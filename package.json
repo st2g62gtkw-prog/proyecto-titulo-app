@@ -1,0 +1,21 @@
+{
+  "name": "proyecto-titulo-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Simulación 3D de la construcción del Edificio E — Condominio Espacio Las Tablas, Curauma",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.170.0",
+    "typescript": "5.6.3",
+    "vite": "5.4.11"
+  }
+}
