@@ -12,7 +12,9 @@ export default function demo(stage: Stage) {
   for (const o of [...stage.scene.children]) {
     if (o instanceof THREE.Mesh && o.geometry instanceof THREE.PlaneGeometry) stage.scene.remove(o);
   }
+  const t0 = performance.now();
   const site = createSite();
+  const ms = performance.now() - t0;
   stage.scene.add(site.group);
 
   const building = new THREE.Mesh(
@@ -35,18 +37,22 @@ export default function demo(stage: Stage) {
     stage.scene.add(m);
   }
 
-  let meshes = 0;
-  site.group.traverse((o) => { if ((o as THREE.Mesh).isMesh) meshes++; });
-  console.log(`site: ${meshes} mallas`);
-
-  const hide = new URLSearchParams(location.search).get('hide');
-  if (hide) site.group.traverse((o) => {
+  let meshes = 0, verts = 0;
+  site.group.traverse((o) => {
     const m = o as THREE.Mesh;
-    if (!m.isMesh || m.renderOrder >= 0) return;
-    const mat = m.material as THREE.MeshStandardMaterial;
-    if (hide === '1') o.visible = false;
-    if (hide === 'opaque') { mat.transparent = false; mat.needsUpdate = true; }
-    if (hide === 'noalpha') { m.geometry.deleteAttribute('color'); mat.vertexColors = false; mat.needsUpdate = true; }
+    if (m.isMesh) { meshes++; verts += m.geometry.attributes.position.count; }
   });
+  console.log(`site: ${meshes} mallas, ${verts} vértices, ${ms.toFixed(0)} ms`);
+
+  // clic: muestra qué se seleccionó (acopio o faena)
+  const ray = new THREE.Raycaster();
+  const info = document.getElementById('info')!;
+  stage.renderer.domElement.addEventListener('pointerup', (e) => {
+    const r = stage.renderer.domElement.getBoundingClientRect();
+    ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), stage.camera);
+    const pick = ray.intersectObjects(site.pickables, true)[0]?.object.userData.pick;
+    info.textContent = pick ? `site · ${pick.type}${pick.id ? ` · ${pick.id}` : ''}` : 'site';
+  });
+
   return (t: number, dt: number) => site.update(t, dt);
 }

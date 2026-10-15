@@ -16,12 +16,19 @@ import { createMixer, type MixerRig } from './equipment/mixer';
 import { createPanelPack, createDeckPack, createPropBundle, createRebarBundle } from './equipment/payloads';
 import { createConcreteStream, type ConcreteStream } from './equipment/pour';
 import { createPump, type PumpRig } from './equipment/pump';
-import { createCrowd, type Crowd } from './equipment/workers';
+import type { Crowd } from './equipment/workers';
 import { uTime } from './reveal';
-import { createSite, type SiteRig } from './site';
+import type { SiteRig } from './site';
 import type { Stage } from './stage';
 import { buildStructure, type Structure } from './structure';
-import { createTag } from '../ui/hud';
+import type { createTag } from '../ui/hud';
+
+/** Fábricas de las partes que viven en otros módulos (permite probar el mundo por partes). */
+export interface WorldDeps {
+  createSite: () => SiteRig;
+  createCrowd: (max: number) => Crowd;
+  createTag: typeof createTag;
+}
 
 const MIXER_POOL = 4;
 
@@ -57,7 +64,7 @@ export class World {
   private labelsOn = true;
   private highlight: THREE.LineSegments;
 
-  constructor(private stage: Stage, private b: LoadedBuilding) {
+  constructor(private stage: Stage, readonly b: LoadedBuilding, private deps: WorldDeps) {
     const { data, detail } = b;
     const scene = stage.scene;
     this.sched = buildSchedule(data);
@@ -65,7 +72,7 @@ export class World {
     scene.add(this.structure.group);
     this.pickables.push(...this.structure.pickables);
 
-    this.site = createSite();
+    this.site = deps.createSite();
     scene.add(this.site.group);
     this.pickables.push(...this.site.pickables);
 
@@ -160,7 +167,7 @@ export class World {
 
     // cuadrillas
     this.crews = new Crews({ data, sched: this.sched, ground: {} });
-    this.crowd = createCrowd(this.crews.members.length);
+    this.crowd = deps.createCrowd(this.crews.members.length);
     scene.add(this.crowd.group);
     this.pickables.push(...this.crowd.pickables);
 
@@ -177,7 +184,7 @@ export class World {
   }
 
   private addLabel(key: string, text: string, kind: Parameters<typeof createTag>[1], parent: THREE.Object3D, pos: THREE.Vector3) {
-    const el = createTag(text, kind);
+    const el = this.deps.createTag(text, kind);
     const obj = new CSS2DObject(el);
     obj.position.copy(pos);
     parent.add(obj);

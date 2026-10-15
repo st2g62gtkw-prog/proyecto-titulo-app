@@ -127,15 +127,25 @@ export class Logistics {
           leave: [pour[1] + 2.5, pour[1] + 8.5],
         };
         this.pumps.push(v);
-        // dos o tres mixers alimentan la bomba durante el hormigonado
+        // tres mixers alimentan la bomba durante el hormigonado; el siguiente espera en cola
         const n = 3;
+        const qx = pmp.x - 13;
         for (let k = 0; k < n; k++) {
           const d0 = pour[0] + ((pour[1] - pour[0]) * k) / n;
           const d1 = pour[0] + ((pour[1] - pour[0]) * (k + 1)) / n;
-          this.mixers.push({
-            id: id++, spot: 'bomba', inRoute: entry(pmp.x), outRoute: exitFrom(pmp.x),
-            arrive: [d0 - 4.6, d0 - 0.25], discharge: [d0 - 0.1, d1 - 0.05], leave: [d1, d1 + 5],
-          });
+          if (k === 0) {
+            this.mixers.push({
+              id: id++, spot: 'bomba', inRoute: entry(pmp.x), outRoute: exitFrom(pmp.x),
+              arrive: [d0 - 5.2, d0 - 0.6], discharge: [d0 - 0.4, d1 - 0.05], leave: [d1, d1 + 5],
+            });
+          } else {
+            this.mixers.push({
+              id: id++, spot: 'bomba', inRoute: entry(qx), outRoute: exitFrom(pmp.x),
+              arrive: [d0 - 6, d0 - 1.2],
+              queue: { wait: new Route().add([[qx, LZ], [pmp.x, LZ]]), move: [d0 + 0.45, d0 + 1.6] },
+              discharge: [d0 + 1.7, d1 - 0.05], leave: [d1, d1 + 5],
+            });
+          }
         }
       }
     }

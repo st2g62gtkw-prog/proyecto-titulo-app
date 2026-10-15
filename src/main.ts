@@ -12,7 +12,9 @@ import { computeProgress, floorSteps } from './core/progress';
 import { CREW_ROLES } from './core/crews';
 import { createStage } from './scene/stage';
 import { World } from './scene/world';
-import { createHud, type HudState, type KPI, type Selection, type ViewMode } from './ui/hud';
+import { createSite } from './scene/site';
+import { createCrowd } from './scene/equipment/workers';
+import { createHud, createTag, type HudState, type KPI, type Selection, type ViewMode } from './ui/hud';
 
 const app = document.getElementById('app')!;
 const stage = createStage(app);
@@ -259,7 +261,7 @@ async function start() {
   const b = await loadBuilding();
   hud.setLoading(0.45, 'Generando estructura, moldajes y enfierradura…');
   await new Promise((r) => setTimeout(r, 30));
-  world = new World(stage, b);
+  world = new World(stage, b, { createSite, createCrowd, createTag });
   hud.setLoading(0.85, 'Preparando la faena…');
   feed = buildFeed(world.sched, world.log);
   const markers = world.sched.activities

@@ -59,7 +59,7 @@ export function formPanelTexture() {
 /** Placa fenólica de losa: 2,44 × 1,22 m, café rojizo con juntas. */
 export function plywoodTexture() {
   return canvas(256, 128, (g) => {
-    g.fillStyle = '#93543a';
+    g.fillStyle = '#7a4632';
     g.fillRect(0, 0, 256, 128);
     noise(g, 256, 128, 18, 1);
     g.fillStyle = 'rgba(255,220,180,0.06)';

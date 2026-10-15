@@ -45,7 +45,7 @@ export interface Structure {
 
 const C = {
   concrete: '#c9c6bf',
-  rebar: '#5f3b27',
+  rebar: '#4f3224',
   prop: '#c7352c',
   beam: '#e2b11f',
   guard: '#f0c22a',

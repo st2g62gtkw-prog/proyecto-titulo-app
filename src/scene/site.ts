@@ -7,6 +7,7 @@
  * son grupos propios con userData.pick para poder seleccionarlos con un clic.
  */
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SITE } from '../config';
 import { BUILDING_FACTS, PROJECT } from '../data/project';
 import { formPanelTexture, plywoodTexture } from './textures';
@@ -31,8 +32,10 @@ const G = SITE.groundY;
 /** Cierro perimetral; el borde z0 va sobre el coronamiento del talud. */
 const FENCE = { x0: SITE.gate.x, x1: 72, z0: SITE.talud.zTop - 1, z1: 46 };
 const GATE = { z0: SITE.gate.z - 4.3, z1: SITE.gate.z + 4.3 };
-/** Ejes de las calles del barrio. */
-const ST = { w: SITE.gate.x - 8, s: 56, e: 82, n: 100 };
+/** Calle exterior del portón (eje x = cte). */
+const ST_W = SITE.gate.x - 8;
+/** Barrio: calles a lo largo de x (z = cte) y de z (x = cte), y su extensión plana. */
+const TOWN = { xSt: [56, 100, 144, 188], zSt: [-118, ST_W, 82, 160], x0: -170, x1: 230, z1: 205 };
 
 // ---------------------------------------------------------------------------------------
 // Ruido y utilidades
@@ -52,27 +55,53 @@ function hash(ix: number, iy: number, seed: number) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-/** Ruido de valor 2D; con px/py > 0 es periódico (texturas que se repiten sin costura). */
-function vnoise(x: number, y: number, seed = 0, px = 0, py = px) {
+/** Ruido de valor 2D (0..1). */
+function vnoise(x: number, y: number, seed = 0) {
   const ix = Math.floor(x), iy = Math.floor(y);
   const fx = x - ix, fy = y - iy;
   const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-  const wx = (i: number) => (px ? ((i % px) + px) % px : i);
-  const wy = (i: number) => (py ? ((i % py) + py) % py : i);
-  const a = hash(wx(ix), wy(iy), seed), b = hash(wx(ix + 1), wy(iy), seed);
-  const c = hash(wx(ix), wy(iy + 1), seed), d = hash(wx(ix + 1), wy(iy + 1), seed);
+  const a = hash(ix, iy, seed), b = hash(ix + 1, iy, seed);
+  const c = hash(ix, iy + 1, seed), d = hash(ix + 1, iy + 1, seed);
   return lerp(lerp(a, b, ux), lerp(c, d, ux), uy);
 }
 
-function fbm(x: number, y: number, oct = 4, seed = 0, px = 0, py = px) {
+function fbm(x: number, y: number, oct = 4, seed = 0) {
   let s = 0, a = 0.5, f = 1, n = 0;
   for (let i = 0; i < oct; i++) {
-    s += a * vnoise(x * f, y * f, seed + i * 17, px * f, py * f);
+    s += a * vnoise(x * f, y * f, seed + i * 17);
     n += a;
     a *= 0.5;
     f *= 2;
   }
   return s / n;
+}
+
+/**
+ * Ruido periódico w × h para texturas que se repiten sin costura: octavas de ruido de valor
+ * sobre una grilla de px × py celdas (que se duplica en cada octava). Valores 0..1.
+ */
+function noiseField(w: number, h: number, px: number, py: number, oct: number, seed: number) {
+  const out = new Float32Array(w * h);
+  let amp = 0.5, total = 0;
+  for (let o = 0; o < oct; o++) {
+    const nx = px << o, ny = py << o;
+    const lat = new Float32Array(nx * ny);
+    for (let i = 0; i < lat.length; i++) lat[i] = hash(i % nx, Math.floor(i / nx), seed + o * 17);
+    for (let y = 0; y < h; y++) {
+      const fy = (y / h) * ny, iy = Math.floor(fy), ty = fy - iy, uy = ty * ty * (3 - 2 * ty);
+      const r0 = iy * nx, r1 = ((iy + 1) % ny) * nx;
+      for (let x = 0; x < w; x++) {
+        const fx = (x / w) * nx, ix = Math.floor(fx), tx = fx - ix, ux = tx * tx * (3 - 2 * tx), ix1 = (ix + 1) % nx;
+        const top = lat[r0 + ix] + (lat[r0 + ix1] - lat[r0 + ix]) * ux;
+        const bot = lat[r1 + ix] + (lat[r1 + ix1] - lat[r1 + ix]) * ux;
+        out[y * w + x] += amp * (top + (bot - top) * uy);
+      }
+    }
+    total += amp;
+    amp *= 0.5;
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= total;
+  return out;
 }
 
 function rng(seed: number) {
@@ -116,10 +145,10 @@ function heightAt(x: number, z: number) {
   if (s > 0 && s < 1) h += (vnoise(x * 0.35, z * 0.6, 9) - 0.5) * 0.45 * Math.sin(Math.PI * s) * (1 - k);
   const behind = zt - z;
   if (behind > 0) h += behind * 0.06 * smooth(0, 50, behind) + (fbm(x * 0.03, z * 0.03, 3, 5) - 0.5) * 2.5 * smooth(0, 25, behind);
-  const far = Math.max(-125 - x, x - 165, z - 140, 0);
+  const far = Math.max(TOWN.x0 - 5 - x, x - TOWN.x1 - 5, z - TOWN.z1 - 5, 0);
   if (far > 0) h += smooth(0, 90, far) * fbm(x * 0.01, z * 0.01, 3, 11) * 16;
   const r = Math.hypot(x - 10, z - 10);
-  if (r > 230) h += smooth(230, 480, r) * (fbm(x * 0.005, z * 0.005, 4, 3) * 70 - 8);
+  if (r > 260) h += smooth(260, 520, r) * (fbm(x * 0.005, z * 0.005, 4, 3) * 70 - 8);
   return h;
 }
 
@@ -139,11 +168,11 @@ function axis(lo: number, hi: number, step: number, ext: number, fine?: [number,
 }
 
 const TC = {
-  sand: new THREE.Color('#e2c398'),
-  sandDark: new THREE.Color('#c9a273'),
-  grass: new THREE.Color('#93a35e'),
-  grassDry: new THREE.Color('#b9ad74'),
-  forest: new THREE.Color('#67784a'),
+  sand: new THREE.Color('#dfbd8e'),
+  sandDark: new THREE.Color('#cda575'),
+  grass: new THREE.Color('#86a052'),
+  grassDry: new THREE.Color('#aca66a'),
+  forest: new THREE.Color('#5d7044'),
   cut: new THREE.Color('#d48a56'),
   cutDark: new THREE.Color('#b8693f'),
 };
@@ -155,18 +184,20 @@ function terrainColor(x: number, z: number, h: number, ny: number, out: THREE.Co
   // suelo compactado dentro del cierro
   const din = Math.min(x - FENCE.x0, FENCE.x1 - x, z - FENCE.z0, FENCE.z1 - z);
   const site = smooth(-2.5, 1.2, din + (n1 - 0.5) * 5);
-  tmp.lerpColors(TC.sand, TC.sandDark, smooth(0.3, 0.75, n1 * 0.6 + n2 * 0.4));
+  tmp.lerpColors(TC.sand, TC.sandDark, smooth(0.25, 0.85, n1 * 0.35 + n2 * 0.65));
   out.lerp(tmp, site);
   // cara del corte: rojizo con vetas verticales
   const cut = smooth(0.06, 0.13, 1 - ny) * (1 - smooth(0, 18, outsideX(x)));
   if (cut > 0) {
-    tmp.lerpColors(TC.cut, TC.cutDark, smooth(0.25, 0.75, vnoise(x * 0.9, h * 0.5, 4)));
+    // cárcavas verticales y estratos horizontales
+    const rill = smooth(0.3, 0.8, vnoise(x * 0.55, z * 0.12, 4)) * 0.8 + 0.2 * Math.sin(h * 2.3) ** 2;
+    tmp.lerpColors(TC.cut, TC.cutDark, rill);
     out.lerp(tmp, cut);
   }
 }
 
 function buildTerrain(mat: THREE.Material) {
-  const xs = axis(-130, 170, 3, 900);
+  const xs = axis(-130, 170, 3, 900, [FENCE.x0 - 6, FENCE.x1 + 6, 1.5]);
   const zs = axis(-120, 150, 3, 900, [-28, -11, 0.75]);
   const nx = xs.length, nz = zs.length;
   const pos = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2), col = new Float32Array(nx * nz * 3);
@@ -310,6 +341,16 @@ function part(b: Batch, g: THREE.BufferGeometry, x: number, y: number, z: number
   else for (let k = 0; k < P.count; k++) b.idx.push(base + k);
 }
 
+/** Icosaedro con vértices compartidos (12 en vez de 60); el material del follaje usa flatShading. */
+function indexedBlob() {
+  const g = new THREE.IcosahedronGeometry(0.5, 0);
+  g.deleteAttribute('uv');
+  g.deleteAttribute('normal');
+  const m = mergeVertices(g);
+  m.computeVertexNormals();
+  return m;
+}
+
 /** Plantillas compartidas (geometrías unitarias). */
 const GEO = {
   box: new THREE.BoxGeometry(1, 1, 1),
@@ -318,7 +359,8 @@ const GEO = {
   trunk: new THREE.CylinderGeometry(0.3, 0.5, 1, 6, 1, true),
   cone: new THREE.ConeGeometry(0.5, 1, 12, 1, true),
   sphere: new THREE.SphereGeometry(0.5, 14, 9),
-  blob: new THREE.IcosahedronGeometry(0.5, 0),
+  blob: indexedBlob(),
+  twig: new THREE.CylinderGeometry(0.5, 0.5, 1, 4, 1, true),
   torus: new THREE.TorusGeometry(0.5, 0.1, 6, 22),
 };
 
@@ -479,10 +521,10 @@ function pixels(g: CanvasRenderingContext2D, w: number, h: number, fn: (x: numbe
 /** Suelo: grano fino neutro con piedrecillas; se tiñe con el color de vértice. */
 function groundTexture() {
   const S = 512;
+  const N = noiseField(S, S, 8, 8, 4, 3), Mf = noiseField(S, S, 48, 48, 2, 7);
   return canvasTex(S, S, (g) => {
     pixels(g, S, S, (x, y, o) => {
-      const n = fbm((x / S) * 8, (y / S) * 8, 4, 3, 8);
-      const m = fbm((x / S) * 48, (y / S) * 48, 2, 7, 48);
+      const n = N[y * S + x], m = Mf[y * S + x];
       const sp = hash(x, y, 1);
       let v = 0.78 + 0.2 * n + 0.08 * m + (sp - 0.5) * 0.09;
       if (sp > 0.986) v *= 0.8;
@@ -504,32 +546,34 @@ function groundTexture() {
 /** Ripio compactado; con huellas de neumáticos si `tracks`. u = través del camino, v = largo. */
 function gravelTexture(tracks: boolean) {
   const W = tracks ? 128 : 256, H = tracks ? 512 : 256;
+  const N = noiseField(W, H, 4, tracks ? 16 : 4, 3, 11);
   return canvasTex(W, H, (g) => {
     pixels(g, W, H, (x, y, o) => {
       const u = x / W, v = y / H;
-      const n = fbm(u * 4, v * (tracks ? 16 : 4), 3, 11, 4, tracks ? 16 : 4);
+      const n = N[y * W + x];
       const sp = hash(x, y, 2);
-      let val = 0.74 + 0.16 * n + (sp - 0.5) * 0.16;
+      let val = (tracks ? 0.5 : 0.53) + 0.12 * n + (sp - 0.5) * 0.14;
+      if (sp > 0.97) val *= 1.25;
       if (tracks) {
-        const wob = 0.025 * Math.sin(v * Math.PI * 4) + 0.012 * Math.sin(v * Math.PI * 10 + 1);
-        for (const c of [0.25, 0.75]) {
-          const d = Math.abs(u - c - wob);
-          const t = 1 - smooth(0.045, 0.085, d);
-          const tread = (y % 7) < 2 ? 0.95 : 1;
-          val = lerp(val, (0.66 + 0.06 * n) * tread, t * 0.85);
+        const wob = 0.008 * Math.sin(v * Math.PI * 2) + 0.004 * Math.sin(v * Math.PI * 6 + 1);
+        for (const c of [0.27, 0.73]) {
+          const t = 1 - smooth(0.04, 0.075, Math.abs(u - c - wob));
+          const tread = y % 6 < 2 ? 0.94 : 1;
+          val = lerp(val, (0.44 + 0.05 * n) * tread, t * 0.7);
         }
       }
-      o[0] = val; o[1] = val * 0.955; o[2] = val * 0.88;
+      o[0] = val; o[1] = val * 0.93; o[2] = val * 0.82;
     });
   });
 }
 
 function asphaltTexture() {
   const W = 256, H = 512;
+  const N = noiseField(W, H, 4, 8, 3, 31);
   return canvasTex(W, H, (g) => {
     pixels(g, W, H, (x, y, o) => {
       const u = x / W, v = y / H;
-      const n = fbm(u * 4, v * 8, 3, 31, 4, 8);
+      const n = N[y * W + x];
       let val = 0.3 + 0.07 * n + (hash(x, y, 3) - 0.5) * 0.06;
       const line = Math.abs(u - 0.07) < 0.008 || Math.abs(u - 0.93) < 0.008 || (Math.abs(u - 0.5) < 0.007 && v % 0.5 < 0.22);
       if (line) val = 0.82;
@@ -657,43 +701,45 @@ function safetySignTexture() {
     g.fillStyle = green;
     for (let i = 0; i < 3; i++) {
       g.beginPath();
-      g.ellipse(838 + i * 30, 470 - i * 8, 11, 34, 0.25, 0, 7);
+      g.ellipse(W - 140 + i * 30, 392 - i * 8, 11, 34, 0.25, 0, 7);
       g.fill();
     }
-    g.font = '800 46px system-ui, Arial, sans-serif';
-    g.fillText('MUTUAL', 800, 530);
+    g.font = '800 44px system-ui, Arial, sans-serif';
+    g.fillText('MUTUAL', W - 250, 470);
     g.font = '500 26px system-ui, Arial, sans-serif';
-    g.fillText('de seguridad', 830, 560);
-    const digits = (x: number, y: number, s: string) => {
-      for (let i = 0; i < s.length; i++) {
-        g.fillStyle = '#e9ecef';
-        g.fillRect(x + i * 58, y - 34, 50, 68);
-        g.strokeStyle = '#b5bcc3';
-        g.lineWidth = 2;
-        g.strokeRect(x + i * 58, y - 34, 50, 68);
-        g.fillStyle = '#1d2329';
-        g.font = '700 50px system-ui, Arial, sans-serif';
-        g.fillText(s[i], x + i * 58 + 11, y + 2);
+    g.fillText('de seguridad', W - 220, 505);
+    // filas de texto con casilleros de números (como el letrero de la visita a terreno)
+    const row = (y: number, items: (string | [string])[], maxPx: number, maxW = W - 80) => {
+      let px = maxPx;
+      const width = () => {
+        g.font = `700 ${px}px system-ui, Arial, sans-serif`;
+        return items.reduce((w, it) => w + (typeof it === 'string' ? g.measureText(it).width : it[0].length * px * 1.12) + px * 0.4, 0);
+      };
+      while (width() > maxW && px > 20) px -= 2;
+      let x = 40;
+      for (const it of items) {
+        if (typeof it === 'string') {
+          g.fillStyle = '#1d2329';
+          g.fillText(it, x, y);
+          x += g.measureText(it).width + px * 0.4;
+          continue;
+        }
+        for (const ch of it[0]) {
+          g.fillStyle = '#e9ecef';
+          g.fillRect(x, y - px * 0.68, px, px * 1.36);
+          g.strokeStyle = '#b5bcc3';
+          g.lineWidth = 2;
+          g.strokeRect(x, y - px * 0.68, px, px * 1.36);
+          g.fillStyle = '#1d2329';
+          g.fillText(ch, x + (px - g.measureText(ch).width) / 2, y + 2);
+          x += px * 1.12;
+        }
+        x += px * 0.4;
       }
     };
-    g.fillStyle = '#1d2329';
-    g.font = '700 50px system-ui, Arial, sans-serif';
-    g.fillText('AQUÍ TRABAJAMOS', 40, 170);
-    digits(490, 170, '085');
-    g.fillStyle = '#1d2329';
-    g.font = '700 50px system-ui, Arial, sans-serif';
-    g.fillText('PERSONAS', 680, 170);
-    g.fillText('LLEVAMOS', 40, 270);
-    digits(300, 270, '015');
-    g.fillStyle = '#1d2329';
-    g.font = '700 50px system-ui, Arial, sans-serif';
-    g.fillText('DÍAS SIN ACCIDENTES', 490, 270);
-    g.font = '600 38px system-ui, Arial, sans-serif';
-    g.fillText('FECHA', 40, 370);
-    digits(190, 370, '091026');
-    g.font = '500 30px system-ui, Arial, sans-serif';
-    g.fillStyle = '#5b6670';
-    g.fillText('Uso obligatorio de casco, chaleco y zapatos de seguridad', 40, 470);
+    row(180, ['AQUÍ TRABAJAMOS', ['085'], 'PERSONAS'], 56);
+    row(290, ['LLEVAMOS', ['015'], 'DÍAS SIN ACCIDENTES'], 56);
+    row(410, ['FECHA', ['091026']], 44, 600);
   }, false);
   return t;
 }
@@ -714,22 +760,22 @@ function projectBoardTexture() {
     for (let f = 0; f < 7; f++) for (let i = 0; i < 7; i++) g.fillRect(72 + i * 44, 140 + f * 44, 30, 26);
     g.fillStyle = '#f08a24';
     g.fillRect(56, 450, 330, 10);
-    g.fillStyle = '#ffffff';
+    // texto ajustado al ancho disponible
+    const text = (t: string, y: number, weight: number, px: number, color: string) => {
+      do g.font = `${weight} ${px}px system-ui, Arial, sans-serif`;
+      while (g.measureText(t).width > W - 470 && (px -= 2) > 12);
+      g.fillStyle = color;
+      g.fillText(t, 430, y);
+    };
     g.textBaseline = 'alphabetic';
-    g.font = '500 30px system-ui, Arial, sans-serif';
-    g.fillText('CONDOMINIO', 430, 120);
-    g.font = '800 64px system-ui, Arial, sans-serif';
-    g.fillText(PROJECT.nombre.toUpperCase(), 430, 190);
+    text('CONDOMINIO', 120, 500, 30, '#ffffff');
+    text(PROJECT.nombre.toUpperCase(), 190, 800, 64, '#ffffff');
     g.fillStyle = '#f08a24';
     g.fillRect(430, 214, 120, 8);
-    g.fillStyle = '#ffffff';
-    g.font = '600 40px system-ui, Arial, sans-serif';
-    g.fillText(`${PROJECT.edificio} · ${BUILDING_FACTS.pisos} pisos · ${BUILDING_FACTS.deptos} deptos.`, 430, 285);
-    g.font = '400 30px system-ui, Arial, sans-serif';
-    g.fillStyle = '#c9d6e2';
-    g.fillText(PROJECT.constructora, 430, 350);
-    g.fillText(PROJECT.permiso, 430, 395);
-    g.fillText('Curauma · Valparaíso', 430, 440);
+    text(`${PROJECT.edificio} · ${BUILDING_FACTS.pisos} pisos · ${BUILDING_FACTS.deptos} deptos.`, 285, 600, 40, '#ffffff');
+    text(PROJECT.constructora, 350, 400, 30, '#c9d6e2');
+    text(PROJECT.permiso, 395, 400, 30, '#c9d6e2');
+    text('Curauma · Valparaíso', 440, 400, 30, '#c9d6e2');
   }, false);
 }
 
@@ -756,29 +802,30 @@ function flagTexture() {
 // ---------------------------------------------------------------------------------------
 
 function createMaterials() {
+  const T__ = <X,>(n: string, f: () => X) => { const t = performance.now(); const r = f(); console.log('tex', n, (performance.now() - t).toFixed(0)); return r; };
   const std = (p: THREE.MeshStandardMaterialParameters) => new THREE.MeshStandardMaterial(p);
   const decal = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 };
   return {
-    ground: std({ map: groundTexture(), vertexColors: true, roughness: 1 }),
-    road: std({ map: gravelTexture(true), vertexColors: true, roughness: 1, ...decal }),
-    pad: std({ map: gravelTexture(false), vertexColors: true, roughness: 1, ...decal }),
-    asphalt: std({ map: asphaltTexture(), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
+    ground: std({ map: T__('groundTexture()', () => groundTexture()), vertexColors: true, roughness: 1 }),
+    road: std({ map: T__('gravelTexture(true)', () => gravelTexture(true)), vertexColors: true, roughness: 1, ...decal }),
+    pad: std({ map: T__('gravelTexture(false)', () => gravelTexture(false)), vertexColors: true, roughness: 1, ...decal }),
+    asphalt: std({ map: T__('asphaltTexture()', () => asphaltTexture()), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
     paint: std({ vertexColors: true, roughness: 0.55, metalness: 0.05 }),
     rough: std({ vertexColors: true, roughness: 0.9 }),
     metal: std({ vertexColors: true, roughness: 0.45, metalness: 0.35 }),
-    osb: std({ map: osbTexture(), vertexColors: true, roughness: 0.92 }),
-    sheet: std({ map: corrugatedTexture(), vertexColors: true, roughness: 0.48, metalness: 0.3 }),
-    cloth: std({ map: clothTexture(), vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }),
-    net: std({ map: netTexture(), alphaTest: 0.4, roughness: 0.8, side: THREE.DoubleSide }),
+    osb: std({ map: T__('osbTexture()', () => osbTexture()), vertexColors: true, roughness: 0.92 }),
+    sheet: std({ map: T__('corrugatedTexture()', () => corrugatedTexture()), vertexColors: true, roughness: 0.48, metalness: 0.3 }),
+    cloth: std({ map: T__('clothTexture()', () => clothTexture()), vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }),
+    net: std({ map: T__('netTexture()', () => netTexture()), alphaTest: 0.4, roughness: 0.8, side: THREE.DoubleSide }),
     glass: std({ color: '#33414d', roughness: 0.18, metalness: 0.45 }),
-    form: std({ map: formPanelTexture(), vertexColors: true, roughness: 0.55, metalness: 0.3 }),
-    ply: std({ map: plywoodTexture(), vertexColors: true, roughness: 0.7 }),
+    form: std({ map: T__('formPanelTexture()', () => formPanelTexture()), vertexColors: true, roughness: 0.55, metalness: 0.3 }),
+    ply: std({ map: T__('plywoodTexture()', () => plywoodTexture()), vertexColors: true, roughness: 0.7 }),
     foliage: std({ vertexColors: true, roughness: 0.95, flatShading: true }),
-    facade: std({ map: facadeTexture(), vertexColors: true, roughness: 0.9 }),
-    tile: std({ map: tileTexture(), vertexColors: true, roughness: 0.8 }),
-    sign: std({ map: safetySignTexture(), roughness: 0.6 }),
-    board: std({ map: projectBoardTexture(), roughness: 0.55 }),
-    flag: std({ map: flagTexture(), roughness: 0.8, side: THREE.DoubleSide }),
+    facade: std({ map: T__('facadeTexture()', () => facadeTexture()), vertexColors: true, roughness: 0.9 }),
+    tile: std({ map: T__('tileTexture()', () => tileTexture()), vertexColors: true, roughness: 0.8 }),
+    sign: std({ map: T__('safetySignTexture()', () => safetySignTexture()), roughness: 0.6 }),
+    board: std({ map: T__('projectBoardTexture()', () => projectBoardTexture()), roughness: 0.55 }),
+    flag: std({ map: T__('flagTexture()', () => flagTexture()), roughness: 0.8, side: THREE.DoubleSide }),
     beacon: std({ color: '#ffb020', emissive: '#ff9a00', emissiveIntensity: 0.4, roughness: 0.3 }),
   };
 }
@@ -903,11 +950,11 @@ function buildGate(k: Kit, M: Mats, beacons: Batch) {
 
 /** Letrero de seguridad junto al portón (dos caras) sobre dos postes. */
 function buildSafetySign(k: Kit, M: Mats, group: THREE.Group) {
-  const x = SITE.gate.x + 6.5, z = GATE.z0 - 2.3, ry = 0.3;
-  const W = 3.2, H = 2.0, y0 = G + 1.0;
+  const x = SITE.gate.x + 6.5, z = GATE.z0 - 2.3, ry = 0.55;
+  const W = 3.4, H = 2.1, y0 = G + 1.0;
   const f = frame(x, z, ry);
   for (const s of [-1, 1]) {
-    const [px, pz] = f((s * W) / 2.3, -0.05);
+    const [px, pz] = f(s * (W / 2 + 0.1), -0.06);
     box(k.b(M.metal), px, G - 0.2, pz, 0.1, y0 + H + 0.1 - G + 0.2, 0.1, COL.steel, { ry });
   }
   const [bx, bz] = f(0, -0.06);
@@ -1139,7 +1186,7 @@ function buildMoldajeLosa(M: Mats) {
   const k = new Kit();
   const r = rng(12);
   const bundles: [number, number, number, number][] = [
-    [17.6, 12.5, 3.9, 5], [17.6, 13.75, 3.9, 4], [17.2, 15.0, 2.45, 3],
+    [17.6, 12.5, 2.9, 5], [17.6, 13.75, 2.9, 4], [17.35, 15.0, 2.45, 3],
   ];
   let top = G;
   for (const [bx, bz, L, layers] of bundles) {
@@ -1157,7 +1204,7 @@ function buildMoldajeLosa(M: Mats) {
     for (const s of [-1, 1]) box(k.b(M.paint), bx + s * L * 0.3, G + 0.11, bz, 0.04, layers * 0.2 + 0.02, 0.98, '#1d1f22');
     if (bz === 13.75) top = G + 0.12 + layers * 0.2;
   }
-  const stacks: [number, number, number][] = [[20.8, 12.45, 3], [20.8, 13.85, 4], [20.8, 15.25, 2]];
+  const stacks: [number, number, number][] = [[20.75, 12.45, 3], [20.75, 13.85, 4], [20.75, 15.25, 2]];
   for (const [sx, sz, n] of stacks) {
     sleepers(k.b(M.rough), sx, sz, 1.3, 'x', [-0.9, 0, 0.9]);
     for (let i = 0; i < n; i++) {
@@ -1337,7 +1384,7 @@ function car(k: Kit, M: Mats, x: number, z: number, ry: number, color: string, p
     box(k.b(M.rough), bx, G + 0.9, bz, 2.1, 0.02, Wd - 0.14, '#2b2b2b', { ry });
   }
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    const [wx, wz] = f(sx * (L / 2 - 0.85), sz * (Wd / 2 - 0.12));
+    const [wx, wz] = f(sx * (L / 2 - 0.85), sz * (Wd / 2 - 0.1));
     part(p, GEO.cyl, wx, G + 0.33, wz, 0.66, 0.24, 0.66, '#1b1d20', { ry, rx: Math.PI / 2 });
   }
   for (const sz of [-1, 1]) {
@@ -1372,7 +1419,7 @@ function buildMisc(k: Kit, M: Mats) {
   // conos de seguridad
   const cones: V2[] = [
     [-29.6, 25.2], [-29.6, 27], [30.6, 25.2], [30.6, 27], [-50, 27.1], [-46, 27.1],
-    [42.5, 23.6], [45, 23.6], [47.5, 23.6], [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-26.5, 19.3], [24.6, 17.8],
+    [43, 22.9], [45.5, 22.9], [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-26.5, 19.3], [24.6, 17.8],
   ];
   for (const [cx, cz] of cones) cone(p, cx, cz);
   // pallets sueltos
@@ -1389,6 +1436,28 @@ function buildMisc(k: Kit, M: Mats) {
       box(b, bx + s * (L / 2 - 0.04), G, bz, 0.08, H, W, c);
     }
     for (let i = 0; i < 9; i++) box(k.b(M.rough), bx + (r() - 0.5) * 3, G + 0.1 + r() * 0.6, bz + (r() - 0.5) * 1.4, 0.4 + r() * 0.9, 0.08 + r() * 0.2, 0.2 + r() * 0.4, ['#8f8a80', '#9b7650', '#6d6a64', '#b7b2a8'][i % 4], { ry: r() * 3 });
+  }
+  // bodega en contenedor marítimo
+  {
+    const cx = 64.5, cz = 40.5;
+    part(k.b(M.sheet), GEO.box, cx, G + 1.3, cz, 6.06, 2.59, 2.44, '#3f6b88', { uv: [1.1, 2.6] });
+    box(p, cx - 3.04, G + 0.06, cz, 0.04, 2.47, 2.32, '#355a73');
+    for (const s of [-0.55, -0.15, 0.15, 0.55]) box(k.b(M.metal), cx - 3.08, G + 0.2, cz + s, 0.05, 2.2, 0.05, '#9aa4ad');
+  }
+  // cancha de lavado de canoas de mixer (losa con muretes y lechada)
+  {
+    const cx = 61, cz = 28.5, b = k.b(M.rough);
+    box(b, cx, G, cz, 4.4, 0.12, 3.4, '#a9a59d');
+    box(b, cx + 0.2, G + 0.12, cz, 3.6, 0.02, 2.8, '#c9c6c0');
+    box(b, cx + 2.1, G, cz, 0.2, 0.5, 3.4, '#9e9a92');
+    for (const s of [-1, 1]) box(b, cx, G, cz + s * 1.6, 4.4, 0.5, 0.2, '#9e9a92');
+  }
+  // sacos de cemento sobre pallets (envueltos en film)
+  for (let i = 0; i < 3; i++) {
+    const cx = 44.6 + i * 1.35, cz = 1.5;
+    palletStack(k.b(M.rough), cx, cz, Math.PI / 2, 1, r);
+    box(p, cx, G + 0.15, cz, 0.95, 0.95, 1.12, '#dcd9d2');
+    box(p, cx, G + 1.1, cz, 0.85, 0.02, 1.0, '#c8c4bb');
   }
   // acopio de áridos y excedentes de excavación
   const mounds: [number, number, number, number, number, string][] = [
@@ -1411,37 +1480,37 @@ function buildMisc(k: Kit, M: Mats) {
     car(k, M, cx, 39.6 + (r() - 0.5) * 0.4, Math.PI / 2 + (i % 3 === 1 ? Math.PI : 0) + (r() - 0.5) * 0.06, colors[i], i === 2 || i === 5);
   }
   car(k, M, -45, 24.6, 0.02, '#f2f3f4', true);
-  car(k, M, ST.w + 2.9, 14, -Math.PI / 2, '#8d969e');
-  car(k, M, ST.w + 2.9, 48, Math.PI / 2, '#c9ccd0');
-  car(k, M, ST.w - 2.9, 64, -Math.PI / 2, '#3b4c63');
+  car(k, M, ST_W + 2.9, 14, -Math.PI / 2, '#8d969e');
+  car(k, M, ST_W + 2.9, 48, Math.PI / 2, '#c9ccd0');
+  car(k, M, ST_W - 2.9, 64, -Math.PI / 2, '#3b4c63');
 }
 
 // ---------------------------------------------------------------------------------------
 // Entorno: calles, veredas, casas y árboles
 // ---------------------------------------------------------------------------------------
 
+/** Calles asfaltadas y veredas (cortadas en los cruces y en el acceso a la obra). */
 function buildStreets(asphalt: Batch, k: Kit, M: Mats) {
-  const o = { width: 8, texLen: 16, step: 6 };
-  ribbon(asphalt, [[ST.w, -170], [ST.w, 230]], { ...o, lift: 0.04 });
-  ribbon(asphalt, [[ST.w + 4, ST.s], [240, ST.s]], { ...o, lift: 0.05 });
-  ribbon(asphalt, [[ST.w + 4, ST.n], [240, ST.n]], { ...o, lift: 0.05 });
-  ribbon(asphalt, [[ST.e, ST.s - 4], [ST.e, -170]], { ...o, lift: 0.055 });
-  // veredas (tramos entre cruces)
+  const o = { width: 8, texLen: 16, step: 3 };
+  TOWN.zSt.forEach((x, i) => ribbon(asphalt, [[x, -170], [x, TOWN.z1 + 25]], { ...o, lift: 0.04 + i * 0.003 }));
+  TOWN.xSt.forEach((z, i) => ribbon(asphalt, [[ST_W + 4, z], [TOWN.x1 + 25, z]], { ...o, lift: 0.055 + i * 0.003 }));
   const b = k.b(M.rough);
-  const walk = (x0: number, z0: number, x1: number, z1: number) => {
-    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-    box(b, cx, heightAt(cx, cz) - 0.05, cz, Math.abs(x1 - x0) || 2, 0.2, Math.abs(z1 - z0) || 2, COL.concrete);
+  const walk = (along: 'x' | 'z', c: number, a: number, e: number, cuts: number[]) => {
+    let s0 = a;
+    for (const cut of [...cuts.filter((v) => v > a && v < e).sort((p, q) => p - q), e + 5]) {
+      const s1 = cut - 5;
+      if (s1 - s0 > 2) {
+        const m = (s0 + s1) / 2, L = s1 - s0;
+        for (const side of [-1, 1]) {
+          const x = along === 'x' ? m : c + side * 5, z = along === 'x' ? c + side * 5 : m;
+          box(b, x, heightAt(x, z) - 0.05, z, along === 'x' ? L : 2, 0.2, along === 'x' ? 2 : L, COL.concrete);
+        }
+      }
+      s0 = cut + 5;
+    }
   };
-  walk(ST.w + 5, -12, ST.w + 5, GATE.z0 - 0.5);
-  walk(ST.w + 5, GATE.z1 + 0.5, ST.w + 5, ST.s - 5);
-  walk(ST.w + 5, ST.s + 5, ST.w + 5, ST.n - 5);
-  walk(ST.w + 5, ST.n + 5, ST.w + 5, 170);
-  walk(ST.w - 5, -12, ST.w - 5, 170);
-  for (const zz of [ST.s, ST.n]) for (const s of [-1, 1]) {
-    walk(ST.w + 6, zz + s * 5, ST.e - 5, zz + s * 5);
-    walk(ST.e + 5, zz + s * 5, 200, zz + s * 5);
-  }
-  for (const s of [-1, 1]) walk(ST.e + s * 5, -12, ST.e + s * 5, ST.s - 5);
+  for (const x of TOWN.zSt) walk('z', x, -10, TOWN.z1 + 20, x === ST_W ? [...TOWN.xSt, SITE.roadZ] : TOWN.xSt);
+  for (const z of TOWN.xSt) walk('x', z, ST_W + 6, TOWN.x1 + 20, TOWN.zSt);
 }
 
 const WALLS = ['#f6f2ea', '#efe4cc', '#f3e7d3', '#ebe8e1', '#f1dcc0', '#f8f6f1'];
@@ -1462,17 +1531,20 @@ function house(fac: Batch, tile: Batch, x: number, z: number, ry: number, r: () 
   }
 }
 
-function eucalyptus(b: Batch, x: number, z: number, H: number, r: () => number) {
+function eucalyptus(b: Batch, x: number, z: number, H: number, r: () => number, branches = true) {
   const y = heightAt(x, z) - 0.2;
-  const lx = (r() - 0.5) * 0.12, lz = (r() - 0.5) * 0.12;
-  const tw = (H / 20) * 0.9;
-  part(b, GEO.trunk, x, y + H * 0.36, z, tw, H * 0.74, tw, r() > 0.5 ? '#cfc6b4' : '#a89c88', { rx: lz, rz: -lx });
-  const n = 3 + Math.floor(r() * 3);
+  const lx = (r() - 0.5) * 0.1, lz = (r() - 0.5) * 0.1;
+  const tw = H / 22, bark = r() > 0.5 ? '#cfc6b4' : '#a89c88';
+  part(b, GEO.trunk, x, y + H * 0.4, z, tw, H * 0.8, tw, bark, { rx: lz, rz: -lx });
+  // copa rala: masas sueltas en la punta de ramas que salen del tronco
+  const n = 4 + Math.floor(r() * 3);
+  const ox = x + lx * H * 0.35, oz = z + lz * H * 0.35;
   for (let i = 0; i < n; i++) {
-    const t = 0.55 + r() * 0.38, cr = H * (0.1 + r() * 0.08);
-    const cx = x + lx * H * t + (r() - 0.5) * H * 0.22, cz = z + lz * H * t + (r() - 0.5) * H * 0.22;
-    const c = ['#6f8158', '#7d8d61', '#5f7350', '#869463', '#687a5c'][Math.floor(r() * 5)];
-    part(b, GEO.blob, cx, y + H * t, cz, cr * 2.2, cr * 2.6, cr * 2.2, c, { ry: r() * 6, rx: (r() - 0.5) * 0.8, jitter: 0.5, seed: Math.floor(r() * 1e6) });
+    const a = r() * Math.PI * 2, d = H * (0.05 + r() * 0.13), cr = H * (0.07 + r() * 0.05);
+    const cx = ox + Math.cos(a) * d, cz = oz + Math.sin(a) * d, cy = y + H * (0.66 + (r() - 0.3) * 0.28);
+    if (branches) rod(b, GEO.twig, x + lx * H * 0.15, y + H * 0.52, z + lz * H * 0.15, cx, cy - cr * 0.4, cz, tw * 0.28, bark);
+    const c = ['#5b6d47', '#66774f', '#52653f', '#718057', '#5f704e'][Math.floor(r() * 5)];
+    part(b, GEO.blob, cx, cy, cz, cr * 2.6, cr * 1.9, cr * 2.6, c, { ry: r() * 6, rx: (r() - 0.5) * 0.8, jitter: 0.5, seed: Math.floor(r() * 1e6) });
   }
 }
 
@@ -1481,7 +1553,7 @@ function pine(b: Batch, x: number, z: number, H: number, r: () => number) {
   part(b, GEO.trunk, x, y + H * 0.3, z, H * 0.04, H * 0.6, H * 0.04, '#6b5440');
   for (let i = 0; i < 4; i++) {
     const t = 0.45 + i * 0.14, cr = H * (0.22 - i * 0.035);
-    const c = ['#3f5a3a', '#486443', '#36503a'][Math.floor(r() * 3)];
+    const c = ['#34503a', '#3c573c', '#2f4a36'][Math.floor(r() * 3)];
     part(b, GEO.blob, x + (r() - 0.5) * 1.2, y + H * t, z + (r() - 0.5) * 1.2, cr * 2.3, cr * 1.5, cr * 2.3, c, { ry: r() * 6, jitter: 0.45, seed: Math.floor(r() * 1e6) });
   }
 }
@@ -1492,54 +1564,64 @@ function roundTree(b: Batch, x: number, z: number, H: number, r: () => number) {
   const n = 1 + Math.floor(r() * 2);
   for (let i = 0; i < n; i++) {
     const cr = H * (0.3 + r() * 0.1);
-    const c = ['#6c8c45', '#7a9a4e', '#5d7f3e', '#88a057'][Math.floor(r() * 4)];
+    const c = ['#5f8240', '#6c8e48', '#557a3a', '#7a9650'][Math.floor(r() * 4)];
     part(b, GEO.blob, x + (r() - 0.5) * 1.4, y + H * (0.62 + i * 0.15), z + (r() - 0.5) * 1.4, cr * 2, cr * 1.8, cr * 2, c, { ry: r() * 6, jitter: 0.35, seed: Math.floor(r() * 1e6) });
   }
 }
 
+/** Barrio, bosques y lomas. Lo cercano proyecta sombras; lo lejano no (va en otra malla). */
 function buildSurroundings(M: Mats, group: THREE.Group) {
-  const k = new Kit();
+  const near = new Kit(), far = new Kit();
   const r = rng(31);
-  const fac = k.b(M.facade), tile = k.b(M.tile), fol = k.b(M.foliage);
-  const garden = (x: number, z: number) => { if (r() > 0.35) roundTree(fol, x + (r() - 0.5) * 6, z + (r() - 0.5) * 3, 4 + r() * 3, r); };
-  // barrio al sur (+z): filas de casas a ambos lados de las calles
-  for (let x = ST.w + 10; x < 170; x += 11.5) {
-    if (Math.abs(x - ST.e) < 9) continue;
-    for (const [zc, ry] of [[ST.s + 15, Math.PI], [ST.n - 15, 0], [ST.n + 15, Math.PI]] as const) {
-      const xx = x + (zc === ST.n - 15 ? 5.5 : 0);
-      if (Math.abs(xx - ST.e) < 9) continue;
-      house(fac, tile, xx, zc + (r() - 0.5) * 0.6, ry, r);
-      garden(xx, zc + (ry === 0 ? -8 : 8));
+  const isNear = (x: number, z: number) => Math.hypot(x - 1, z - 10) < 115;
+  const kit = (x: number, z: number) => (isNear(x, z) ? near : far);
+  const onStreet = (x: number, z: number) => TOWN.zSt.some((X) => Math.abs(x - X) < 7) || TOWN.xSt.some((Z) => Math.abs(z - Z) < 7 && x > ST_W);
+  const addHouse = (x: number, z: number, ry: number) => {
+    const k = kit(x, z);
+    house(k.b(M.facade), k.b(M.tile), x, z, ry, r);
+    if (r() > 0.4) {
+      const gx = x + (r() - 0.5) * 6, gz = z + (r() - 0.5) * 6;
+      const f = frame(gx, gz, ry);
+      const [tx, tz] = f(0, 7.5);
+      roundTree(k.b(M.foliage), tx, tz, 4 + r() * 3, r);
+    }
+  };
+  // filas a ambos lados de las calles en x (la primera fila de la calle 56 sería la obra)
+  for (const zc of TOWN.xSt) for (const side of [-1, 1]) {
+    const zr = zc + side * 15;
+    if (zr < FENCE.z1 + 6) continue;
+    for (let x = ST_W + 10 + (side < 0 ? 5.5 : 0); x < TOWN.x1; x += 11.5) {
+      if (TOWN.zSt.some((X) => Math.abs(x - X) < 9)) continue;
+      addHouse(x, zr + (r() - 0.5) * 0.6, side > 0 ? Math.PI : 0);
     }
   }
-  // barrio al poniente (-x) de la calle exterior
-  for (let z = -4; z < 165; z += 11.5) {
-    house(fac, tile, ST.w - 15, z, -Math.PI / 2, r);
-    house(fac, tile, ST.w - 38, z + 5, Math.PI / 2, r);
-    garden(ST.w - 26.5, z);
+  // filas junto a las calles en z: poniente (todo el largo) y oriente (frente a la obra)
+  // (ry = π/2 deja el antejardín hacia +x)
+  for (const [xr, ry, z1] of [[-156, -Math.PI / 2, TOWN.z1], [-133, Math.PI / 2, TOWN.z1], [-103, -Math.PI / 2, TOWN.z1], [-79, Math.PI / 2, TOWN.z1],
+    [97, -Math.PI / 2, 48], [120, Math.PI / 2, 48], [145, Math.PI / 2, 48], [175, -Math.PI / 2, 48], [198, Math.PI / 2, 48]] as const) {
+    for (let z = -4 + (Math.abs(xr) % 2) * 5; z < z1; z += 11.5) addHouse(xr, z, ry);
   }
-  // al oriente (+x) de la calle E, frente a la obra
-  for (let z = -4; z < ST.s - 8; z += 11.5) {
-    house(fac, tile, ST.e + 15, z, Math.PI / 2, r);
-    house(fac, tile, ST.e + 38, z + 5, -Math.PI / 2, r);
-    garden(ST.e + 26.5, z);
-  }
-  // bosque de eucaliptos y pinos sobre el talud (oriente) y en las lomas
+  // bosque de eucaliptos y pinos sobre el talud (oriente)
   for (let i = 0; i < 230; i++) {
-    const x = -150 + r() * 330, z = FENCE.z0 - 4 - Math.pow(r(), 1.6) * 120;
-    if (r() > 0.3) eucalyptus(fol, x, z, 15 + r() * 12, r);
-    else pine(fol, x, z, 12 + r() * 8, r);
+    const x = -150 + r() * 330, z = FENCE.z0 - 4 - Math.pow(r(), 1.6) * 120, H = r();
+    if (onStreet(x, z)) continue;
+    const b = kit(x, z).b(M.foliage);
+    if (r() > 0.3) eucalyptus(b, x, z, 15 + H * 12, r, isNear(x, z));
+    else pine(b, x, z, 12 + H * 8, r);
   }
-  // grupos de árboles en las esquinas del barrio
-  const groves: [number, number, number, number][] = [[-108, 20, 14, 18], [-100, 120, 16, 14], [150, 10, 18, 14], [130, 130, 20, 12], [ST.w - 4, -40, 10, 10]];
-  for (const [gx, gz, rad, n] of groves) for (let i = 0; i < n; i++) {
-    const a = r() * 6.28, d = Math.sqrt(r()) * rad;
-    if (r() > 0.4) eucalyptus(fol, gx + Math.cos(a) * d, gz + Math.sin(a) * d, 14 + r() * 10, r);
-    else pine(fol, gx + Math.cos(a) * d, gz + Math.sin(a) * d, 11 + r() * 7, r);
+  // lomas lejanas con manchones de bosque (sin sombras)
+  for (let i = 0; i < 1800; i++) {
+    const x = -460 + r() * 920, z = -460 + r() * 920;
+    const inTown = x > TOWN.x0 - 8 && x < TOWN.x1 + 8 && z > -14 && z < TOWN.z1 + 8;
+    const inNear = x > -150 && x < 180 && z > -150 && z < -14;
+    if (inTown || inNear || onStreet(x, z) || fbm(x * 0.012, z * 0.012, 2, 41) < 0.46) continue;
+    if (r() > 0.35) eucalyptus(far.b(M.foliage), x, z, 16 + r() * 12, r, false);
+    else pine(far.b(M.foliage), x, z, 12 + r() * 8, r);
   }
-  // algunos eucaliptos sueltos junto al cierro
-  for (const [tx, tz] of [[-57.3, -6], [-57.3, 5], [74, 30], [74, 40], [-57.3, 43], [74, -6]] as const) eucalyptus(fol, tx, tz, 16 + r() * 6, r);
-  k.into(group);
+  // eucaliptos sueltos junto al cierro
+  for (const [tx, tz] of [[-57.3, -6], [-57.3, 5], [74, -6]] as const) eucalyptus(near.b(M.foliage), tx, tz, 16 + r() * 6, r);
+  near.into(group);
+  far.into(group, false);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1564,7 +1646,7 @@ export function createSite(): SiteRig {
   padAt(50, SITE.roadZ, 13, 15);
   for (const A of [SITE.acopioMoldajeMuro, SITE.acopioMoldajeLosa, SITE.acopioFierro, SITE.tallerFierro, SITE.acopioPuntales]) padAt(A.x, A.z, A.w + 1.5, A.d + 1.5, 0.75);
   ribbon(roads, [[SITE.loopX0, SITE.roadZ], [SITE.loopX0, SITE.loopZ], [SITE.loopX1, SITE.loopZ], [SITE.loopX1, SITE.roadZ]], { width: 5, texLen: 12, radius: 6, fade: 0.6, step: 2 });
-  ribbon(roads, [[ST.w, SITE.roadZ], [52, SITE.roadZ]], { width: 7, texLen: 12, uRep: 2, fade: 0.6, step: 4, lift: 0.035 });
+  ribbon(roads, [[ST_W, SITE.roadZ], [52, SITE.roadZ]], { width: 7, texLen: 12, uRep: 2, fade: 0.6, step: 4, lift: 0.035 });
   const decals: [Batch, THREE.Material, number][] = [[pads, M.pad, -3], [roads, M.road, -2]];
   for (const [b, m, order] of decals) {
     const mesh = new THREE.Mesh(b.build()!, m);
@@ -1609,10 +1691,14 @@ export function createSite(): SiteRig {
 
   buildSurroundings(M, group);
 
+  // la selección también funciona sobre cada malla hija
+  const pickables = [muro.group, losa.group, fierro.group, puntales.group, taller.group, faena];
+  for (const p of pickables) p.traverse((o) => (o.userData.pick = p.userData.pick));
+
   const pos = flagGeo.attributes.position as THREE.BufferAttribute;
   return {
     group,
-    pickables: [muro.group, losa.group, fierro.group, puntales.group, taller.group, faena],
+    pickables,
     anchors: {
       acopioMoldajeMuro: muro.anchor,
       acopioMoldajeLosa: losa.anchor,
