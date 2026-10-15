@@ -2,8 +2,11 @@
  * Camión mixer 7 m³ (estilo International: cabina blanca con capó, tambor gris, 3 ejes).
  * Origen = suelo bajo el centro del vehículo; avanza hacia +x (cabina en +x).
  *
- * También exporta piezas comunes a los equipos: PartKit (fusión de geometría por material),
- * materiales de camión y juego de ruedas instanciado.
+ * También exporta las piezas comunes de los equipos (bomba, capacho, cargas):
+ *  - PartKit: junta primitivas en UNA malla por material.
+ *  - "Swatches": pocos materiales compartidos con color por vértice (pintura, metal, luces),
+ *    así cada pieza móvil se dibuja en una sola llamada aunque tenga varios colores.
+ *  - Ruedas instanciadas.
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -11,8 +14,16 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 export type XY = [number, number];
 export type XYZ = [number, number, number];
 
+/** Material compartido + color de las piezas que lo usan. */
+export interface Swatch {
+  mat: THREE.Material;
+  color: THREE.Color;
+}
+export type Surface = THREE.Material | Swatch;
+
 const KEEP = new Set(['position', 'normal', 'uv']);
 const UP = new THREE.Vector3(0, 1, 0);
+const WHITE = new THREE.Color(1, 1, 1);
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -20,26 +31,93 @@ const _p = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const _d = new THREE.Vector3();
 
+// ───────────────────────── materiales compartidos ─────────────────────────
+
+let shared: { paint: THREE.MeshStandardMaterial; metal: THREE.MeshStandardMaterial; glow: THREE.MeshBasicMaterial } | null = null;
+function sharedMats() {
+  if (!shared) {
+    shared = {
+      paint: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.08 }),
+      metal: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.35 }),
+      glow: new THREE.MeshBasicMaterial({ vertexColors: true }),
+    };
+  }
+  return shared;
+}
+
+/** Superficie pintada / de acero / luminosa (faroles) con el color dado. */
+export const paint = (color: THREE.ColorRepresentation): Swatch => ({ mat: sharedMats().paint, color: new THREE.Color(color) });
+export const metal = (color: THREE.ColorRepresentation): Swatch => ({ mat: sharedMats().metal, color: new THREE.Color(color) });
+export const glow = (color: THREE.ColorRepresentation): Swatch => ({ mat: sharedMats().glow, color: new THREE.Color(color) });
+
+/** Agrega (o reemplaza) el color por vértice de una geometría suelta. */
+export function tinted<G extends THREE.BufferGeometry>(geo: G, color: THREE.ColorRepresentation | THREE.Color): G {
+  const c = color instanceof THREE.Color ? color : new THREE.Color(color);
+  const n = geo.attributes.position.count;
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3);
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return geo;
+}
+
+export interface TruckSurfaces {
+  white: Swatch;
+  dark: Swatch;
+  grime: Swatch;
+  steel: Swatch;
+  chrome: Swatch;
+  amber: Swatch;
+  red: Swatch;
+  lamp: Swatch;
+  glass: THREE.MeshStandardMaterial;
+  concrete: THREE.MeshStandardMaterial;
+  tire: THREE.MeshStandardMaterial;
+}
+
+let truckSurf: TruckSurfaces | null = null;
+export function truckSurfaces(): TruckSurfaces {
+  if (truckSurf) return truckSurf;
+  truckSurf = {
+    white: paint('#f2f2ee'),
+    dark: paint('#2b2e33'),
+    grime: paint('#7e7f7c'),
+    steel: metal('#a3a9b0'),
+    chrome: metal('#e2e6ea'),
+    amber: glow('#ffb238'),
+    red: glow('#e0281e'),
+    lamp: glow('#fff6dc'),
+    glass: new THREE.MeshStandardMaterial({ color: '#1f2c37', roughness: 0.1, metalness: 0.4 }),
+    concrete: new THREE.MeshStandardMaterial({ color: '#8a8a83', roughness: 0.3, metalness: 0.05 }),
+    tire: new THREE.MeshStandardMaterial({ color: '#1c1d1f', roughness: 0.88 }),
+  };
+  return truckSurf;
+}
+
+// ───────────────────────── PartKit ─────────────────────────
+
 /**
- * Acumulador de piezas: cada primitiva se transforma y se agrupa por material;
- * build() entrega un Group con UNA malla por material (pocas llamadas de dibujo).
+ * Acumulador de piezas: cada primitiva se transforma, se pinta con el color de su swatch
+ * y se agrupa por material; build() entrega un Group con UNA malla por material.
  * Las geometrías recibidas pasan a ser del kit (se descartan tras copiarlas).
  */
 export class PartKit {
   private parts = new Map<THREE.Material, THREE.BufferGeometry[]>();
 
   /** Geometría con posición, giro (Euler XYZ, rad) y escala. */
-  add(mat: THREE.Material, geo: THREE.BufferGeometry, pos: XYZ = [0, 0, 0], rot: XYZ = [0, 0, 0], scl: XYZ = [1, 1, 1]) {
+  add(s: Surface, geo: THREE.BufferGeometry, pos: XYZ = [0, 0, 0], rot: XYZ = [0, 0, 0], scl: XYZ = [1, 1, 1]) {
     _m.compose(_p.set(...pos), _q.setFromEuler(_e.set(...rot)), _s.set(...scl));
-    return this.addMatrix(mat, geo, _m);
+    return this.addMatrix(s, geo, _m);
   }
 
-  addMatrix(mat: THREE.Material, geo: THREE.BufferGeometry, m: THREE.Matrix4) {
+  addMatrix(s: Surface, geo: THREE.BufferGeometry, m: THREE.Matrix4) {
+    const isMat = s instanceof THREE.Material;
+    const mat = isMat ? s : s.mat;
     const g = geo.index ? geo.toNonIndexed() : geo.clone();
     geo.dispose();
     for (const k of Object.keys(g.attributes)) if (!KEEP.has(k)) g.deleteAttribute(k);
     g.clearGroups();
     g.applyMatrix4(m);
+    tinted(g, isMat ? WHITE : s.color);
     let list = this.parts.get(mat);
     if (!list) this.parts.set(mat, (list = []));
     list.push(g);
@@ -47,40 +125,52 @@ export class PartKit {
   }
 
   /** Caja alineada a los ejes entre dos esquinas. */
-  box(mat: THREE.Material, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) {
-    return this.add(mat, new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]);
+  box(s: Surface, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) {
+    return this.add(s, new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]);
   }
 
   /** Caja centrada en `pos` con giro. */
-  boxAt(mat: THREE.Material, sx: number, sy: number, sz: number, pos: XYZ, rot: XYZ = [0, 0, 0]) {
-    return this.add(mat, new THREE.BoxGeometry(sx, sy, sz), pos, rot);
+  boxAt(s: Surface, sx: number, sy: number, sz: number, pos: XYZ, rot: XYZ = [0, 0, 0]) {
+    return this.add(s, new THREE.BoxGeometry(sx, sy, sz), pos, rot);
   }
 
   /** Cilindro o tronco de cono según eje x | y | z; rTop queda hacia el lado + del eje. */
-  cyl(mat: THREE.Material, rTop: number, rBot: number, len: number, pos: XYZ, axis: 'x' | 'y' | 'z' = 'y', seg = 14, open = false) {
+  cyl(s: Surface, rTop: number, rBot: number, len: number, pos: XYZ, axis: 'x' | 'y' | 'z' = 'y', seg = 14, open = false) {
     const rot: XYZ = axis === 'x' ? [0, 0, -Math.PI / 2] : axis === 'z' ? [Math.PI / 2, 0, 0] : [0, 0, 0];
-    return this.add(mat, new THREE.CylinderGeometry(rTop, rBot, len, seg, 1, open), pos, rot);
+    return this.add(s, new THREE.CylinderGeometry(rTop, rBot, len, seg, 1, open), pos, rot);
   }
 
   /** Barra cilíndrica (tubo abierto) entre dos puntos. */
-  bar(mat: THREE.Material, a: XYZ, b: XYZ, r: number, seg = 8) {
+  bar(s: Surface, a: XYZ, b: XYZ, r: number, seg = 8) {
     _d.set(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
     const len = _d.length();
     if (len < 1e-5) return this;
     _q.setFromUnitVectors(UP, _d.divideScalar(len));
     _m.compose(_p.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2), _q, _s.set(1, 1, 1));
-    return this.addMatrix(mat, new THREE.CylinderGeometry(r, r, len, seg, 1, true), _m);
+    return this.addMatrix(s, new THREE.CylinderGeometry(r, r, len, seg, 1, true), _m);
   }
 
   /** Perfil lateral (x, y) extruido a lo largo de z entre z0 y z1. */
-  profile(mat: THREE.Material, pts: XY[], z0: number, z1: number) {
+  profile(s: Surface, pts: XY[], z0: number, z1: number) {
     const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
-    return this.add(mat, new THREE.ExtrudeGeometry(shape, { depth: z1 - z0, bevelEnabled: false }), [0, 0, z0]);
+    return this.add(s, new THREE.ExtrudeGeometry(shape, { depth: z1 - z0, bevelEnabled: false }), [0, 0, z0]);
+  }
+
+  /** Tolva de sección cuadrada (tronco de pirámide) con boca oscura arriba; `sx` estira en x. */
+  funnel(s: Surface, mouth: Surface, rTop: number, rBot: number, h: number, pos: XYZ, rot: XYZ = [0, 0, 0], sx = 1) {
+    const body = new THREE.CylinderGeometry(rTop, rBot, h, 4, 1);
+    body.rotateY(Math.PI / 4);
+    body.scale(sx, 1, 1);
+    this.add(s, body, pos, rot);
+    const half = rTop * Math.SQRT1_2;
+    const top = new THREE.BoxGeometry(2 * (half * sx - 0.05), 0.012, 2 * (half - 0.05));
+    top.translate(0, h / 2, 0);
+    return this.add(mouth, top, pos, rot);
   }
 
   /** Sólido de revolución en torno al eje y; perfil [radio, y]. */
-  lathe(mat: THREE.Material, pts: XY[], seg: number, pos: XYZ = [0, 0, 0], rot: XYZ = [0, 0, 0]) {
-    return this.add(mat, new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg), pos, rot);
+  lathe(s: Surface, pts: XY[], seg: number, pos: XYZ = [0, 0, 0], rot: XYZ = [0, 0, 0]) {
+    return this.add(s, new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg), pos, rot);
   }
 
   build(shadows = true): THREE.Group {
@@ -115,46 +205,6 @@ export function markPickable(root: THREE.Object3D, pick: { type: string; id?: st
   return out;
 }
 
-// ───────────────────────── materiales compartidos ─────────────────────────
-
-export interface TruckMaterials {
-  white: THREE.MeshStandardMaterial;
-  dark: THREE.MeshStandardMaterial;
-  steel: THREE.MeshStandardMaterial;
-  chrome: THREE.MeshStandardMaterial;
-  glass: THREE.MeshStandardMaterial;
-  tire: THREE.MeshStandardMaterial;
-  rim: THREE.MeshStandardMaterial;
-  amber: THREE.MeshStandardMaterial;
-  red: THREE.MeshStandardMaterial;
-  lamp: THREE.MeshStandardMaterial;
-  grime: THREE.MeshStandardMaterial;
-  concrete: THREE.MeshStandardMaterial;
-}
-
-let truckMats: TruckMaterials | null = null;
-
-export function truckMaterials(): TruckMaterials {
-  if (truckMats) return truckMats;
-  const std = (color: string, roughness: number, metalness = 0, extra: THREE.MeshStandardMaterialParameters = {}) =>
-    new THREE.MeshStandardMaterial({ color, roughness, metalness, ...extra });
-  truckMats = {
-    white: std('#f2f2ee', 0.4, 0.05),
-    dark: std('#2b2e33', 0.7, 0.2),
-    steel: std('#a3a9b0', 0.45, 0.3),
-    chrome: std('#e2e6ea', 0.25, 0.5),
-    glass: std('#1f2c37', 0.1, 0.4),
-    tire: std('#1c1d1f', 0.88),
-    rim: std('#ffffff', 0.4, 0.3, { vertexColors: true }),
-    amber: std('#ffb238', 0.4, 0, { emissive: '#ff8a00', emissiveIntensity: 0.8 }),
-    red: std('#d0241b', 0.4, 0, { emissive: '#8a0d08', emissiveIntensity: 0.7 }),
-    lamp: std('#f6f3e8', 0.15, 0, { emissive: '#fff6d8', emissiveIntensity: 0.55 }),
-    grime: std('#7e7f7c', 0.85, 0.2),
-    concrete: std('#8a8a83', 0.3, 0.05),
-  };
-  return truckMats;
-}
-
 // ───────────────────────── ruedas ─────────────────────────
 
 export interface WheelSpot {
@@ -176,17 +226,6 @@ const TIRE_W = 0.3;
 const DUAL_OFF = 0.165;
 let wheelGeos: { tire: THREE.BufferGeometry; rim: THREE.BufferGeometry } | null = null;
 
-function painted(geo: THREE.BufferGeometry, color: string, pos: XYZ, rot: XYZ = [0, 0, 0]) {
-  const g = geo.index ? geo.toNonIndexed() : geo;
-  const c = new THREE.Color(color);
-  const n = g.attributes.position.count;
-  const col = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3);
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  g.applyMatrix4(_m.compose(_p.set(...pos), _q.setFromEuler(_e.set(...rot)), _s.set(1, 1, 1)));
-  return g;
-}
-
 function wheelGeometries() {
   if (wheelGeos) return wheelGeos;
   const h = TIRE_W / 2;
@@ -195,20 +234,23 @@ function wheelGeometries() {
   const tire = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 22);
   tire.rotateX(Math.PI / 2);
   // llanta con perforaciones oscuras para que se note el giro (cara exterior hacia +z)
-  const ax: XYZ = [Math.PI / 2, 0, 0];
+  const part = (g: THREE.BufferGeometry, color: string, pos: XYZ, rotZ = 0) => {
+    g.rotateX(Math.PI / 2).rotateZ(rotZ).translate(...pos);
+    return tinted(g, color);
+  };
   const parts = [
-    painted(new THREE.CylinderGeometry(0.29, 0.29, 0.02, 22), '#c3c7cc', [0, 0, h - 0.04], ax),
-    painted(new THREE.CylinderGeometry(0.286, 0.286, TIRE_W - 0.06, 22, 1, true), '#6f757c', [0, 0, -0.01], ax),
-    painted(new THREE.CylinderGeometry(0.12, 0.15, 0.08, 14), '#4a4f55', [0, 0, h], ax),
-    painted(new THREE.CylinderGeometry(0.06, 0.085, 0.06, 12), '#d2d6da', [0, 0, h + 0.06], ax),
+    part(new THREE.CylinderGeometry(0.29, 0.29, 0.02, 22), '#c3c7cc', [0, 0, h - 0.04]),
+    part(new THREE.CylinderGeometry(0.286, 0.286, TIRE_W - 0.06, 22, 1, true), '#6f757c', [0, 0, -0.01]),
+    part(new THREE.CylinderGeometry(0.12, 0.15, 0.08, 14), '#4a4f55', [0, 0, h]),
+    part(new THREE.CylinderGeometry(0.06, 0.085, 0.06, 12), '#d2d6da', [0, 0, h + 0.06]),
   ];
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
-    parts.push(painted(new THREE.BoxGeometry(0.07, 0.1, 0.024), '#1d1f22', [Math.cos(a) * 0.215, Math.sin(a) * 0.215, h - 0.035], [0, 0, a + Math.PI / 2]));
+    parts.push(part(new THREE.BoxGeometry(0.07, 0.024, 0.1), '#1d1f22', [Math.cos(a) * 0.215, Math.sin(a) * 0.215, h - 0.035], a + Math.PI / 2));
   }
   for (let i = 0; i < 10; i++) {
     const a = (i / 10) * Math.PI * 2;
-    parts.push(painted(new THREE.BoxGeometry(0.025, 0.025, 0.04), '#e6e8ea', [Math.cos(a) * 0.165, Math.sin(a) * 0.165, h], [0, 0, a]));
+    parts.push(part(new THREE.BoxGeometry(0.025, 0.04, 0.025), '#e6e8ea', [Math.cos(a) * 0.165, Math.sin(a) * 0.165, h], a));
   }
   const rim = mergeGeometries(parts, false);
   parts.forEach((g) => g.dispose());
@@ -218,19 +260,18 @@ function wheelGeometries() {
 
 /** Ruedas de un camión: neumáticos y llantas como dos InstancedMesh. */
 export function createWheels(spots: WheelSpot[]): WheelSet {
-  const M = truckMaterials();
   const geo = wheelGeometries();
   const tireCount = spots.reduce((n, s) => n + (s.dual ? 2 : 1), 0);
-  const tires = new THREE.InstancedMesh(geo.tire, M.tire, tireCount);
-  const rims = new THREE.InstancedMesh(geo.rim, M.rim, spots.length);
+  const tires = new THREE.InstancedMesh(geo.tire, truckSurfaces().tire, tireCount);
+  const rims = new THREE.InstancedMesh(geo.rim, sharedMats().metal, spots.length);
   const flip = new THREE.Quaternion().setFromAxisAngle(UP, Math.PI);
   const spin = new THREE.Quaternion();
   const Z = new THREE.Vector3(0, 0, 1);
   let ti = 0;
   for (const s of spots) {
-    const side = Math.sign(s.z) || 1;
-    const offs = s.dual ? [-DUAL_OFF, DUAL_OFF] : [0];
-    for (const o of offs) tires.setMatrixAt(ti++, _m.compose(_p.set(s.x, WHEEL_R, s.z + o), side > 0 ? _q.identity() : flip, _s.set(1, 1, 1)));
+    for (const o of s.dual ? [-DUAL_OFF, DUAL_OFF] : [0]) {
+      tires.setMatrixAt(ti++, _m.compose(_p.set(s.x, WHEEL_R, s.z + o), _q.identity(), _s.set(1, 1, 1)));
+    }
   }
   const roll = (distance: number) => {
     const a = distance / WHEEL_R;
@@ -319,11 +360,11 @@ function drumMaterial() {
   g.fillRect(0, 0, W, H * 0.4);
   let seed = 7;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 260; i++) {
-    const y = Math.pow(rnd(), 1.8) * H;
-    g.fillStyle = rnd() > 0.5 ? 'rgba(135,131,122,0.7)' : 'rgba(208,203,193,0.6)';
+  for (let i = 0; i < 140; i++) {
+    const y = Math.pow(rnd(), 2.6) * H;
+    g.fillStyle = rnd() > 0.5 ? 'rgba(140,136,127,0.45)' : 'rgba(214,209,199,0.4)';
     g.beginPath();
-    g.ellipse(rnd() * W, y, 2 + rnd() * 6, 1 + rnd() * 3, 0, 0, Math.PI * 2);
+    g.ellipse(rnd() * W, y, 1.5 + rnd() * 4, 1 + rnd() * 2, 0, 0, Math.PI * 2);
     g.fill();
   }
   const tex = new THREE.CanvasTexture(c);
@@ -335,11 +376,11 @@ function drumMaterial() {
 }
 
 function buildMixerBody(kit: PartKit) {
-  const M = truckMaterials();
+  const M = truckSurfaces();
   // chasis
   kit.box(M.dark, -4.72, 0.72, -0.48, 4.5, 1.0, -0.36);
   kit.box(M.dark, -4.72, 0.72, 0.36, 4.5, 1.0, 0.48);
-  kit.box(M.dark, -4.5, 1.0, -0.55, 1.62, 1.14, 0.55);
+  kit.box(M.dark, -4.5, 1.0, -0.46, 1.62, 1.14, 0.46);
   // parachoques y capó
   kit.box(M.chrome, 4.55, 0.5, -1.22, 4.8, 0.86, 1.22);
   kit.box(M.dark, 4.5, 0.42, -1.0, 4.74, 0.5, 1.0);
@@ -385,10 +426,13 @@ function buildMixerBody(kit: PartKit) {
   // caja de herramientas y estanque de agua
   kit.box(M.white, 0.2, 0.62, 0.72, 1.4, 1.05, 1.22);
   kit.cyl(M.white, 0.3, 0.3, 2.4, [0.1, 0.86, -0.92], 'x', 16);
-  // guardafangos traseros, faldones y parachoques
+  // guardafangos traseros (acero inox. sobre cada eje), faldones y parachoques
   for (const s of [-1, 1]) {
-    kit.box(M.dark, -4.3, 1.12, s > 0 ? 0.62 : -1.28, -1.4, 1.17, s > 0 ? 1.28 : -0.62);
-    kit.box(M.dark, -4.32, 0.28, s > 0 ? 0.65 : -1.22, -4.28, 1.12, s > 0 ? 1.22 : -0.65);
+    for (const ax of [-2.15, -3.55]) {
+      kit.box(M.steel, ax - 0.5, 1.13, s > 0 ? 0.64 : -1.26, ax + 0.5, 1.16, s > 0 ? 1.26 : -0.64);
+      for (const e of [-1, 1]) kit.boxAt(M.steel, 0.3, 0.03, 0.62, [ax + e * 0.62, 1.07, s * 0.95], [0, 0, -e * 0.55]);
+    }
+    kit.box(M.dark, -4.32, 0.28, s > 0 ? 0.65 : -1.22, -4.28, 1.0, s > 0 ? 1.22 : -0.65);
     kit.box(M.red, -4.82, 0.46, s > 0 ? 0.75 : -1.05, -4.79, 0.58, s > 0 ? 1.05 : -0.75);
     kit.box(M.steel, -4.75, 0.62, s > 0 ? 0.5 : -0.6, -4.65, 1.0, s > 0 ? 0.6 : -0.5);
   }
@@ -402,8 +446,8 @@ function buildMixerBody(kit: PartKit) {
   }
   kit.box(M.dark, -2.95, 2.05, -0.62, -2.7, 2.2, 0.62);
   // tolva de carga (arriba) y de descarga (bajo la boca)
-  kit.add(M.grime, new THREE.CylinderGeometry(0.62, 0.25, 0.6, 4, 1, true), [-4.25, 3.8, 0], [0, Math.PI / 4, 0.35]);
-  kit.add(M.grime, new THREE.CylinderGeometry(0.45, 0.18, 0.38, 4, 1, true), [-4.35, 2.62, 0], [0, Math.PI / 4, 0]);
+  kit.funnel(M.grime, M.dark, 0.62, 0.25, 0.6, [-4.25, 3.8, 0], [0, 0, 0.35]);
+  kit.funnel(M.grime, M.dark, 0.42, 0.18, 0.36, [-4.33, 2.6, 0]);
   for (const s of [-1, 1]) {
     kit.bar(M.grime, [-4.45, 3.5, s * 0.35], [-3.6, 2.25, s * 0.55], 0.04);
     kit.bar(M.grime, [-4.45, 2.45, s * 0.3], [-3.2, 2.15, s * 0.5], 0.035);
@@ -423,14 +467,14 @@ function buildMixerBody(kit: PartKit) {
 }
 
 function buildDrum(): THREE.Group {
-  const M = truckMaterials();
+  const M = truckSurfaces();
   const pivot = new THREE.Group();
   pivot.position.set(DRUM_FRONT[0], DRUM_FRONT[1], 0);
   pivot.quaternion.setFromUnitVectors(UP, new THREE.Vector3(-Math.cos(DRUM_TILT), Math.sin(DRUM_TILT), 0));
   const spin = new THREE.Group();
   spin.name = 'drumSpin';
   const kit = new PartKit();
-  kit.lathe(drumMaterial(), DRUM_PROFILE.map(([r, a]) => [r, a] as XY), 40);
+  kit.lathe(drumMaterial(), DRUM_PROFILE, 40);
   kit.add(M.dark, new THREE.TorusGeometry(0.83, 0.05, 8, 40), [0, 4.3, 0], [Math.PI / 2, 0, 0]);
   kit.add(M.dark, new THREE.TorusGeometry(0.47, 0.035, 6, 28), [0, 5.36, 0], [Math.PI / 2, 0, 0]);
   spin.add(kit.build());
@@ -442,7 +486,7 @@ function buildDrum(): THREE.Group {
 }
 
 function buildChute() {
-  const M = truckMaterials();
+  const M = truckSurfaces();
   const yaw = new THREE.Group();
   yaw.position.set(...CHUTE_PIVOT);
   const pitch = new THREE.Group();
@@ -456,7 +500,7 @@ function buildChute() {
   kit.boxAt(M.dark, 0.04, 0.1, 0.5, [0.97, -0.05, 0]);
   pitch.add(kit.build());
   const flow = new PartKit();
-  flow.box(truckMaterials().concrete, 0.05, 0.0, -0.18, L - 0.01, 0.06, 0.18);
+  flow.box(M.concrete, 0.05, 0.0, -0.18, L - 0.01, 0.06, 0.18);
   const concrete = flow.build();
   concrete.visible = false;
   pitch.add(concrete);

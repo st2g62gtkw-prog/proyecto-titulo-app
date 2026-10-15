@@ -192,6 +192,16 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
       };
       return info[p.id ?? ''] ?? { title: 'Acopio', rows: [] };
     }
+    case 'carga': {
+      const cargas: Record<string, [string, string]> = {
+        'moldaje-muro': ['Paquete de paneles de moldaje', 'Paneles metálicos para muros'],
+        fierro: ['Paquete de fierro', 'Barras A630-420H de 6 m'],
+        'moldaje-losa': ['Paquete de moldaje de losa', 'Vigas H20 y placas fenólicas'],
+        puntales: ['Paquete de puntales', 'Alzaprimas metálicas'],
+      };
+      const [title, subtitle] = cargas[p.id ?? ''] ?? ['Carga de grúa', ''];
+      return { title, subtitle, badge: 'GRÚA', rows: [['Tarea de la grúa', w.state.craneTask]] };
+    }
     case 'faena':
       return { title: 'Instalación de faena', subtitle: 'Oficinas, bodega, comedor y baños', badge: 'FAENA', rows: [['Dotación', `${EQUIPMENT.dotacion} personas`], ['Constructora', PROJECT.constructora], ['Mandante', PROJECT.mandante]] };
     default:

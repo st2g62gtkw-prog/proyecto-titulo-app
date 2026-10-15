@@ -4,7 +4,7 @@
  * Origen = ojo de izaje (arriba); el cuerpo cuelga hacia -y (alto total 2,0 m).
  */
 import * as THREE from 'three';
-import { PartKit, markPickable, truckMaterials, type XY } from './mixer';
+import { PartKit, markPickable, metal, paint, truckSurfaces, type Swatch, type XY } from './mixer';
 
 export interface CapachoRig {
   group: THREE.Group;
@@ -22,20 +22,15 @@ const CONE_BOT = -1.72;
 const BOT_R = 0.22;
 const HEIGHT = 2.0;
 
-let mats: Record<'body' | 'frame' | 'rubber', THREE.MeshStandardMaterial> | null = null;
+let surf: Record<'body' | 'frame' | 'rubber', Swatch> | null = null;
 function materials() {
-  if (mats) return mats;
-  mats = {
-    body: new THREE.MeshStandardMaterial({ color: '#8b9096', roughness: 0.62, metalness: 0.3 }),
-    frame: new THREE.MeshStandardMaterial({ color: '#f2c12e', roughness: 0.45, metalness: 0.1 }),
-    rubber: new THREE.MeshStandardMaterial({ color: '#202124', roughness: 0.8 }),
-  };
-  return mats;
+  surf ??= { body: metal('#8b9096'), frame: paint('#f2c12e'), rubber: paint('#202124') };
+  return surf;
 }
 
 export function createCapacho(): CapachoRig {
   const M = materials();
-  const T = truckMaterials();
+  const T = truckSurfaces();
   const group = new THREE.Group();
   group.name = 'capacho';
 

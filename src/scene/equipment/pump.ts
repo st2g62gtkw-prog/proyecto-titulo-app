@@ -8,7 +8,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { PartKit, createWheels, markPickable, smooth, truckMaterials, type XY } from './mixer';
+import { PartKit, createWheels, markPickable, paint, smooth, tinted, truckSurfaces, type Swatch, type XY } from './mixer';
 
 export interface PumpRig {
   group: THREE.Group;
@@ -53,17 +53,16 @@ const REAR = { x: -4.775, y: 1.21, z: 1.45, ext: 2.75 };
 const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const win = (k: number, w: XY) => smooth((k - w[0]) / (w[1] - w[0]));
 
-let pumpMats: Record<'boom' | 'pipe' | 'rubber' | 'pad' | 'warn', THREE.MeshStandardMaterial> | null = null;
+let pumpSurf: Record<'boom' | 'pipe' | 'rubber' | 'pad' | 'warn', Swatch> | null = null;
 function materials() {
-  if (pumpMats) return pumpMats;
-  pumpMats = {
-    boom: new THREE.MeshStandardMaterial({ color: '#f2a516', roughness: 0.42, metalness: 0.1 }),
-    pipe: new THREE.MeshStandardMaterial({ color: '#8d949b', roughness: 0.5, metalness: 0.35 }),
-    rubber: new THREE.MeshStandardMaterial({ color: '#1d1e20', roughness: 0.75 }),
-    pad: new THREE.MeshStandardMaterial({ color: '#2a2c2f', roughness: 0.9 }),
-    warn: new THREE.MeshStandardMaterial({ color: '#c8261d', roughness: 0.5 }),
+  pumpSurf ??= {
+    boom: paint('#f2a516'),
+    pipe: paint('#8d949b'),
+    rubber: paint('#1d1e20'),
+    pad: paint('#2a2c2f'),
+    warn: paint('#c8261d'),
   };
-  return pumpMats;
+  return pumpSurf;
 }
 
 // ───────────────────────── cinemática de la pluma ─────────────────────────
@@ -123,7 +122,7 @@ function solveBoom(R: number, Z: number, out: number[]) {
 // ───────────────────────── geometría ─────────────────────────
 
 function buildTruck(kit: PartKit) {
-  const M = truckMaterials();
+  const M = truckSurfaces();
   const P = materials();
   // chasis y cabina adelantada
   for (const s of [-1, 1]) kit.box(M.dark, -5.3, 0.72, s > 0 ? 0.36 : -0.48, 5.6, 1.0, s > 0 ? 0.48 : -0.36);
@@ -175,9 +174,7 @@ function buildTruck(kit: PartKit) {
   kit.box(P.boom, -2.2, 1.42, -0.45, -1.75, 1.95, 0.45);
   kit.box(P.boom, -4.85, 1.42, -0.42, -4.45, 1.85, 0.42);
   // tolva trasera con parrilla
-  const hopper = new THREE.CylinderGeometry(0.62, 0.38, 0.55, 4, 1, true);
-  hopper.rotateY(Math.PI / 4);
-  kit.add(M.grime, hopper, [-5.8, 1.12, 0], [0, 0, 0], [0.72, 1, 1]);
+  kit.funnel(M.grime, M.dark, 0.62, 0.38, 0.55, [-5.8, 1.12, 0], [0, 0, 0], 0.72);
   for (let i = 0; i < 6; i++) kit.box(M.steel, -6.06 + i * 0.1, 1.38, -0.42, -6.04 + i * 0.1, 1.41, 0.42);
   kit.box(M.dark, -5.6, 0.8, -0.4, -5.3, 1.0, 0.4);
   kit.box(M.dark, -5.32, 0.42, -1.1, -5.2, 0.62, 1.1);
@@ -194,14 +191,14 @@ function buildTruck(kit: PartKit) {
 
 /** Cabezal giratorio de la torreta (en coordenadas del plano de la pluma). */
 function buildHead(kit: PartKit) {
-  const M = truckMaterials();
+  const M = truckSurfaces();
   const P = materials();
   const cheek: XY[] = [[-0.55, 2.75], [0.9, 2.75], [1.25, 2.92], [1.25, 3.1], [0.75, 3.55], [0.35, 3.95], [-0.15, 3.95], [-0.6, 3.5]];
   kit.profile(P.boom, cheek, 0.27, 0.42);
   kit.profile(P.boom, cheek, -0.42, -0.27);
   kit.box(P.boom, -0.55, 2.75, -0.42, 1.25, 3.0, 0.42);
-  kit.cyl(M.steel, 0.11, 0.11, 0.95, [J0[0], J0[1], 0], 'z', 12);
-  kit.cyl(M.steel, 0.08, 0.08, 0.5, [1.05, 2.97, 0], 'z', 10);
+  kit.cyl(P.pipe, 0.11, 0.11, 0.95, [J0[0], J0[1], 0], 'z', 12);
+  kit.cyl(P.pipe, 0.08, 0.08, 0.5, [1.05, 2.97, 0], 'z', 10);
   kit.box(M.dark, -0.9, 2.8, -0.3, -0.55, 3.25, 0.3);
   kit.cyl(P.pipe, 0.07, 0.07, 0.75, [-0.25, 3.1, 0.52], 'y', 10);
 }
@@ -224,10 +221,7 @@ function buildSection(i: number): THREE.Group {
   kit.cyl(P.pipe, 0.068, 0.068, L - 0.5, [L / 2, 0, pz], 'x', 10);
   for (const x of [0.4, L - 0.4]) kit.cyl(P.pipe, 0.095, 0.095, 0.12, [x, 0, pz], 'x', 10);
   for (let x = 1.4; x < L - 0.8; x += 2.2) kit.box(P.pipe, x - 0.04, -0.1, w / 2 - 0.01, x + 0.04, 0.1, pz + 0.02);
-  if (i === 3) {
-    kit.box(P.warn, L - 0.9, -h1 / 2 - 0.01, -w / 2 - 0.01, L - 0.55, h1 / 2 + 0.01, w / 2 + 0.01);
-    kit.cyl(P.pipe, 0.09, 0.07, 0.35, [L, -0.2, 0], 'y', 10);
-  }
+  if (i === 3) kit.box(P.warn, L - 0.9, -h1 / 2 - 0.01, -w / 2 - 0.01, L - 0.55, h1 / 2 + 0.01, w / 2 + 0.01);
   return kit.build();
 }
 
@@ -240,7 +234,7 @@ function unitCylinder(r: number, y0: number, y1: number, seg: number) {
 // ───────────────────────── rig ─────────────────────────
 
 export function createPump(): PumpRig {
-  const M = truckMaterials();
+  const M = truckSurfaces();
   const P = materials();
   const group = new THREE.Group();
   group.name = 'pump';
@@ -275,10 +269,9 @@ export function createPump(): PumpRig {
     return g;
   });
 
-  // cilindros hidráulicos: camisa (color pluma) y vástago (cromado)
-  const ramGeo = unitCylinder(1, 0, 1, 12);
-  const barrels = new THREE.InstancedMesh(ramGeo, P.boom, 4);
-  const rods = new THREE.InstancedMesh(ramGeo, M.chrome, 4);
+  // cilindros hidráulicos: camisa (color pluma) y vástago (cromado); instancias 4–6 = bielas de rótula
+  const barrels = new THREE.InstancedMesh(tinted(unitCylinder(1, 0, 1, 12), P.boom.color), P.boom.mat, 7);
+  const rods = new THREE.InstancedMesh(tinted(unitCylinder(1, 0, 1, 10), M.chrome.color), M.chrome.mat, 4);
   for (const m of [barrels, rods]) {
     m.castShadow = true;
     m.frustumCulled = false;
@@ -290,8 +283,8 @@ export function createPump(): PumpRig {
 
   // manguera final
   const hose = new THREE.Group();
-  const hoseBody = new THREE.Mesh(unitCylinder(0.065, -1, 0, 10), P.rubber);
-  const hoseCoupling = new THREE.Mesh(unitCylinder(0.09, -0.22, 0, 10), P.pipe);
+  const hoseBody = new THREE.Mesh(tinted(unitCylinder(0.065, -1, 0, 10), P.rubber.color), P.rubber.mat);
+  const hoseCoupling = new THREE.Mesh(tinted(unitCylinder(0.09, -0.22, 0, 10), P.pipe.color), P.pipe.mat);
   hoseBody.castShadow = hoseCoupling.castShadow = true;
   hose.add(hoseBody, hoseCoupling);
   slew.add(hose);
@@ -327,9 +320,9 @@ export function createPump(): PumpRig {
     return { g, s };
   });
   const legParts = [unitCylinder(0.085, 0.05, 1.35, 12), unitCylinder(0.24, 0, 0.05, 16), unitCylinder(0.12, 0.05, 0.14, 12)];
-  const legs = new THREE.InstancedMesh(mergeGeometries(legParts, false), M.steel, 4);
+  const legs = new THREE.InstancedMesh(tinted(mergeGeometries(legParts, false), M.steel.color), M.steel.mat, 4);
   legParts.forEach((g) => g.dispose());
-  const mats = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.08, 0.9).translate(0, 0.04, 0), P.pad, 4);
+  const mats = new THREE.InstancedMesh(tinted(new THREE.BoxGeometry(0.9, 0.08, 0.9).translate(0, 0.04, 0), P.pad.color), P.pad.mat, 4);
   for (const m of [legs, mats]) {
     m.castShadow = true;
     m.receiveShadow = true;
@@ -343,6 +336,7 @@ export function createPump(): PumpRig {
   const _s = new THREE.Vector3();
   const ONE = new THREE.Vector3(1, 1, 1);
   const UP = new THREE.Vector3(0, 1, 0);
+  const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
   const setOutriggers = (k: number) => {
     const a = smooth(k / 0.6);
@@ -389,7 +383,7 @@ export function createPump(): PumpRig {
 
   const setBoom = (k: number, target: THREE.Vector3 | null) => {
     if (target) {
-      group.updateMatrixWorld(true);
+      group.updateWorldMatrix(true, false);
       local.copy(target);
       group.worldToLocal(local);
       hasTarget = true;
@@ -429,6 +423,8 @@ export function createPump(): PumpRig {
       const g = a0 + s * Math.PI / 2 + (th[j] - th[j - 1] - FOLD[j]) / 2;
       _b.set(pts[j].x + 0.55 * Math.cos(g), pts[j].y + 0.55 * Math.sin(g));
       setRam(j, _a, _b);
+      _q.setFromAxisAngle(Z_AXIS, g - Math.PI / 2);
+      barrels.setMatrixAt(3 + j, _m.compose(_v.set(pts[j].x, pts[j].y, 0), _q, _s.set(0.07, 0.58, 0.07)));
     }
     barrels.instanceMatrix.needsUpdate = true;
     rods.instanceMatrix.needsUpdate = true;
