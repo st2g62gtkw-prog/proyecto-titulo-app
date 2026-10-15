@@ -207,6 +207,8 @@ const CORNERS: [number, number][] = [[1, 1], [1, -1], [-1, -1], [-1, 1]];
 const FOOT_TOP = 0.08;
 /** Altura del eje de la roldana del motón sobre el punto de enganche. */
 const SHEAVE_Y = 1.25;
+/** Separación (±x) de los dos ramales del cable de levante. */
+const ROPE_DX = 0.22;
 
 /** Mástil reticulado: 4 cordones, horizontales y diagonales en "N" por cara, uniones y escalera. */
 function buildMast(red: Parts, steel: Parts, H: number) {
@@ -426,14 +428,16 @@ export function createCrane(opts: CraneOptions): CraneRig {
     footing: new THREE.MeshStandardMaterial({ color: '#9b978f', roughness: 0.95 }),
     concrete: new THREE.MeshStandardMaterial({ color: '#c3c0b8', roughness: 0.9 }),
     white: new THREE.MeshStandardMaterial({ color: '#eef0ee', roughness: 0.45 }),
-    glass: new THREE.MeshStandardMaterial({ color: '#4d8486', roughness: 0.1, metalness: 0.55, emissive: '#10292b' }),
+    glass: new THREE.MeshStandardMaterial({ color: '#3b5866', roughness: 0.14, metalness: 0.5, emissive: '#0f1c22' }),
     osb: new THREE.MeshStandardMaterial({ map: osbTexture(), roughness: 0.9 }),
     soil: new THREE.MeshStandardMaterial({ color: '#7a6450', roughness: 1 }),
     sign: new THREE.MeshStandardMaterial({ map: signAtlas(), roughness: 0.6 }),
-    hookBody: new THREE.MeshStandardMaterial({ map: stripesTexture(), roughness: 0.5, metalness: 0.1 }),
+    yellow: new THREE.MeshStandardMaterial({ color: '#f0b20a', roughness: 0.5, metalness: 0.1 }),
+    hookBand: new THREE.MeshStandardMaterial({ map: stripesTexture(), roughness: 0.5, metalness: 0.1 }),
     beacon: new THREE.MeshStandardMaterial({ color: '#7a0d0d', emissive: '#ff2a1a', emissiveIntensity: 0.3 }),
   };
-  (mat.hookBody.map as THREE.Texture).repeat.set(2, 2);
+  // franja de 0,84 × 0,30 m: baldosas cuadradas para que las rayas queden a 45°
+  (mat.hookBand.map as THREE.Texture).repeat.set(2.8, 1);
 
   const group = new THREE.Group();
   group.name = 'grua';
@@ -540,15 +544,22 @@ export function createCrane(opts: CraneOptions): CraneRig {
   // ── motón (gira con la pluma) y gancho
   const block = new THREE.Group();
   slewing.add(block);
-  const body = new Parts(), metal = new Parts();
-  body.box(-0.38, 0.62, -0.2, 0.38, SHEAVE_Y, 0.2);
-  body.cyl(0.38, 0.4, 'z', 0, SHEAVE_Y, 0, 20);
-  metal.cyl(0.11, 0.44, 'z', 0, SHEAVE_Y, 0, 12);
-  metal.box(-0.26, 0.44, -0.17, 0.26, 0.62, 0.17);
+  // dos placas laterales amarillas (franja de peligro abajo) que encierran la roldana
+  const cheeks = new Parts(), band = new Parts(), metal = new Parts();
+  for (const s of [-1, 1]) {
+    const z0 = s * 0.16, z1 = s * 0.23;
+    cheeks.cyl(0.42, 0.07, 'z', 0, SHEAVE_Y, s * 0.195, 22);
+    cheeks.box(-0.42, 0.9, z0, 0.42, SHEAVE_Y, z1);
+    band.box(-0.42, 0.6, z0, 0.42, 0.9, z1);
+  }
+  metal.cyl(0.36, 0.3, 'z', 0, SHEAVE_Y, 0, 20);
+  metal.cyl(0.1, 0.56, 'z', 0, SHEAVE_Y, 0, 12);
+  metal.box(-0.3, 0.44, -0.2, 0.3, 0.6, 0.2);
   metal.cyl(0.06, 0.22, 'y', 0, 0.35, 0, 8);
   const R = 0.17, tube = 0.055;
   metal.geo(new THREE.TorusGeometry(R, tube, 8, 18, Math.PI * 1.6).rotateZ((66 * Math.PI) / 180).translate(0, R - tube, 0));
-  add(block, body, mat.hookBody);
+  add(block, cheeks, mat.yellow);
+  add(block, band, mat.hookBand);
   add(block, metal, mat.dark, 'cast');
 
   // ── cables: huinche → pluma (fijo) y dos ramales verticales carro → motón
@@ -582,8 +593,14 @@ export function createCrane(opts: CraneOptions): CraneRig {
       trolley.position.x = r;
       block.position.set(r, y, 0);
       hook.position.set(Math.cos(slew) * r, y, Math.sin(slew) * r);
+      // dos ramales carro → motón (sin asignar memoria por cuadro)
       const top = jh - 0.45, bot = y + SHEAVE_Y;
-      ropePos.set([r - 0.22, top, 0, r - 0.22, bot, 0, r + 0.22, top, 0, r + 0.22, bot, 0], 12);
+      for (let i = 0; i < 2; i++) {
+        const x = r + (i ? ROPE_DX : -ROPE_DX), o = 12 + i * 6;
+        ropePos[o] = ropePos[o + 3] = x;
+        ropePos[o + 1] = top;
+        ropePos[o + 4] = bot;
+      }
       ropeGeo.attributes.position.needsUpdate = true;
     },
     update(t, dt) {
@@ -592,7 +609,7 @@ export function createCrane(opts: CraneOptions): CraneRig {
       const k = ph < 0.5 ? Math.pow(Math.sin((ph / 0.5) * Math.PI), 0.6) : 0;
       mat.beacon.emissiveIntensity = 0.25 + k * 3.5;
       glowMat.opacity = k;
-      glows.forEach((g) => (g.visible = k > 0.01));
+      for (const g of glows) g.visible = k > 0.01;
       anemo.rotation.y = t * 7;
       // balanceo de la carga: péndulo amortiguado excitado por la aceleración (suavizada) del gancho
       if (!(dt > 0 && dt < 0.25)) return;

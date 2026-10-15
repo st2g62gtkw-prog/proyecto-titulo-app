@@ -21,7 +21,7 @@ import { uTime } from './reveal';
 import type { SiteRig } from './site';
 import type { Stage } from './stage';
 import { buildStructure, type Structure } from './structure';
-import type { createTag } from '../ui/hud';
+import type { createTag } from '../ui/dashboard';
 
 /** Fábricas de las partes que viven en otros módulos (permite probar el mundo por partes). */
 export interface WorldDeps {

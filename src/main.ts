@@ -2,7 +2,7 @@
  * Edificio E · Obra en vivo — punto de entrada.
  */
 import * as THREE from 'three';
-import './ui/hud.css';
+import './ui/dashboard.css';
 import './ui/app.css';
 import { SITE } from './config';
 import { loadBuilding } from './data/building';
@@ -14,7 +14,7 @@ import { createStage } from './scene/stage';
 import { World } from './scene/world';
 import { createSite } from './scene/site';
 import { createCrowd } from './scene/equipment/workers';
-import { createHud, createTag, type HudState, type KPI, type Selection, type ViewMode } from './ui/hud';
+import { createHud, createTag, type HudState, type KPI, type Selection, type ViewMode } from './ui/dashboard';
 
 const app = document.getElementById('app')!;
 const stage = createStage(app);
@@ -233,7 +233,7 @@ function hudState(): HudState {
   else if (a.kind === 'losaHormigon' || a.kind === 'radier') detail = `${a.detail} · ${fmt(k * 100)} %`;
   else if (a.kind !== 'terminaciones') detail = `${a.detail} · Grúa: ${w.state.craneTask}`;
   const lastIdx = feed.findIndex((e) => e.t > T);
-  const recent = (lastIdx === -1 ? feed : feed.slice(0, lastIdx)).slice(-7).reverse();
+  const recent = (lastIdx === -1 ? feed : feed.slice(0, lastIdx)).slice(-5).reverse();
   const lvName = s.levelNames[a.kind.startsWith('losa') ? a.level : a.level];
   return {
     time: T,
@@ -252,7 +252,7 @@ function hudState(): HudState {
     floors: prog.floors.map((f) => ({ ...f, name: f.name === 'Techumbre' ? 'Techo' : f.name })),
     kpis,
     feed: recent.map((e) => ({ t: dayLabel(s.dayAt(e.t)).replace('Día ', 'D'), text: e.text, kind: e.kind })),
-    crew: CREW_ROLES.map((r) => ({ label: r.label, count: r.n })),
+    crew: CREW_ROLES.map((r) => ({ label: r.short, count: r.n })),
   };
 }
 
@@ -290,8 +290,11 @@ let last = performance.now();
 let clock = 0;
 let hudAcc = 0;
 let selAcc = 0;
+let frames = 0;
 function loop(now: number) {
-  const dt = Math.min((now - last) / 1000, 0.1);
+  frames++;
+  // el primer cuadro puede traer una marca de tiempo anterior a `last` (tras compilar shaders)
+  const dt = Math.min(Math.max((now - last) / 1000, 0), 0.1);
   last = now;
   clock += dt;
   const w = world!;
@@ -320,6 +323,9 @@ function loop(now: number) {
   }
   requestAnimationFrame(loop);
 }
+
+// acceso para pruebas automatizadas (capturas)
+Object.defineProperty(window, '__obra', { value: { get frames() { return frames; }, get T() { return T; }, get world() { return world; } } });
 
 start().catch((e) => {
   console.error(e);

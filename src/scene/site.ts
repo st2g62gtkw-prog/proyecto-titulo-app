@@ -3,7 +3,7 @@
  * terreno con talud de corte, caminos de ripio, cierros y portón, instalación de faena,
  * acopios al alcance de la grúa, taller de fierro y el barrio alrededor.
  *
- * Todo lo estático se fusiona por material (≈ 40 mallas en total). Cada acopio y la faena
+ * Todo lo estático se fusiona por material (≈ 45 mallas en total). Cada acopio y la faena
  * son grupos propios con userData.pick para poder seleccionarlos con un clic.
  */
 import * as THREE from 'three';

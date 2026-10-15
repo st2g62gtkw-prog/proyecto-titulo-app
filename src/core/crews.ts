@@ -36,13 +36,13 @@ export interface CrewSetup {
 }
 
 export const CREW_ROLES = [
-  { key: 'enfierradores', label: 'Enfierradores', n: 18 },
-  { key: 'carpinteros', label: 'Carpinteros de moldaje', n: 22 },
-  { key: 'concreteros', label: 'Concreteros', n: 9 },
-  { key: 'grua', label: 'Operador y rigger de grúa', n: 3 },
-  { key: 'jornales', label: 'Jornales', n: 20 },
-  { key: 'mantencion', label: 'Instalaciones y mantención', n: 7 },
-  { key: 'supervision', label: 'Supervisión y prevención', n: 6 },
+  { key: 'enfierradores', label: 'Enfierradores', short: 'Enfierradores', n: 18 },
+  { key: 'carpinteros', label: 'Carpinteros de moldaje', short: 'Carpinteros', n: 22 },
+  { key: 'concreteros', label: 'Concreteros', short: 'Concreteros', n: 9 },
+  { key: 'grua', label: 'Operador y rigger de grúa', short: 'Grúa', n: 3 },
+  { key: 'jornales', label: 'Jornales', short: 'Jornales', n: 20 },
+  { key: 'mantencion', label: 'Instalaciones y mantención', short: 'Instalaciones', n: 7 },
+  { key: 'supervision', label: 'Supervisión y prevención', short: 'Supervisión', n: 6 },
 ] as const;
 
 /** Cuántas personas de cada cuadrilla están en la losa de trabajo según la actividad. */

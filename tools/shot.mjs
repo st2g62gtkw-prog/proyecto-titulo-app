@@ -11,6 +11,10 @@ const logs = [];
 page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 await page.goto(url, { waitUntil: 'load' });
+// WAIT_FRAMES=n espera a que la app haya dibujado n cuadros (window.__obra.frames)
+if (process.env.WAIT_FRAMES) {
+  await page.waitForFunction((n) => (window.__obra?.frames ?? 0) >= n, +process.env.WAIT_FRAMES, { timeout: 240000, polling: 500 });
+}
 await page.waitForTimeout(+wait);
 await page.screenshot({ path: out, timeout: 180000 });
 await browser.close();
