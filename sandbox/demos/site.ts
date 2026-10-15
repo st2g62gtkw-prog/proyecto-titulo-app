@@ -39,5 +39,14 @@ export default function demo(stage: Stage) {
   site.group.traverse((o) => { if ((o as THREE.Mesh).isMesh) meshes++; });
   console.log(`site: ${meshes} mallas`);
 
+  const hide = new URLSearchParams(location.search).get('hide');
+  if (hide) site.group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || m.renderOrder >= 0) return;
+    const mat = m.material as THREE.MeshStandardMaterial;
+    if (hide === '1') o.visible = false;
+    if (hide === 'opaque') { mat.transparent = false; mat.needsUpdate = true; }
+    if (hide === 'noalpha') { m.geometry.deleteAttribute('color'); mat.vertexColors = false; mat.needsUpdate = true; }
+  });
   return (t: number, dt: number) => site.update(t, dt);
 }
