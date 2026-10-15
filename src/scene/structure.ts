@@ -91,6 +91,7 @@ function makeSharedMaterials(clip: THREE.Plane[]) {
     railing: withClip(revealMaterial({ color: C.railing, roughness: 0.5, metalness: 0.5 }, { mode: 'drop', dropHeight: 0.6 })),
     door: withClip(revealMaterial({ color: C.door, roughness: 0.6 }, { mode: 'drop', dropHeight: 0.6 })),
     excavation: withClip(revealMaterial({ color: '#7d5b3b', roughness: 1 }, { mode: 'pop' })),
+    trench: withClip(revealMaterial({ color: '#4c3523', roughness: 1 }, { mode: 'pop' })),
   };
 }
 
@@ -136,6 +137,12 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     g.timing(0, 0, rad[1], rad[1] + 0.2);
     g.extrude(offsetPolygon(levels[0].slab.outer, -1.6), [], -0.2, -0.186, false, false);
     add(g.build(), M.excavation, 'excavacion', 0, 0, rad[1] + 0.3, false, false);
+
+    // zanjas excavadas para las zapatas (se ven oscuras hasta que se hormigonan)
+    const z = new GeoBuilder();
+    z.timing(0, 0, rad[1], rad[1] + 0.2);
+    haWalls(levels[0]).forEach((w) => z.extrude(offsetPolygon(w.poly, -0.32), [], -0.2, -0.183, false, false));
+    add(z.build(), M.trench, 'zanjas', 0, 0, rad[1] + 0.3, false, false);
 
     const f = new GeoBuilder();
     f.uvScale = 1 / 2.4;

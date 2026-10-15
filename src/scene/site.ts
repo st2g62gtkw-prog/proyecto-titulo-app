@@ -803,6 +803,7 @@ function flagTexture() {
 
 function createMaterials() {
   const T__ = <X,>(n: string, f: () => X) => { const t = performance.now(); const r = f(); console.log('tex', n, (performance.now() - t).toFixed(0)); return r; };
+  T__('ply-first', () => plywoodTexture());
   const std = (p: THREE.MeshStandardMaterialParameters) => new THREE.MeshStandardMaterial(p);
   const decal = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 };
   return {
