@@ -69,9 +69,22 @@ const TORSO_H = 0.53; // pelvis → base del cuello
 const SHOULDER_Y = 0.46, SHOULDER_W = 0.245;
 const UPPER_ARM = 0.29;
 const HAND_Y = -0.28; // centro del guante en el antebrazo
-/** Metros recorridos por ciclo de marcha (dos pasos). */
-const STRIDE = 1.5;
 const TAU = Math.PI * 2;
+
+// marcha con pies apoyados: cada bota queda fija en el suelo mientras soporta el cuerpo
+/** Metros reales recorridos por ciclo de marcha (dos pasos) a paso normal. */
+const STRIDE = 1.4;
+/** Fracción del ciclo en que cada pie está apoyado (> 0,5: hay doble apoyo). */
+const DUTY = 0.6;
+/** Cabeceo de la bota al pisar con el talón (punta arriba) y al despegar con la punta. */
+const Q_HEEL = 0.3, Q_TOE = 0.55;
+/** Despeje de la bota a mitad del vuelo (m, sin escalar). */
+const LIFT = 0.07;
+const REACH = (THIGH + SHIN) * 0.995;
+/** Altura máxima de la cadera al caminar (pierna de apoyo casi estirada). */
+const HIP_UP = ANKLE + REACH - 0.006;
+/** Zancada relativa según la rapidez (amp ∈ [0, 1]): a paso lento, pasos cortos. */
+const strideK = (amp: number) => 0.4 + 0.6 * amp;
 
 // ─────────────────────────── geometría ───────────────────────────
 
@@ -260,45 +273,103 @@ const pulse = (c: number, a: number, b: number) => {
   return smooth((c - a) / e) * smooth((b - c) / e);
 };
 
-/** Piernas de la marcha; devuelve sin(fase) para balancear brazos y torso. */
-function walkLegs(o: Float32Array, ph: number, amp: number) {
-  const s = Math.sin(ph);
-  o[THL] = 0.42 * s * amp;
-  o[THR] = -0.42 * s * amp;
-  // la rodilla se dobla mientras la pierna pasa adelante
-  const kl = Math.cos(ph - 0.25);
-  o[KNL] = amp * (0.1 + 0.85 * Math.max(0, kl) ** 2);
-  o[KNR] = amp * (0.1 + 0.85 * Math.max(0, -kl) ** 2);
-  // talón al pisar, punta al despegar
-  o[FTL] = clamp(0.6 * (o[THL] - o[KNL]), -0.5, 0.22);
-  o[FTR] = clamp(0.6 * (o[THR] - o[KNR]), -0.5, 0.22);
+/** Tobillo de una bota apoyada: (x, y) sobre el suelo y cabeceo q (rad, + = punta arriba). */
+const foot = new Float64Array(3);
+/** Bota en el suelo con el tobillo plano en x = fx, girando sobre el talón (q > 0) o la punta (q < 0). */
+function plant(fx: number, q: number) {
+  const p = q > 0 ? HEEL : TOE;
+  foot[0] = fx + p * (1 - Math.cos(q)) - ANKLE * Math.sin(q);
+  foot[1] = ANKLE * Math.cos(q) - p * Math.sin(q);
+  foot[2] = q;
+}
+
+/** Altura máxima de la cadera para que la pierna alcance un tobillo en (x, y). */
+const reach = (x: number, y: number) => y + Math.sqrt(Math.max(0, REACH * REACH - x * x));
+
+/**
+ * Trayectoria de una bota relativa a la cadera (marco local, sin escalar) para la fase u ∈ [0, 1)
+ * (0 = pisa con el talón). S = recorrido de la cadera durante el apoyo. Devuelve la altura máxima
+ * de cadera que permite esta pierna: apoyada, la que alcanza; en la segunda mitad del vuelo baja
+ * suave hacia la del próximo apoyo (la cadera desciende antes de pisar, no de golpe).
+ */
+function footPath(u: number, S: number, amp: number) {
+  const qh = Q_HEEL * amp, qt = Q_TOE * amp;
+  if (u < DUTY) {
+    // apoyo: talón → planta → punta, siempre girando sobre el punto que toca el suelo
+    const k = u / DUTY;
+    plant(S * (0.5 - k), k < 0.15 ? qh * (1 - smooth(k / 0.15)) : -qt * smooth((k - 0.55) / 0.45));
+    return reach(foot[0], foot[1]);
+  }
+  // vuelo: Hermite entre el despegue y el siguiente apoyo, con la velocidad del apoyo en los extremos
+  const k = (u - DUTY) / (1 - DUTY);
+  plant(-S / 2, -qt);
+  const x0 = foot[0], y0 = foot[1];
+  plant(S / 2, qh);
+  const x1 = foot[0], y1 = foot[1];
+  const land = reach(x1, y1);
+  const m = (-S * (1 - DUTY)) / DUTY;
+  const k2 = k * k, k3 = k2 * k, e = smooth(k);
+  const q = -qt + (qh + qt) * e;
+  const y = y0 + (y1 - y0) * e;
+  const low = y + Math.min(HEEL * Math.sin(q), TOE * Math.sin(q)) - ANKLE * Math.cos(q);
+  foot[0] = (2 * k3 - 3 * k2 + 1) * x0 + (k3 - 2 * k2 + k) * m + (3 * k2 - 2 * k3) * x1 + (k3 - k2) * m;
+  foot[1] = y - Math.min(0, low) + LIFT * amp * Math.sin(Math.PI * k);
+  foot[2] = q;
+  return land + (HIP_UP - land) * (1 - smooth((k - 0.5) / 0.5));
+}
+
+/** IK de dos huesos en el plano sagital: tobillo en (dx, dy) respecto de la cadera; la rodilla va adelante. */
+function legIK(o: Float32Array, side: number, dx: number, dy: number, q: number) {
+  const d = Math.min(Math.hypot(dx, dy), REACH);
+  const cosK = (THIGH * THIGH + SHIN * SHIN - d * d) / (2 * THIGH * SHIN);
+  const cosH = (THIGH * THIGH + d * d - SHIN * SHIN) / (2 * THIGH * d);
+  o[THL + side] = Math.atan2(dx, -dy) + Math.acos(clamp(cosH, -1, 1));
+  o[KNL + side] = Math.PI - Math.acos(clamp(cosK, -1, 1));
+  o[FTL + side] = q;
+}
+
+const legs = new Float64Array(6);
+/**
+ * Piernas de la marcha para la fase c (ciclos): pies plantados, cadera a la altura que alcanza la
+ * pierna de apoyo (el vaivén vertical sale solo). Devuelve cuánto adelanta la pierna izquierda (−1…1)
+ * para balancear brazos y torso.
+ */
+function walkLegs(o: Float32Array, c: number, amp: number) {
+  const S = (DUTY * STRIDE * strideK(amp)) / WORKER_SCALE;
+  let h = HIP_UP;
+  for (let side = 0; side < 2; side++) {
+    h = Math.min(h, footPath(fract(c + side * 0.5), S, amp));
+    legs.set(foot, side * 3);
+  }
+  for (let side = 0; side < 2; side++) legIK(o, side, legs[side * 3], legs[side * 3 + 1] - h, legs[side * 3 + 2]);
+  const s = Math.cos(TAU * c) * amp;
   o[SPREAD] = 0.03;
-  o[HIPYAW] = -0.07 * s * amp;
-  o[ROLL] = 0.02 * s * amp;
+  o[HIPYAW] = -0.07 * s;
+  o[ROLL] = 0.02 * s;
   return s;
 }
 
-function poseWalk(o: Float32Array, ph: number, amp: number) {
-  const s = walkLegs(o, ph, amp);
-  o[SHL] = -0.4 * s * amp;
-  o[SHR] = 0.4 * s * amp;
+function poseWalk(o: Float32Array, c: number, amp: number) {
+  const s = walkLegs(o, c, amp);
+  o[SHL] = -0.4 * s;
+  o[SHR] = 0.4 * s;
   o[ELL] = 0.2 + 0.4 * Math.max(0, o[SHL]);
   o[ELR] = 0.2 + 0.4 * Math.max(0, o[SHR]);
   o[ABL] = o[ABR] = 0.09;
   o[LEAN] = 0.06 * amp;
-  o[TWIST] = 0.08 * s * amp;
-  o[HYAW] = -0.06 * s * amp;
+  o[TWIST] = 0.08 * s;
+  o[HYAW] = -0.06 * s;
   o[HPITCH] = 0.04;
 }
 
-function poseCarry(o: Float32Array, ph: number, amp: number) {
-  const s = walkLegs(o, ph, amp * 0.85);
+function poseCarry(o: Float32Array, c: number, amp: number) {
+  const s = walkLegs(o, c, amp);
   o[SHL] = o[SHR] = 0.3;
   o[ELL] = o[ELR] = 1.25;
   o[ABL] = o[ABR] = 0.02;
   o[LEAN] = -0.04;
-  o[TWIST] = 0.025 * s * amp;
-  o[HYAW] = -0.025 * s * amp;
+  o[TWIST] = 0.025 * s;
+  o[HYAW] = -0.025 * s;
   o[HPITCH] = 0.08;
   o[PROP] = 1;
 }
@@ -522,14 +593,15 @@ export function createCrowd(max: number): Crowd {
       for (let j = 0; j < 4; j++) W[wi + j] += ((j === a ? 1 : 0) - W[wi + j]) * k;
       const dw = Math.abs(p.walk - lastWalk[i]);
       amp[i] += (Math.min(1, dw / dt / 0.7) - amp[i]) * (1 - Math.exp(-dt * 6));
-      gait[i] += Math.min(dw, 2.5 * dt);
+      // fase en ciclos: avanza con la distancia real (pies plantados) hasta un trote de 2,5 m/s
+      gait[i] += Math.min(dw, 2.5 * dt) / (STRIDE * strideK(amp[i]));
       const dh = p.heading - dir[i];
       dir[i] += Math.atan2(Math.sin(dh), Math.cos(dh)) * (1 - Math.exp(-dt * 10));
     } else {
       // primer cuadro, salto de la línea de tiempo o tiempo fijo: sin suavizado
       for (let j = 0; j < 4; j++) W[wi + j] = j === a ? 1 : 0;
       amp[i] = 1;
-      gait[i] = p.walk;
+      gait[i] = p.walk / STRIDE;
       dir[i] = p.heading;
     }
     lastT[i] = p.t;
@@ -537,7 +609,7 @@ export function createCrowd(max: number): Crowd {
     ready[i] = 1;
 
     // pose mezclada
-    const ph = (TAU * gait[i]) / STRIDE;
+    const ph = gait[i];
     F.fill(0);
     for (let j = 0; j < 4; j++) {
       const w = W[wi + j];

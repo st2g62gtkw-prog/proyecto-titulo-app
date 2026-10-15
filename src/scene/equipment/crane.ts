@@ -529,15 +529,21 @@ export function createCrane(opts: CraneOptions): CraneRig {
   // ── carro
   const trolley = new THREE.Group();
   slewing.add(trolley);
+  // bastidor abierto: ruedas sobre los cordones inferiores, colgadores por fuera y roldanas abajo
   const tr = new Parts(), trDark = new Parts();
   for (const s of [-1, 1]) {
-    tr.box(-0.6, jh + 0.14, s * 0.43, 0.6, jh + 0.3, s * 0.67);
-    tr.box(-0.6, jh + 0.3, s * 0.4, 0.6, jh + 0.36, s * 0.78);
-    tr.box(-0.55, jh - 0.48, s * 0.7, 0.55, jh + 0.36, s * 0.78);
-    for (const x of [-0.38, 0.38]) trDark.cyl(0.09, 0.14, 'z', x, jh + 0.2, s * 0.55, 10);
+    tr.box(-0.62, jh + 0.3, s * 0.5, 0.62, jh + 0.38, s * 0.8);
+    for (const x of [-0.5, 0.5]) {
+      tr.box(x - 0.05, jh - 0.66, s * 0.7, x + 0.05, jh + 0.3, s * 0.8);
+      trDark.cyl(0.08, 0.1, 'z', x * 0.84, jh + 0.22, s * 0.55, 10);
+    }
+    tr.box(-0.74, jh - 0.66, s * 0.66, 0.74, jh - 0.56, s * 0.8);
   }
-  tr.box(-0.55, jh - 0.55, -0.78, 0.55, jh - 0.42, 0.78);
-  for (const x of [-0.4, 0.4]) trDark.cyl(0.18, 0.09, 'z', x, jh - 0.45, 0, 14);
+  for (const x of [-0.68, 0.68]) tr.box(x - 0.06, jh - 0.66, -0.66, x + 0.06, jh - 0.56, 0.66);
+  for (const x of [-0.4, 0.4]) {
+    trDark.cyl(0.18, 0.1, 'z', x, jh - 0.45, 0, 14);
+    trDark.cyl(0.035, 1.4, 'z', x, jh - 0.45, 0, 6);
+  }
   add(trolley, tr, mat.red);
   add(trolley, trDark, mat.dark, 'cast');
 
@@ -605,24 +611,25 @@ export function createCrane(opts: CraneOptions): CraneRig {
     },
     update(t, dt) {
       // baliza: destello suave ~0,7 s encendida / 0,7 s apagada
-      const ph = (t % 1.4) / 1.4;
+      const ph = (((t % 1.4) + 1.4) % 1.4) / 1.4;
       const k = ph < 0.5 ? Math.pow(Math.sin((ph / 0.5) * Math.PI), 0.6) : 0;
       mat.beacon.emissiveIntensity = 0.25 + k * 3.5;
       glowMat.opacity = k;
       for (const g of glows) g.visible = k > 0.01;
       anemo.rotation.y = t * 7;
       // balanceo de la carga: péndulo amortiguado excitado por la aceleración (suavizada) del gancho
-      if (!(dt > 0 && dt < 0.25)) return;
-      tmp.subVectors(hook.position, sway.prev).divideScalar(dt);
+      const ok = dt > 0 && dt < 0.25;
+      if (ok) tmp.subVectors(hook.position, sway.prev).divideScalar(dt);
       sway.prev.copy(hook.position);
+      if (!ok) return;
       if (tmp.lengthSq() > 900) tmp.copy(sway.vel); // salto de la línea de tiempo: sin impulso
       const a = 1 - Math.exp(-dt / 0.15);
       const vx = sway.vel.x + (tmp.x - sway.vel.x) * a, vz = sway.vel.z + (tmp.z - sway.vel.z) * a;
       const ax = (vx - sway.vel.x) / dt, az = (vz - sway.vel.z) / dt;
       sway.vel.set(vx, 0, vz);
-      const lim = 0.06 * rig.swing;
-      const tx = THREE.MathUtils.clamp((az / 9.81) * rig.swing, -lim, lim);
-      const tz = THREE.MathUtils.clamp((-ax / 9.81) * rig.swing, -lim, lim);
+      const s = Math.max(0, rig.swing), lim = 0.06 * s;
+      const tx = THREE.MathUtils.clamp((az / 9.81) * s, -lim, lim);
+      const tz = THREE.MathUtils.clamp((-ax / 9.81) * s, -lim, lim);
       const w = 1.9, z = 0.12;
       sway.angVel.x += (w * w * (tx - sway.ang.x) - 2 * z * w * sway.angVel.x) * dt;
       sway.angVel.y += (w * w * (tz - sway.ang.y) - 2 * z * w * sway.angVel.y) * dt;

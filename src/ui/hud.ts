@@ -218,10 +218,11 @@ function counter(el: HTMLElement): Setter<string> {
       el.textContent = v;
       return;
     }
-    from = prev;
+    from = shown = prev;
     to = n;
     dec = (v.split(',')[1] ?? '').length;
     t0 = performance.now();
+    el.textContent = fmtEs(from, dec);
     tweens.add(step);
     if (!tweenRaf) tweenRaf = requestAnimationFrame(runTweens);
   };
@@ -276,14 +277,15 @@ function buildBrand() {
     'hud-card hud-brand',
     `<div class="hb-logo">${LOGO}</div>
     <div class="hb-txt">
-      <div class="hb-title"><span class="d-only">Espacio Las Tablas · </span><em>Edificio E</em></div>
-      <div class="hb-sub"><span class="d-only">Curauma, Valparaíso · Obra gruesa</span><span class="m-only">Las Tablas · Curauma</span></div>
+      <div class="hb-kick">Espacio Las Tablas</div>
+      <div class="hb-title">Edificio E</div>
+      <div class="hb-sub">Curauma, Valparaíso · Obra gruesa</div>
     </div>
     <div class="hb-live">
       <span class="live" data-r="live"><i></i><b data-r="liveTxt">EN VIVO</b></span>
       <span class="hb-day mono" data-r="day">—</span>
     </div>
-    <div class="lvl lvl-sm" data-r="lvl">—</div>`,
+    <div class="lvl" data-r="lvl">—</div>`,
   );
   const r = refs(el);
   const day = text(r.day), lvl = text(r.lvl), liveTxt = text(r.liveTxt);
@@ -485,9 +487,13 @@ function buildFeed() {
   let cached: FeedItem[] = [];
   let byKey = new Map<string, HTMLElement>();
   const make = (it: FeedItem) => {
-    const li = h('li', `fi k-${it.kind}`, `<span class="fi-ic">${icon(it.kind)}</span><div class="fi-b"><div class="fi-t"></div><div class="fi-time mono"></div></div>`);
+    const li = h('li', `fi k-${it.kind}`, `<span class="fi-ic">${icon(it.kind)}</span><div class="fi-t"></div><div class="fi-time mono"><b></b><span></span></div>`);
+    // "D35 · 10:20" → día arriba y hora abajo
+    const [day, hour = ''] = it.t.split(' · ');
     (li.querySelector('.fi-t') as HTMLElement).textContent = it.text;
-    (li.querySelector('.fi-time') as HTMLElement).textContent = it.t;
+    (li.querySelector('.fi-time b') as HTMLElement).textContent = day;
+    (li.querySelector('.fi-time span') as HTMLElement).textContent = hour;
+    li.title = `${it.t} · ${it.text}`;
     li.addEventListener('animationend', () => li.classList.remove('is-new'));
     return li;
   };
@@ -749,24 +755,34 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
     });
     (Object.keys(panes) as SheetTab[]).forEach((k) => panes[k].classList.toggle('is-on', k === tab));
   }
-  let dragY: number | null = null;
-  let swallowClick = false;
-  sh.head.addEventListener('pointerdown', (e) => (dragY = e.clientY));
-  sh.head.addEventListener('pointerup', (e) => {
-    if (dragY === null) return;
+  // deslizar la cabecera: arriba abre, abajo cierra; el clic que sigue a un deslizamiento se descarta
+  let dragY = 0, dragMoved = false, swallowUntil = 0;
+  const onDragMove = (e: PointerEvent) => {
+    if (Math.abs(e.clientY - dragY) > 8) dragMoved = true;
+  };
+  const onDragEnd = (e: PointerEvent) => {
+    removeEventListener('pointermove', onDragMove);
+    removeEventListener('pointerup', onDragEnd);
+    removeEventListener('pointercancel', onDragEnd);
+    if (!dragMoved || e.type === 'pointercancel') return;
+    swallowUntil = performance.now() + 350;
     const dy = e.clientY - dragY;
-    dragY = null;
-    if (Math.abs(dy) > 24) {
-      swallowClick = true;
-      setSheet(dy < 0);
-    }
+    if (Math.abs(dy) > 24) setSheet(dy < 0);
+  };
+  sh.head.addEventListener('pointerdown', (e) => {
+    dragY = e.clientY;
+    dragMoved = false;
+    addEventListener('pointermove', onDragMove);
+    addEventListener('pointerup', onDragEnd);
+    addEventListener('pointercancel', onDragEnd);
   });
-  sh.head.addEventListener(
+  addEventListener(
     'click',
     (e) => {
-      if (!swallowClick) return;
-      swallowClick = false;
-      e.stopPropagation();
+      if (performance.now() < swallowUntil) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
     },
     true,
   );
@@ -805,8 +821,9 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
   root.appendChild(el);
 
   const mq = matchMedia(MOBILE_QUERY);
+  let mobile = false;
   const layout = () => {
-    const mobile = mq.matches;
+    mobile = mq.matches;
     el.classList.toggle('is-mobile', mobile);
     if (mobile) {
       el.prepend(brand.el);
@@ -870,11 +887,13 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
       kpis.update(s);
       crew.update(s);
       feed.update(s);
-      const active = s.steps.find((x) => x.state === 'active');
-      snPhase(s.phaseTitle);
-      snAct(s.activityTitle);
-      snPct(active ? active.progress : null);
-      snK(active ? active.progress : 0);
+      if (mobile) {
+        const active = s.steps.find((x) => x.state === 'active');
+        snPhase(s.phaseTitle);
+        snAct(s.activityTitle);
+        snPct(active ? active.progress : null);
+        snK(active ? active.progress : 0);
+      }
     },
     setMarkers(m) {
       markers = [...m]

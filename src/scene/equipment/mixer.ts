@@ -86,7 +86,7 @@ export function truckSurfaces(): TruckSurfaces {
     amber: glow('#ffb238'),
     red: glow('#e0281e'),
     lamp: glow('#fff6dc'),
-    glass: new THREE.MeshStandardMaterial({ color: '#1f2c37', roughness: 0.1, metalness: 0.4 }),
+    glass: new THREE.MeshStandardMaterial({ color: '#2c3e4f', roughness: 0.12, metalness: 0.3 }),
     concrete: new THREE.MeshStandardMaterial({ color: '#8a8a83', roughness: 0.3, metalness: 0.05 }),
     tire: new THREE.MeshStandardMaterial({ color: '#1c1d1f', roughness: 0.88 }),
   };
@@ -275,13 +275,14 @@ export function createWheels(spots: WheelSpot[]): WheelSet {
   }
   const roll = (distance: number) => {
     const a = distance / WHEEL_R;
-    spots.forEach((s, i) => {
+    for (let i = 0; i < spots.length; i++) {
+      const s = spots[i];
       const side = Math.sign(s.z) || 1;
       const zOut = s.z + (s.dual ? side * DUAL_OFF : 0);
       spin.setFromAxisAngle(Z, side > 0 ? -a : a);
       if (side < 0) spin.premultiply(flip);
       rims.setMatrixAt(i, _m.compose(_p.set(s.x, WHEEL_R, zOut), spin, _s.set(1, 1, 1)));
-    });
+    }
     rims.instanceMatrix.needsUpdate = true;
   };
   roll(0);

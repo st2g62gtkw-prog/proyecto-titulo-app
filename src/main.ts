@@ -2,7 +2,7 @@
  * Edificio E · Obra en vivo — punto de entrada.
  */
 import * as THREE from 'three';
-import './ui/dashboard.css';
+import './ui/hud.css';
 import './ui/app.css';
 import { SITE } from './config';
 import { loadBuilding } from './data/building';
@@ -14,7 +14,7 @@ import { createStage } from './scene/stage';
 import { World } from './scene/world';
 import { createSite } from './scene/site';
 import { createCrowd } from './scene/equipment/workers';
-import { createHud, createTag, type HudState, type KPI, type Selection, type ViewMode } from './ui/dashboard';
+import { createHud, createTag, type HudState, type KPI, type Selection, type ViewMode } from './ui/hud';
 
 const app = document.getElementById('app')!;
 const stage = createStage(app);
@@ -61,7 +61,7 @@ function setView(v: ViewMode) {
     if (v === 'iso') {
       c.target.copy(ISO_TARGET);
       stage.setIsoView();
-      stage.camera.zoom = window.innerWidth < 820 ? 0.9 : 1.15;
+      stage.camera.zoom = window.innerWidth < 820 ? 0.85 : 1.05;
       stage.camera.updateProjectionMatrix();
     }
   }

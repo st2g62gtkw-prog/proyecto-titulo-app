@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Sandbox · tablero</title>
+  <link rel="stylesheet" href="../src/ui/hud.css" />
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1220; overscroll-behavior: none; }
+    /* fondo que reemplaza a la vista 3D */
+    #app {
+      position: fixed; inset: 0; touch-action: none;
+      background:
+        linear-gradient(30deg, rgba(255,255,255,.03) 1px, transparent 1px) 0 0 / 56px 32px,
+        linear-gradient(150deg, rgba(255,255,255,.03) 1px, transparent 1px) 0 0 / 56px 32px,
+        radial-gradient(1100px 700px at 50% 55%, #1d2c44 0%, #111b2d 50%, #080d17 100%);
+    }
+    body.light #app {
+      background:
+        linear-gradient(30deg, rgba(90,70,40,.08) 1px, transparent 1px) 0 0 / 56px 32px,
+        linear-gradient(150deg, rgba(90,70,40,.08) 1px, transparent 1px) 0 0 / 56px 32px,
+        linear-gradient(180deg, #cfdbe4 0%, #d7d0c2 48%, #c8a77c 100%);
+    }
+    .stand-in { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .demo-tags { position: absolute; inset: 0; pointer-events: none; }
+    .demo-tags > * { position: absolute; left: 0; top: 0; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <svg class="stand-in" id="standin" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="demo-tags" id="tags"></div>
+  </div>
+  <script type="module" src="./hud-demo.ts"></script>
+</body>
+</html>

@@ -23,12 +23,12 @@ export default function demo(stage: Stage) {
   );
   building.position.set((-24 + 26.5) / 2, 9, 0);
   building.castShadow = true;
-  stage.scene.add(building);
 
   const mast = new THREE.Mesh(new THREE.BoxGeometry(1.6, SITE.crane.mastHeight, 1.6), new THREE.MeshStandardMaterial({ color: '#c62f22' }));
   mast.position.set(SITE.crane.x, SITE.groundY + SITE.crane.mastHeight / 2, SITE.crane.z);
   mast.castShadow = true;
-  stage.scene.add(mast);
+  // &bld=0 oculta los marcadores del edificio y la grúa (para ver el talud detrás)
+  if (new URLSearchParams(location.search).get('bld') !== '0') stage.scene.add(building, mast);
 
   // marcas de los puntos de enganche de la grúa
   for (const p of Object.values(site.anchors)) {

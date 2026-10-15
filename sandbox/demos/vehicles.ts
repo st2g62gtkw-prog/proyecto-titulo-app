@@ -40,6 +40,19 @@ export default function demo(stage: Stage) {
   const hoseStream = createConcreteStream();
   scene.add(hoseStream.group);
 
+  // ── 2º mixer: retrocede hasta la tolva de la bomba (t < 4 s), baja la canaleta y descarga
+  const feeder = createMixer();
+  feeder.group.rotation.y = Math.PI;
+  scene.add(feeder.group);
+  pump.group.updateMatrixWorld(true);
+  const hopper = pump.hopper.getWorldPosition(new THREE.Vector3());
+  feeder.setChute(1);
+  feeder.group.updateMatrixWorld(true);
+  const tipLocal = feeder.group.worldToLocal(feeder.chuteTip.getWorldPosition(new THREE.Vector3()));
+  const feederX = hopper.x + tipLocal.x; // girado en π: la canaleta queda hacia +x
+  const feederStream = createConcreteStream();
+  scene.add(feederStream.group);
+
   const rect = { x0: -10, x1: 10, z0: -25, z1: -15, y: 15, rows: 6 };
   const path: THREE.Vector3[] = [];
   for (let r = 0; r < rect.rows; r++) {
@@ -81,6 +94,15 @@ export default function demo(stage: Stage) {
   return (t: number) => {
     mixer.setDrumSpin(t * 2.4);
     mixerStream.set(mixer.chuteTip.getWorldPosition(hose), toCapacho, 1, t);
+
+    const back = Math.max(0, 4 - t);
+    feeder.group.position.set(feederX - 0.8 * back * back, G, hopper.z);
+    feeder.setWheels(0.8 * back * back);
+    feeder.setChute((t - 4) / 1.2);
+    feeder.setDrumSpin(-t * 2.2);
+    const feeding = t > 5.2;
+    feeder.setDischarge(feeding);
+    feederStream.set(feeder.chuteTip.getWorldPosition(outlet), hopper, feeding ? 0.8 : 0, t);
 
     const k = Math.min(t / 6, 1);
     pump.setBoom(k, sample(Math.max(0, t - 6) * 2.5));

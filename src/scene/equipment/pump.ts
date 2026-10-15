@@ -13,6 +13,7 @@ import { PartKit, createWheels, markPickable, paint, smooth, tinted, truckSurfac
 export interface PumpRig {
   group: THREE.Group;
   length: number;
+  /** Alcance nominal (vertical) de la pluma, 42 m; el alcance horizontal desde la torreta es ≈ 38 m. */
   boomReach: number;
   setOutriggers(k: number): void;
   setBoom(k: number, target: THREE.Vector3 | null): void;
@@ -46,9 +47,12 @@ const T1_NAT = deg(80);
 const T4_NAT = deg(-78);
 const T1_MIN = deg(8);
 
+/** Tolva trasera: centro x, cota del borde (bajo la canaleta del mixer, ~1,3 m), alto y forma. */
+const HOPPER = { x: -5.72, top: 1.24, h: 0.52, r: 1.0, sx: 0.5 };
 const FRONT_PIVOT = { x: 2.55, y: 1.62, z: 1.0, len: 3.75 };
 const FRONT_SWING = deg(125);
-const REAR = { x: -4.775, y: 1.21, z: 1.45, ext: 2.75 };
+/** Estabilizadores traseros telescópicos: la viga sale 2,0 m pero su extremo interior queda en la caja. */
+const REAR = { x: -4.775, y: 1.21, z: 1.45, ext: 2.0, inner: -1.0 };
 
 const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const win = (k: number, w: XY) => smooth((k - w[0]) / (w[1] - w[0]));
@@ -174,9 +178,10 @@ function buildTruck(kit: PartKit) {
   kit.box(P.boom, -2.2, 1.42, -0.45, -1.75, 1.95, 0.45);
   kit.box(P.boom, -4.85, 1.42, -0.42, -4.45, 1.85, 0.42);
   // tolva trasera con parrilla
-  kit.funnel(M.grime, M.dark, 0.62, 0.38, 0.55, [-5.8, 1.12, 0], [0, 0, 0], 0.72);
-  for (let i = 0; i < 6; i++) kit.box(M.steel, -6.06 + i * 0.1, 1.38, -0.42, -6.04 + i * 0.1, 1.41, 0.42);
-  kit.box(M.dark, -5.6, 0.8, -0.4, -5.3, 1.0, 0.4);
+  kit.funnel(M.grime, M.dark, HOPPER.r, HOPPER.r * 0.5, HOPPER.h, [HOPPER.x, HOPPER.top - HOPPER.h / 2, 0], [0, 0, 0], HOPPER.sx);
+  for (let i = 0; i < 6; i++) kit.box(M.steel, HOPPER.x - 0.27 + i * 0.1, HOPPER.top, -0.64, HOPPER.x - 0.25 + i * 0.1, HOPPER.top + 0.03, 0.64);
+  kit.box(M.steel, HOPPER.x - 0.34, HOPPER.top, -0.02, HOPPER.x + 0.3, HOPPER.top + 0.035, 0.02);
+  kit.box(M.dark, -5.45, 0.75, -0.4, -5.3, 1.0, 0.4);
   kit.box(M.dark, -5.32, 0.42, -1.1, -5.2, 0.62, 1.1);
   // tubería de impulsión hasta la torreta
   kit.cyl(P.pipe, 0.07, 0.07, 8.1, [-1.15, 1.55, 0.68], 'x', 10);
@@ -252,7 +257,7 @@ export function createPump(): PumpRig {
   group.add(wheels.group);
 
   const hopper = new THREE.Object3D();
-  hopper.position.set(-5.8, 1.4, 0);
+  hopper.position.set(HOPPER.x, HOPPER.top - 0.05, 0);
   group.add(hopper);
 
   // ── torreta y pluma
@@ -308,7 +313,7 @@ export function createPump(): PumpRig {
   const rear = [1, -1].map((s) => {
     const k = new PartKit();
     const zz = (a: number, b: number) => (s > 0 ? [a, b] : [-b, -a]);
-    const [z0, z1] = zz(-1.2, REAR.z - 0.1);
+    const [z0, z1] = zz(REAR.inner, REAR.z + 0.1);
     k.box(P.boom, -0.19, -0.14, z0, 0.19, 0.14, z1);
     k.cyl(P.boom, 0.13, 0.13, 1.2, [0, 0.3, s * REAR.z], 'y', 14);
     k.cyl(M.dark, 0.09, 0.09, 0.08, [0, 0.94, s * REAR.z], 'y', 10);
@@ -342,19 +347,18 @@ export function createPump(): PumpRig {
     const a = smooth(k / 0.6);
     const j = smooth((k - 0.55) / 0.45);
     const pad = smooth((a - 0.8) / 0.2);
-    const feet: [number, number, number][] = [];
-    for (const f of front) {
-      const rot = Math.PI + f.s * a * FRONT_SWING;
-      f.g.rotation.y = rot;
-      feet.push([FRONT_PIVOT.x + FRONT_PIVOT.len * Math.cos(rot), f.s * FRONT_PIVOT.z - FRONT_PIVOT.len * Math.sin(rot), THREE.MathUtils.lerp(1.0, 0.08, j)]);
-    }
-    for (const r of rear) {
-      r.g.position.z = r.s * a * REAR.ext;
-      feet.push([REAR.x, r.s * (REAR.z + a * REAR.ext), THREE.MathUtils.lerp(0.7, 0.08, j)]);
-    }
-    feet.forEach(([x, z, y], i) => {
+    const foot = (i: number, x: number, y: number, z: number) => {
       legs.setMatrixAt(i, _m.compose(_v.set(x, y, z), _q.identity(), ONE));
       mats.setMatrixAt(i, _m.compose(_v.set(x, 0, z), _q, _s.set(pad + 1e-3, 1, pad + 1e-3)));
+    };
+    front.forEach((f, i) => {
+      const rot = Math.PI + f.s * a * FRONT_SWING;
+      f.g.rotation.y = rot;
+      foot(i, FRONT_PIVOT.x + FRONT_PIVOT.len * Math.cos(rot), THREE.MathUtils.lerp(1.0, 0.08, j), f.s * FRONT_PIVOT.z - FRONT_PIVOT.len * Math.sin(rot));
+    });
+    rear.forEach((r, i) => {
+      r.g.position.z = r.s * a * REAR.ext;
+      foot(2 + i, REAR.x, THREE.MathUtils.lerp(0.85, 0.08, j), r.s * (REAR.z + a * REAR.ext));
     });
     legs.instanceMatrix.needsUpdate = true;
     mats.instanceMatrix.needsUpdate = true;
@@ -368,6 +372,8 @@ export function createPump(): PumpRig {
   const local = new THREE.Vector3();
   let hasTarget = false;
   let yawT = Math.PI / 2;
+  /** Giro pendiente desde la posición de transporte; se mantiene continuo entre llamadas. */
+  let yawDelta = 0;
   const _a = new THREE.Vector2(), _b = new THREE.Vector2(), _dir = new THREE.Vector3();
 
   const setRam = (i: number, a: THREE.Vector2, b: THREE.Vector2) => {
@@ -403,7 +409,13 @@ export function createPump(): PumpRig {
       th[i] = (i === 0 ? 0 : prev) + q;
       prev = th[i];
     }
-    slew.rotation.y = YAW_FOLD + win(k, WIN_YAW) * wrapPi(yawT - YAW_FOLD);
+    // sentido de giro estable: en los extremos (plegada / desplegada) vale el camino corto;
+    // a medio giro se sigue el representante más cercano al anterior, sin saltos de 2π
+    const wy = win(k, WIN_YAW);
+    let d = wrapPi(yawT - YAW_FOLD);
+    if (wy > 0 && wy < 1) d += 2 * Math.PI * Math.round((yawDelta - d) / (2 * Math.PI));
+    yawDelta = d;
+    slew.rotation.y = YAW_FOLD + wy * d;
 
     pts[0].set(J0[0], J0[1]);
     for (let i = 0; i < 4; i++) {
