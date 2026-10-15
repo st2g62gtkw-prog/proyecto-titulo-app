@@ -9,7 +9,7 @@
  * Modos de aparición:
  *   rise   el elemento crece de abajo hacia arriba (fierro de muros, hormigón en moldaje)
  *   drop   el elemento baja desde arriba hasta su lugar (moldajes que coloca la grúa)
- *   sweep  la losa se llena en franjas en zig-zag, como avanza la bomba
+ *   sweep  la losa se llena en franjas en zig-zag, como avanza la bomba (strips = 0: barrido lineal en x)
  *   pop    aparece de golpe en in0
  *
  * Retiro: entre out0 y out1 el elemento se desplaza `outLift` (p. ej. sube con la grúa)
@@ -39,6 +39,8 @@ export interface RevealOptions {
   cap?: boolean;
   /** Parámetros de barrido en zig-zag (modo sweep): rectángulo xz y número de franjas. */
   sweep?: { xmin: number; xmax: number; zmin: number; zmax: number; strips: number; dir?: 1 | -1 };
+  /** Si se define, la ventana de retiro (out0..out1) pinta el elemento de este color en vez de retirarlo. */
+  paint?: THREE.ColorRepresentation;
 }
 
 const WET = new THREE.Color('#5d6064');
@@ -54,6 +56,7 @@ function makeUniforms(o: RevealOptions) {
     uSweep: { value: new THREE.Vector4(s.xmin, s.xmax, s.zmin, s.zmax) },
     uStrips: { value: s.strips },
     uSweepDir: { value: s.dir ?? 1 },
+    uPaint: { value: new THREE.Color(o.paint ?? '#dcdad4') },
   };
 }
 
@@ -66,6 +69,7 @@ uniform vec3 uWet;
 uniform vec4 uSweep;
 uniform float uStrips;
 uniform float uSweepDir;
+uniform vec3 uPaint;
 varying vec3 vRvWorld;
 varying vec4 vRvT;
 varying vec2 vRvBox;
@@ -75,6 +79,7 @@ varying float vRvHide;
 float rvSweepFrac(vec2 xz) {
   float fx = clamp((xz.x - uSweep.x) / max(uSweep.y - uSweep.x, 1e-3), 0.0, 0.9999);
   if (uSweepDir < 0.0) fx = 0.9999 - fx;
+  if (uStrips < 0.5) return fx;
   float fz = clamp((xz.y - uSweep.z) / max(uSweep.w - uSweep.z, 1e-3), 0.0, 1.0);
   float strip = floor(fx * uStrips);
   float along = mod(strip, 2.0) < 0.5 ? fz : 1.0 - fz;
@@ -91,15 +96,21 @@ const VERTEX_BODY = /* glsl */ `
   vRvT = aT;
   vRvBox = aBox;
   vRvHide = 0.0;
-  if (uT < aT.x || uT >= aT.w) vRvHide = 1.0;
+  #ifdef REVEAL_PAINT
+    if (uT < aT.x) vRvHide = 1.0;
+  #else
+    if (uT < aT.x || uT >= aT.w) vRvHide = 1.0;
+  #endif
   #ifdef REVEAL_DROP
     float rvIn = clamp((uT - aT.x) / max(aT.y - aT.x, 1e-4), 0.0, 1.0);
     rvIn = 1.0 - pow(1.0 - rvIn, 3.0);
     transformed.y += uDrop * (1.0 - rvIn);
   #endif
-  float rvOut = clamp((uT - aT.z) / max(aT.w - aT.z, 1e-4), 0.0, 1.0);
-  rvOut = rvOut * rvOut * (3.0 - 2.0 * rvOut);
-  transformed += uOutLift * rvOut;
+  #ifndef REVEAL_PAINT
+    float rvOut = clamp((uT - aT.z) / max(aT.w - aT.z, 1e-4), 0.0, 1.0);
+    rvOut = rvOut * rvOut * (3.0 - 2.0 * rvOut);
+    transformed += uOutLift * rvOut;
+  #endif
   vRvWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
 `;
 
@@ -126,6 +137,10 @@ const FRAGMENT_CONCRETE = /* glsl */ `
     float rvWetK = 1.0 - smoothstep(0.0, uCure, uT - rvReveal);
     diffuseColor.rgb = mix(diffuseColor.rgb, uWet, rvWetK * 0.9);
   #endif
+  #ifdef REVEAL_PAINT
+    float rvPaint = smoothstep(vRvT.z, vRvT.w, uT);
+    diffuseColor.rgb = mix(diffuseColor.rgb, uPaint, rvPaint);
+  #endif
 `;
 
 function patchVertex(src: string) {
@@ -147,6 +162,7 @@ function defines(o: RevealOptions): Record<string, string> {
   if (o.mode === 'sweep') d.REVEAL_SWEEP = '';
   if (o.concrete) d.REVEAL_CONCRETE = '';
   if (o.cap) d.REVEAL_CAP = '';
+  if (o.paint !== undefined) d.REVEAL_PAINT = '';
   return d;
 }
 

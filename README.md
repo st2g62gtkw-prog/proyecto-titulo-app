@@ -1,25 +1,73 @@
 # proyecto-titulo-app
 
-## App del proyecto de título — Visión
+Simulación 3D isométrica de la construcción del **Edificio E** — Condominio Espacio Las Tablas (Curauma, Valparaíso).
 
-### Qué es
+La app muestra cómo crece el edificio con el **método tradicional de hormigón armado**, piso por piso y con la logística real de la obra:
 
-Una app web para el proyecto de título (condominio **Espacio Las Tablas**, Curauma). Inspirada en el reel de WareTrack (cuenta darkvex.ai de Instagram).
+1. **Muros:** enfierradura → moldaje metálico (lo sube la grúa desde el acopio) → llega el mixer → hormigonado con **capacho** colgado de la grúa → desmolde.
+2. **Losa:** puntales y vigas H20 → placas fenólicas → enfierradura → llega el **camión bomba**, despliega estabilizadores y pluma, y hormigona la losa en franjas mientras los mixers alimentan la tolva.
+3. Al terminar la obra gruesa: tabiquería, ventanas de PVC, barandas y pintura de fachada.
 
-### Cómo se tiene que ver y sentir
+## Cómo se ve y se usa
 
-- Vista isométrica en 3D de la obra, navegable: se puede hacer clic y arrastrar para moverse por el mapa, además de acercar y alejar (zoom).
-- Muy animada e interactiva: los elementos reaccionan y tienen movimiento, no es una imagen estática.
-- Al hacer clic en un elemento (por ejemplo el Edificio E) aparecen sus datos en un panel lateral.
-- Paneles de información alrededor con cifras y estado, estilo tablero.
+- Vista isométrica navegable: arrastrar para moverse, rueda o pellizco para zoom y botón derecho para rotar.
+- Línea de tiempo con play/pausa, velocidades ×1 a ×8 y marcas por piso.
+- Al hacer clic en un piso, la grúa, un mixer, la bomba, los acopios o la faena se abren sus datos en un panel lateral.
+- El tablero muestra la etapa actual, el avance de cada piso, los indicadores (hormigón, acero, moldaje, mixers y capachos) y la bitácora de obra.
+- Botones: Vista iso · Seguir la obra · Planta · Etiquetas · Corte (corta el edificio para ver el interior).
 
-### El corazón: logística y construcción en movimiento
+## De dónde salen los datos
 
-- Se ve cómo todo se mueve: los materiales llegando, la grúa operando, los trabajadores.
-- El edificio crece etapa por etapa: se muestra la obra evolucionando en el tiempo.
+Todo viene de la carpeta **Proyecto de titulo 07-10** en Drive:
 
-### Plan
+| Dato | Fuente |
+|---|---|
+| Geometría de losas, muros, ventanas, barandas y puertas | `Modelo/Edificio-E.ifc` → `tools/ifc_to_json.py` → `public/data/` |
+| Muros de hormigón armado e=20 vs. tabiquería | espesor de cada muro en el IFC (≥ 15 cm = H.A.) |
+| Hormigón, acero y moldaje por piso | *Cubicación Edificio E – respaldos (oct 2026)* |
+| Programa por piso, superficies y deptos | *CATALOGO.md* (láminas L38–L40) |
+| Grúa, mixer, faena, acopios, 85 trabajadores | fotos de la visita a terreno del 09-10-2026 |
 
-- Repo creado en GitHub (octubre 2026), por ahora vacío a la espera de desarrollo.
-- Más adelante: desarrollar la app y dejarla online con **Vercel** (deploy conectado al repo) y **Supabase** (base de datos y usuarios).
-- El detalle técnico y el diseño se definen después.
+Los tiempos de cada actividad (días hábiles) son típicos del método y se ajustan en `src/config.ts` (`DAYS` y `PACE`). Ahí también se definen las ubicaciones de la grúa, la bomba, los acopios, los caminos y el portón.
+
+## Desarrollo
+
+```bash
+npm install
+npm run dev        # http://localhost:5173
+npm run build      # genera dist/ (sitio estático)
+```
+
+Para regenerar los datos si cambia el modelo:
+
+```bash
+pip install ifcopenshell numpy
+python tools/ifc_to_json.py ruta/Edificio-E.ifc public/data
+```
+
+`sandbox/` es un banco de pruebas para revisar cada modelo por separado (`/sandbox/?m=crane`, `?m=vehicles`, `?m=site`, `?m=workers`, `?m=structure`).
+
+## Estructura
+
+```
+src/
+  config.ts            disposición de la faena y ritmo de la animación
+  data/                datos del IFC y cifras del proyecto
+  core/
+    schedule.ts        cronograma por piso (muros → losa)
+    cranePlan.ts       viajes de la grúa (fierro, moldajes, capacho)
+    logistics.ts       mixers y camión bomba (llegada, cola, salida)
+    crews.ts           cuadrillas en la losa y en terreno
+    progress.ts        indicadores de avance
+  scene/
+    structure.ts       edificio que crece (hormigón, fierro, moldajes, puntales)
+    reveal.ts          materiales que hacen aparecer/crecer/retirar elementos en el tiempo
+    site.ts            terreno, talud, caminos, faena y acopios
+    equipment/         grúa, mixer, bomba, capacho, cargas, trabajadores
+    world.ts           arma la escena y la sincroniza con el tiempo
+  ui/                  tablero (HUD) y estilos
+```
+
+## Publicación
+
+El sitio es estático (`dist/`). Se publica en Vercel conectado a este repositorio; más adelante se agregará Supabase para datos y usuarios.

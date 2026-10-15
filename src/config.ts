@@ -24,17 +24,17 @@ export const SITE = {
   },
 
   /** Camión bomba (hormigonado de losas): queda mirando al edificio. */
-  pump: { x: 7.5, z: 16.0, heading: -Math.PI / 2 },
+  pump: { x: 6.8, z: 15.0, heading: -Math.PI / 2 },
 
   /** Punto donde el mixer descarga al capacho (muros) y donde se detiene. */
-  mixerCapacho: { x: -6.0, z: 20.0 },
+  mixerCapacho: { x: -6.0, z: 21.5 },
   /** Punto donde el mixer alimenta la tolva de la bomba. */
-  mixerPump: { x: 11.8, z: 20.0 },
+  mixerPump: { x: 11.3, z: 21.5 },
 
   /** Accesos y caminos. Los camiones entran por el portón poniente. */
   gate: { x: -56, z: 31 },
   roadZ: 31,
-  loopZ: 20,
+  loopZ: 21.5,
   loopX0: -26,
   loopX1: 27,
 
@@ -57,7 +57,7 @@ export const PACE = {
   muroFierro: 9,
   muroMoldaje: 13,
   muroHormigon: 16,
-  muroDesmolde: 6,
+  muroDesmolde: 7.5,
   losaMoldaje: 11,
   losaFierro: 9,
   losaHormigon: 16,

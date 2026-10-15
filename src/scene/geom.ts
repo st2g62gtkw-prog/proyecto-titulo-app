@@ -30,78 +30,100 @@ export class GeoBuilder {
     this.pos.push(x, y, z);
     this.nor.push(nx, ny, nz);
     this.uv.push(u, v);
-    this.t.push(...this.cur.t);
-    this.box.push(...this.cur.box);
+    const t = this.cur.t, b = this.cur.box;
+    this.t.push(t[0], t[1], t[2], t[3]);
+    this.box.push(b[0], b[1]);
     return this.pos.length / 3 - 1;
   }
 
-  private quad(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, n: THREE.Vector3, uw = 1, vh = 1) {
+  /** Cuadrilátero a-b-c-d con normal n; corrige el sentido para que la cara mire hacia n. */
+  private quadN(q: Float64Array, n0: number, n1: number, n2: number, uw: number, vh: number) {
     const s = this.uvScale;
-    // asegura que la cara frontal mire hacia la normal indicada
-    const cr = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
-    const i0 = this.vtx(a.x, a.y, a.z, n.x, n.y, n.z, 0, 0);
-    const i1 = this.vtx(b.x, b.y, b.z, n.x, n.y, n.z, uw * s, 0);
-    const i2 = this.vtx(c.x, c.y, c.z, n.x, n.y, n.z, uw * s, vh * s);
-    const i3 = this.vtx(d.x, d.y, d.z, n.x, n.y, n.z, 0, vh * s);
-    if (cr.dot(n) >= 0) this.idx.push(i0, i1, i2, i0, i2, i3);
+    // q = [ax,ay,az, bx,by,bz, cx,cy,cz, dx,dy,dz]
+    const e1x = q[3] - q[0], e1y = q[4] - q[1], e1z = q[5] - q[2];
+    const e2x = q[6] - q[0], e2y = q[7] - q[1], e2z = q[8] - q[2];
+    const dot = (e1y * e2z - e1z * e2y) * n0 + (e1z * e2x - e1x * e2z) * n1 + (e1x * e2y - e1y * e2x) * n2;
+    const i0 = this.vtx(q[0], q[1], q[2], n0, n1, n2, 0, 0);
+    const i1 = this.vtx(q[3], q[4], q[5], n0, n1, n2, uw * s, 0);
+    const i2 = this.vtx(q[6], q[7], q[8], n0, n1, n2, uw * s, vh * s);
+    const i3 = this.vtx(q[9], q[10], q[11], n0, n1, n2, 0, vh * s);
+    if (dot >= 0) this.idx.push(i0, i1, i2, i0, i2, i3);
     else this.idx.push(i0, i2, i1, i0, i3, i2);
+  }
+
+  private q = new Float64Array(12);
+
+  /**
+   * Caja orientada (versión numérica): esquina o, ejes unitarios u (largo), v (alto), w (fondo).
+   */
+  boxN(
+    ox: number, oy: number, oz: number,
+    ux: number, uy: number, uz: number,
+    vx: number, vy: number, vz: number,
+    wx: number, wy: number, wz: number,
+    sx: number, sy: number, sz: number, caps = true,
+  ) {
+    const q = this.q;
+    const P = (o: number, i: number, j: number, k: number) => {
+      q[o] = ox + ux * sx * i + vx * sy * j + wx * sz * k;
+      q[o + 1] = oy + uy * sx * i + vy * sy * j + wy * sz * k;
+      q[o + 2] = oz + uz * sx * i + vz * sy * j + wz * sz * k;
+    };
+    // +u / -u
+    P(0, 1, 0, 0); P(3, 1, 0, 1); P(6, 1, 1, 1); P(9, 1, 1, 0); this.quadN(q, ux, uy, uz, sz, sy);
+    P(0, 0, 0, 1); P(3, 0, 0, 0); P(6, 0, 1, 0); P(9, 0, 1, 1); this.quadN(q, -ux, -uy, -uz, sz, sy);
+    // +w / -w
+    P(0, 0, 0, 1); P(3, 0, 1, 1); P(6, 1, 1, 1); P(9, 1, 0, 1); this.quadN(q, wx, wy, wz, sy, sx);
+    P(0, 1, 0, 0); P(3, 1, 1, 0); P(6, 0, 1, 0); P(9, 0, 0, 0); this.quadN(q, -wx, -wy, -wz, sy, sx);
+    if (caps) {
+      P(0, 0, 1, 0); P(3, 1, 1, 0); P(6, 1, 1, 1); P(9, 0, 1, 1); this.quadN(q, vx, vy, vz, sx, sz);
+      P(0, 0, 0, 1); P(3, 1, 0, 1); P(6, 1, 0, 0); P(9, 0, 0, 0); this.quadN(q, -vx, -vy, -vz, sx, sz);
+    }
+    return this;
   }
 
   /**
    * Caja orientada: esquina `o`, ejes unitarios ortogonales `ux, uy, uz`, tamaños sx, sy, sz.
    */
   orientedBox(o: THREE.Vector3, ux: THREE.Vector3, uy: THREE.Vector3, uz: THREE.Vector3, sx: number, sy: number, sz: number, caps = true) {
-    const X = ux.clone().multiplyScalar(sx);
-    const Y = uy.clone().multiplyScalar(sy);
-    const Z = uz.clone().multiplyScalar(sz);
-    const p = (i: number, j: number, k: number) =>
-      o.clone().addScaledVector(X, i).addScaledVector(Y, j).addScaledVector(Z, k);
-    const nx = ux.clone(), ny = uy.clone(), nz = uz.clone();
-    // +X / -X
-    this.quad(p(1, 0, 0), p(1, 0, 1), p(1, 1, 1), p(1, 1, 0), nx, sz, sy);
-    this.quad(p(0, 0, 1), p(0, 0, 0), p(0, 1, 0), p(0, 1, 1), nx.clone().negate(), sz, sy);
-    // +Z / -Z
-    this.quad(p(0, 0, 1), p(0, 1, 1), p(1, 1, 1), p(1, 0, 1), nz, sy, sx);
-    this.quad(p(1, 0, 0), p(1, 1, 0), p(0, 1, 0), p(0, 0, 0), nz.clone().negate(), sy, sx);
-    if (caps) {
-      this.quad(p(0, 1, 0), p(1, 1, 0), p(1, 1, 1), p(0, 1, 1), ny, sx, sz);
-      this.quad(p(0, 0, 1), p(1, 0, 1), p(1, 0, 0), p(0, 0, 0), ny.clone().negate(), sx, sz);
-    }
-    return this;
+    return this.boxN(o.x, o.y, o.z, ux.x, ux.y, ux.z, uy.x, uy.y, uy.z, uz.x, uz.y, uz.z, sx, sy, sz, caps);
   }
 
   /** Caja alineada a los ejes entre min y max. */
   aabb(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) {
-    return this.orientedBox(
-      new THREE.Vector3(x0, y0, z0),
-      new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1),
-      x1 - x0, y1 - y0, z1 - z0,
-    );
+    return this.boxN(x0, y0, z0, 1, 0, 0, 0, 1, 0, 0, 0, 1, x1 - x0, y1 - y0, z1 - z0);
   }
 
   /** Barra de sección cuadrada `w` entre dos puntos 3D (fierros, puntales, perfiles). */
   bar(a: THREE.Vector3, b: THREE.Vector3, w: number, caps = true) {
-    const d = b.clone().sub(a);
-    const len = d.length();
-    if (len < 1e-5) return this;
-    const ux = d.divideScalar(len);
-    const ref = Math.abs(ux.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-    const uz = new THREE.Vector3().crossVectors(ux, ref).normalize();
-    const uy = new THREE.Vector3().crossVectors(uz, ux).normalize();
-    const o = a.clone().addScaledVector(uy, -w / 2).addScaledVector(uz, -w / 2);
-    // eje largo = X de la caja; las tapas son las caras ±X
-    return this.orientedBox(o, ux, uy, uz, len, w, w, caps);
+    return this.barN(a.x, a.y, a.z, b.x, b.y, b.z, w, caps);
   }
 
-  /** Panel vertical a lo largo del tramo a→b (planta), desplazado `off` hacia la normal izquierda. */
+  barN(ax: number, ay: number, az: number, bx: number, by: number, bz: number, w: number, caps = true) {
+    let dx = bx - ax, dy = by - ay, dz = bz - az;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-5) return this;
+    dx /= len; dy /= len; dz /= len;
+    // referencia: eje y salvo barras casi verticales
+    const vert = Math.abs(dy) > 0.9;
+    const rx = vert ? 1 : 0, ry = vert ? 0 : 1, rz = 0;
+    // w = u × r, v = w × u
+    let wx = dy * rz - dz * ry, wy = dz * rx - dx * rz, wz = dx * ry - dy * rx;
+    const wl = Math.hypot(wx, wy, wz);
+    wx /= wl; wy /= wl; wz /= wl;
+    const vx = wy * dz - wz * dy, vy = wz * dx - wx * dz, vz = wx * dy - wy * dx;
+    const h = w / 2;
+    return this.boxN(ax - vx * h - wx * h, ay - vy * h - wy * h, az - vz * h - wz * h, dx, dy, dz, vx, vy, vz, wx, wy, wz, len, w, w, caps);
+  }
+
+  /** Panel vertical a lo largo del tramo a→b (planta), desplazado `off` hacia la normal derecha (dz, -dx). */
   wallPanel(a: V2, b: V2, y0: number, y1: number, thick: number, off: number) {
     const dx = b[0] - a[0], dz = b[1] - a[1];
     const len = Math.hypot(dx, dz);
     if (len < 1e-4) return this;
-    const ux = new THREE.Vector3(dx / len, 0, dz / len);
-    const n = new THREE.Vector3(dz / len, 0, -dx / len); // normal a la derecha del avance
-    const o = new THREE.Vector3(a[0], y0, a[1]).addScaledVector(n, off);
-    return this.orientedBox(o, ux, new THREE.Vector3(0, 1, 0), n, len, y1 - y0, thick);
+    const ux = dx / len, uz = dz / len;
+    const nx = uz, nz = -ux;
+    return this.boxN(a[0] + nx * off, y0, a[1] + nz * off, ux, 0, uz, 0, 1, 0, nx, 0, nz, len, y1 - y0, thick);
   }
 
   /** Cilindro vertical de pocos lados (puntales, postes). */
@@ -148,11 +170,9 @@ export class GeoBuilder {
           const len = Math.hypot(dx, dz);
           if (len < 1e-5) continue;
           // contorno antihorario en planta (x, z) => normal exterior = (dz, -dx)
-          const n = new THREE.Vector3(dz / len, 0, -dx / len);
-          this.quad(
-            new THREE.Vector3(a.x, y0, a.y), new THREE.Vector3(b.x, y0, b.y),
-            new THREE.Vector3(b.x, y1, b.y), new THREE.Vector3(a.x, y1, a.y), n, len, y1 - y0,
-          );
+          const q = this.q;
+          q.set([a.x, y0, a.y, b.x, y0, b.y, b.x, y1, b.y, a.x, y1, a.y]);
+          this.quadN(q, dz / len, 0, -dx / len, len, y1 - y0);
         }
       };
       ring(shapeOuter);
