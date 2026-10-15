@@ -261,6 +261,11 @@ async function start() {
   if (q.has('speed')) speed = +q.get('speed')!;
   if (q.get('play') === '0') playing = false;
   setView('iso');
+  // entrada: la cámara parte alejada y se acerca a la obra
+  const finalZoom = stage.camera.zoom;
+  stage.camera.zoom = finalZoom * 0.55;
+  stage.camera.updateProjectionMatrix();
+  stage.focus(ISO_TARGET, finalZoom, 2.6);
   // compila shaders con todo visible una vez para evitar tirones al aparecer capas
   world.update(T, 0, 0);
   stage.renderer.compile(stage.scene, stage.camera);

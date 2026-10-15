@@ -3,6 +3,7 @@
  */
 import * as THREE from 'three';
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 
 export interface Stage {
@@ -42,6 +43,11 @@ export function createStage(container: HTMLElement, opts: { shadows?: boolean } 
   container.appendChild(labels.domElement);
 
   const scene = new THREE.Scene();
+  // reflejos suaves para metales y vidrios (cielo neutro)
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.35;
+  pmrem.dispose();
   scene.background = new THREE.Color('#cfdbe4');
   scene.fog = new THREE.Fog('#cfdbe4', 260, 520);
 

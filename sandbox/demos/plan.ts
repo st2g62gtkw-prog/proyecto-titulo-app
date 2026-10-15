@@ -43,6 +43,25 @@ export default function demo(stage: Stage) {
     const log = new Logistics(sched);
     const mix = [0, 1, 2, 3].map(() => { const m = box('#e8e8e8', 9, 3.4, 2.5); m.position.y = 1.5; const g = new THREE.Group(); g.add(m); stage.scene.add(g); return g; });
     const pump = box('#ff8a00', 11, 3.4, 2.5); pump.position.y = 1.5; const pg = new THREE.Group(); pg.add(pump); stage.scene.add(pg);
+    if (q.get('check') === '1') {
+      // recorre toda la obra buscando estados inválidos
+      let bad = 0, maxR = 0, minY = 1e9, maxY = -1e9;
+      for (let T = 0; T < sched.duration; T += 0.05) {
+        const s = plan.at(T);
+        if (![s.slew, s.r, s.hookY, s.fill, s.open].every(Number.isFinite)) { if (bad++ < 5) console.log('NaN at', T.toFixed(2)); }
+        maxR = Math.max(maxR, s.r); minY = Math.min(minY, s.hookY); maxY = Math.max(maxY, s.hookY);
+        for (const m of log.mixerStates(T)) if (![m.pose.x, m.pose.z, m.pose.heading].every(Number.isFinite)) bad++;
+        const ps = log.pumpState(T);
+        if (ps && ![ps.pose.x, ps.pose.z, ps.boom, ps.outriggers].every(Number.isFinite)) bad++;
+      }
+      console.log('check', { bad, maxR: maxR.toFixed(1), minY: minY.toFixed(2), maxY: maxY.toFixed(2), jibY: (SITE.groundY + crane.jibHeight).toFixed(1), dur: sched.duration.toFixed(1), mixers: log.mixers.length, pumps: log.pumps.length });
+      // superposición de mixers por slot del pool
+      const slots = new Map<number, number[][]>();
+      for (const m of log.mixers) { const k = m.id % 4; if (!slots.has(k)) slots.set(k, []); slots.get(k)!.push([m.arrive[0], m.leave[1], m.id]); }
+      let overlaps = 0;
+      slots.forEach((arr) => { arr.sort((a, b) => a[0] - b[0]); for (let i = 1; i < arr.length; i++) if (arr[i][0] < arr[i - 1][1]) overlaps++; });
+      console.log('pool overlaps', overlaps);
+    }
     const act = q.get('act');
     const actT = act ? sched.activities.find((a) => a.id === act) : null;
     tick = (t) => {
