@@ -802,31 +802,29 @@ function flagTexture() {
 // ---------------------------------------------------------------------------------------
 
 function createMaterials() {
-  const T__ = <X,>(n: string, f: () => X) => { const t = performance.now(); const r = f(); console.log('tex', n, (performance.now() - t).toFixed(0)); return r; };
-  T__('ply-first', () => plywoodTexture());
   const std = (p: THREE.MeshStandardMaterialParameters) => new THREE.MeshStandardMaterial(p);
   const decal = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 };
   return {
-    ground: std({ map: T__('groundTexture()', () => groundTexture()), vertexColors: true, roughness: 1 }),
-    road: std({ map: T__('gravelTexture(true)', () => gravelTexture(true)), vertexColors: true, roughness: 1, ...decal }),
-    pad: std({ map: T__('gravelTexture(false)', () => gravelTexture(false)), vertexColors: true, roughness: 1, ...decal }),
-    asphalt: std({ map: T__('asphaltTexture()', () => asphaltTexture()), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
+    ground: std({ map: groundTexture(), vertexColors: true, roughness: 1 }),
+    road: std({ map: gravelTexture(true), vertexColors: true, roughness: 1, ...decal }),
+    pad: std({ map: gravelTexture(false), vertexColors: true, roughness: 1, ...decal }),
+    asphalt: std({ map: asphaltTexture(), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
     paint: std({ vertexColors: true, roughness: 0.55, metalness: 0.05 }),
     rough: std({ vertexColors: true, roughness: 0.9 }),
     metal: std({ vertexColors: true, roughness: 0.45, metalness: 0.35 }),
-    osb: std({ map: T__('osbTexture()', () => osbTexture()), vertexColors: true, roughness: 0.92 }),
-    sheet: std({ map: T__('corrugatedTexture()', () => corrugatedTexture()), vertexColors: true, roughness: 0.48, metalness: 0.3 }),
-    cloth: std({ map: T__('clothTexture()', () => clothTexture()), vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }),
-    net: std({ map: T__('netTexture()', () => netTexture()), alphaTest: 0.4, roughness: 0.8, side: THREE.DoubleSide }),
+    osb: std({ map: osbTexture(), vertexColors: true, roughness: 0.92 }),
+    sheet: std({ map: corrugatedTexture(), vertexColors: true, roughness: 0.48, metalness: 0.3 }),
+    cloth: std({ map: clothTexture(), vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }),
+    net: std({ map: netTexture(), alphaTest: 0.4, roughness: 0.8, side: THREE.DoubleSide }),
     glass: std({ color: '#33414d', roughness: 0.18, metalness: 0.45 }),
-    form: std({ map: T__('formPanelTexture()', () => formPanelTexture()), vertexColors: true, roughness: 0.55, metalness: 0.3 }),
-    ply: std({ map: T__('plywoodTexture()', () => plywoodTexture()), vertexColors: true, roughness: 0.7 }),
+    form: std({ map: formPanelTexture(), vertexColors: true, roughness: 0.55, metalness: 0.3 }),
+    ply: std({ map: plywoodTexture(), vertexColors: true, roughness: 0.7 }),
     foliage: std({ vertexColors: true, roughness: 0.95, flatShading: true }),
-    facade: std({ map: T__('facadeTexture()', () => facadeTexture()), vertexColors: true, roughness: 0.9 }),
-    tile: std({ map: T__('tileTexture()', () => tileTexture()), vertexColors: true, roughness: 0.8 }),
-    sign: std({ map: T__('safetySignTexture()', () => safetySignTexture()), roughness: 0.6 }),
-    board: std({ map: T__('projectBoardTexture()', () => projectBoardTexture()), roughness: 0.55 }),
-    flag: std({ map: T__('flagTexture()', () => flagTexture()), roughness: 0.8, side: THREE.DoubleSide }),
+    facade: std({ map: facadeTexture(), vertexColors: true, roughness: 0.9 }),
+    tile: std({ map: tileTexture(), vertexColors: true, roughness: 0.8 }),
+    sign: std({ map: safetySignTexture(), roughness: 0.6 }),
+    board: std({ map: projectBoardTexture(), roughness: 0.55 }),
+    flag: std({ map: flagTexture(), roughness: 0.8, side: THREE.DoubleSide }),
     beacon: std({ color: '#ffb020', emissive: '#ff9a00', emissiveIntensity: 0.4, roughness: 0.3 }),
   };
 }
