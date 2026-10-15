@@ -14,13 +14,13 @@ import { createStage } from './scene/stage';
 import { World } from './scene/world';
 import { createSite } from './scene/site';
 import { createCrowd } from './scene/equipment/workers';
-import { createHud, createTag, type HudState, type KPI, type Selection, type ViewMode } from './ui/hud';
+import { compassAngle, createHud, createTag, type HudState, type KPI, type Selection, type ViewMode } from './ui/hud';
 
 const app = document.getElementById('app')!;
 const stage = createStage(app);
 
 let playing = true;
-let speed = 2;
+let speed = 1;
 let T = 0;
 let view: ViewMode = 'iso';
 let world: World | null = null;
@@ -41,7 +41,6 @@ const hud = createHud(app, {
   },
   onCloseSelection: () => select(null),
 });
-hud.setCompass(SITE.northAngle);
 hud.setLoading(0.05, 'Cargando modelo del Edificio E…');
 
 const ISO_TARGET = new THREE.Vector3(2, 5, 6);
@@ -61,7 +60,7 @@ function setView(v: ViewMode) {
     if (v === 'iso') {
       c.target.copy(ISO_TARGET);
       stage.setIsoView();
-      stage.camera.zoom = window.innerWidth < 820 ? 0.85 : 1.05;
+      stage.camera.zoom = 1.05;
       stage.camera.updateProjectionMatrix();
     }
   }
@@ -234,17 +233,18 @@ function hudState(): HudState {
   else if (a.kind !== 'terminaciones') detail = `${a.detail} · Grúa: ${w.state.craneTask}`;
   const lastIdx = feed.findIndex((e) => e.t > T);
   const recent = (lastIdx === -1 ? feed : feed.slice(0, lastIdx)).slice(-5).reverse();
-  const lvName = s.levelNames[a.kind.startsWith('losa') ? a.level : a.level];
+  // el ciclo de piso se identifica por sus muros: la losa que se hormigona es la "losa cielo" de ese piso
+  const lvName = s.levelNames[a.kind.startsWith('losa') ? a.level - 1 : a.level];
   return {
     time: T,
     duration: s.duration,
     playing,
     speed,
     dayLabel: dayLabel(s.dayAt(T)),
-    phaseTitle: a.kind === 'terminaciones' ? 'Terminaciones' : a.kind === 'fundaciones' || a.kind === 'radier' ? 'Fundaciones' : `Piso ${(a.kind.startsWith('losa') ? a.level : a.level + 1)} · ${a.kind.startsWith('losa') ? 'Losa' : 'Muros'}`,
-    activityTitle: a.title.split(' · ').pop() ?? a.title,
+    phaseTitle: a.kind === 'terminaciones' ? 'Terminaciones' : a.kind === 'fundaciones' || a.kind === 'radier' ? 'Fundaciones y radier' : `Piso ${(a.kind.startsWith('losa') ? a.level : a.level + 1)} · ${a.kind.startsWith('losa') ? 'Losa' : 'Muros'}`,
+    activityTitle: a.kind === 'fundaciones' ? 'Zapatas corridas con capacho' : a.kind === 'radier' ? 'Radier del 1er piso con bomba' : a.kind === 'terminaciones' ? `Fachada, ventanas y barandas ${a.levelName}` : a.title.split(' · ').pop() ?? a.title,
     activityDetail: detail,
-    levelLabel: lvName === 'Techumbre' ? 'TECHO' : lvName,
+    levelLabel: a.kind === 'fundaciones' || a.kind === 'radier' ? 'FUND' : lvName === 'Techumbre' ? 'TECHO' : lvName,
     steps: a.kind === 'fundaciones' || a.kind === 'radier' || a.kind === 'terminaciones'
       ? floorSteps(s, s.activities.find((x) => x.kind === 'muroFierro' && x.level === 0)!, T)
       : floorSteps(s, a, T),
@@ -310,6 +310,8 @@ function loop(now: number) {
     stage.camera.position.add(d);
   }
   stage.update(dt);
+  const cam = stage.camera.position, tgt = stage.controls.target;
+  hud.setCompass(compassAngle(SITE.northAngle, cam.x - tgt.x, cam.z - tgt.z));
   stage.render();
   hudAcc += dt;
   if (hudAcc > 1 / 20) {

@@ -6,7 +6,7 @@
  *  - 8 trabajando sobre la malla de la losa
  *  - 12 en reposo, en tres grupos conversando
  * Clic sobre un trabajador: muestra su índice en la barra superior. Admite zoom > 9 (detalle).
- * &strip=1: tiras de 8 trabajadores por acción (marcha y carga en 8 fases) para revisar las poses.
+ * &strip=1: tiras de 8 trabajadores por acción (marcha y carga en 8 fases, avanzando) para revisar las poses.
  */
 import * as THREE from 'three';
 import type { Stage } from '../../src/scene/stage';
@@ -62,9 +62,13 @@ export default function demo(stage: Stage) {
 
   const q = new URLSearchParams(location.search);
   if (q.get('strip') === '1') {
-    // tira de inspección: 8 fases de cada acción, quietos en su lugar (x = -11, 0, 11, 22)
+    // tira de inspección: 8 fases de cada acción (x = -11, 0, 11, 22); marcha y carga avanzan a
+    // 1,2 m/s hacia +x dentro de su tramo (los pies quedan plantados), trabajo y reposo quietos
     for (const [x0, action] of [[-11, 'walk'], [0, 'carry'], [11, 'work'], [22, 'idle']] as const) {
-      for (let k = 0; k < 8; k++) plans.push((t) => ({ x: x0 + k * 1.3, y: G, z: 6, heading: 0, walk: 1.2 * t + (k / 8) * 1.5, action }));
+      const v = action === 'walk' || action === 'carry' ? 1.2 : 0;
+      for (let k = 0; k < 8; k++) {
+        plans.push((t) => ({ x: x0 + ((k * 1.3 + v * t) % 10.4), y: G, z: 6, heading: 0, walk: v * t + (k / 8) * 1.4, action })); // 1,4 m = un ciclo de marcha
+      }
     }
   } else {
     for (let k = 0; k < 12; k++) plans.push(circle(-10, 4, 7, 1.25, (k / 12) * Math.PI * 2, 'walk'));

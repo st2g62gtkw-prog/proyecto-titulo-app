@@ -4,7 +4,7 @@
  *             &load=0.4 pantalla de carga fija (load=1 la omite) · &sheet=open&tab=etapa|kpi|feed · &bg=light · &view=follow
  * Un clic sobre el fondo (la "vista 3D") recorre las selecciones de ejemplo.
  */
-import { createHud, createTag, type FeedItem, type HudState, type KPI, type Selection, type SheetTab, type StepInfo, type ViewMode } from '../src/ui/hud';
+import { compassAngle, createHud, createTag, type FeedItem, type HudState, type KPI, type Selection, type SheetTab, type StepInfo, type ViewMode } from '../src/ui/hud';
 
 const q = new URLSearchParams(location.search);
 if (q.get('bg') === 'light') document.body.classList.add('light');
@@ -252,7 +252,8 @@ hud.setMarkers([
   ...[...Array(FLOORS).keys()].map((f) => ({ t: FUND + f * CYCLE, label: `${f + 1}P` })),
   { t: DURATION - TERM, label: 'Term.' },
 ]);
-hud.setCompass((3 * Math.PI) / 4);
+// la vista de reemplazo mira desde +x +z (azimut 45°), como la cámara iso de la app
+hud.setCompass(compassAngle((3 * Math.PI) / 4, 1, 1));
 if (q.has('view')) hud.setView(q.get('view') as ViewMode);
 if (q.has('sheet')) hud.setSheet?.(q.get('sheet') === 'open', (q.get('tab') ?? 'etapa') as SheetTab);
 if (q.has('sel')) select(SEL_ORDER.indexOf(q.get('sel')!));
@@ -360,8 +361,9 @@ function placeTags() {
     el.style.transform = `translate(-50%, -50%) translate(${sp.x.toFixed(1)}px, ${sp.y.toFixed(1)}px)`;
   }
 }
+const mobileMq = matchMedia('(max-width: 819.98px), (max-height: 560px), (max-width: 1099.98px) and (orientation: portrait)');
 function fitView() {
-  const mobile = innerWidth < 820;
+  const mobile = mobileMq.matches;
   svg.setAttribute('viewBox', mobile ? '-70 -44 156 124' : '-140 -62 280 140');
   placeTags();
 }

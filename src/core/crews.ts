@@ -118,42 +118,59 @@ export class Crews {
     }
   }
 
-  update(t: number, a: Activity, groundTargets: { x: number; z: number; action: Action }[]) {
-    const seg = 2.2; // cada cuánto un trabajador cambia de puesto (s)
+  /** Puntos de la losa más cercanos al frente de trabajo en el instante `time`. */
+  private nearFocus(a: Activity, time: number, cache: Map<number, { pts: V2[]; f: ReturnType<Crews['focus']> }>) {
+    const key = Math.round(time * 4);
+    let v = cache.get(key);
+    if (!v) {
+      const f = this.focus(a, Math.min(Math.max(time, a.t0), a.t1));
+      const pts = (this.spots[f.L] ?? [])
+        .map((p) => ({ p, d: Math.hypot(p[0] - f.x, (p[1] - f.z) * 1.6) }))
+        .sort((u, w) => u.d - w.d)
+        .slice(0, 20)
+        .map((o) => o.p);
+      v = { pts, f };
+      cache.set(key, v);
+    }
+    return v;
+  }
+
+  update(t: number, a: Activity, groundTargets: { x: number; z: number; r?: number; action: Action }[]) {
+    const seg = 3.2; // cada cuánto un trabajador cambia de puesto (s de simulación)
+    const speed = 1.4; // m/s al caminar
     const nFloor = Math.min(ACTIVE_ON_FLOOR[a.kind], FLOOR_SLOTS);
-    const f = this.focus(a, t);
-    const pts = this.spots[f.L] ?? [];
-    // puntos cercanos al foco
-    const near = pts
-      .map((p) => ({ p, d: Math.hypot(p[0] - f.x, (p[1] - f.z) * 1.6) }))
-      .sort((u, v) => u.d - v.d)
-      .slice(0, 46)
-      .map((o) => o.p);
+    const cache = new Map<number, { pts: V2[]; f: ReturnType<Crews['focus']> }>();
+    const now = this.nearFocus(a, t, cache);
     for (let i = 0; i < FLOOR_SLOTS; i++) {
       const m = this.members[i];
-      m.visible = i < nFloor && near.length > 0;
+      m.visible = i < nFloor && now.pts.length > 0;
       if (!m.visible) continue;
       const ph = hash(i, 11) * seg;
       const k = Math.floor((t + ph) / seg);
-      const u = (t + ph) / seg - k;
-      const A = near[Math.floor(hash(i, k) * near.length)];
-      const B = near[Math.floor(hash(i, k + 1) * near.length)];
-      const walkPart = 0.35;
-      let x: number, z: number;
-      if (u < walkPart) {
-        const w = u / walkPart;
-        x = A[0] + (B[0] - A[0]) * w;
-        z = A[1] + (B[1] - A[1]) * w;
+      const tk = k * seg - ph; // inicio del tramo actual
+      const prev = this.nearFocus(a, tk - seg, cache).pts;
+      const cur = this.nearFocus(a, tk, cache).pts;
+      if (!prev.length || !cur.length) { m.visible = false; continue; }
+      const A = prev[Math.floor(hash(i, k) * prev.length)];
+      const B = cur[Math.floor(hash(i, k + 1) * cur.length)];
+      const dist = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      const walkT = Math.min(Math.max(dist / speed, 0.4), seg * 0.8);
+      const u = t - tk;
+      if (u < walkT && dist > 0.05) {
+        const w = u / walkT;
+        m.x = A[0] + (B[0] - A[0]) * w;
+        m.z = A[1] + (B[1] - A[1]) * w;
         m.action = hash(i, k + 99) < 0.25 ? 'carry' : 'walk';
         m.heading = Math.atan2(B[1] - A[1], B[0] - A[0]);
-        m.walk = k * 5 + Math.hypot(B[0] - A[0], B[1] - A[1]) * w;
+        m.walk = k * 7 + dist * w;
       } else {
-        x = B[0];
-        z = B[1];
+        m.x = B[0];
+        m.z = B[1];
         m.action = hash(i, k + 7) < 0.82 ? 'work' : 'idle';
-        m.heading = Math.atan2(f.z - z, f.x - x) + (hash(i, k + 3) - 0.5) * 1.6;
+        m.heading = Math.atan2(now.f.z - B[1], now.f.x - B[0]) + (hash(i, k + 3) - 0.5) * 1.6;
+        m.walk = k * 7 + dist;
       }
-      m.x = x; m.z = z; m.y = f.y;
+      m.y = now.f.y;
     }
     // cuadrilla en terreno: rigger en el acopio, taller de fierro, mixer, caminatas
     for (let j = 0; j < GROUND_SLOTS; j++) {
@@ -162,7 +179,7 @@ export class Crews {
       m.visible = !!g;
       if (!g) continue;
       const ang = hash(j, 5) * Math.PI * 2;
-      const rad = 1.2 + hash(j, 6) * 2.2;
+      const rad = (g.r ?? 1.2) + hash(j, 6) * 1.6;
       const sway = Math.sin(t * 0.7 + j) * 0.35;
       m.x = g.x + Math.cos(ang) * rad + sway;
       m.z = g.z + Math.sin(ang) * rad;

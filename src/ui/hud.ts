@@ -2,8 +2,9 @@
  * Tablero (HUD) de la obra en vivo: paneles DOM sobre el lienzo 3D, sin frameworks.
  *  - Escritorio: marca, etapa actual y avance por piso a la izquierda; indicadores, dotación y
  *    bitácora a la derecha; vistas arriba a la derecha; línea de tiempo abajo al centro.
- *  - Teléfono / tablet vertical (< 820 px): barra superior compacta, riel de vistas a la derecha
- *    y hoja inferior con pestañas (Etapa · Indicadores · Bitácora) sobre la línea de tiempo.
+ *  - Teléfono (< 820 px de ancho o < 560 px de alto) y tablet vertical (< 1100 px): barra superior
+ *    compacta, riel de vistas a la derecha y hoja inferior con pestañas (Etapa · Indicadores ·
+ *    Bitácora) sobre la línea de tiempo.
  * update() corre cada cuadro: solo escribe en el DOM lo que cambió (referencias guardadas).
  */
 
@@ -38,6 +39,10 @@ export interface Hud {
   /** k ≥ 1 oculta la pantalla de carga. */
   setLoading(k: number, text?: string): void;
   setView(v: ViewMode): void;
+  /**
+   * Gira la rosa: ángulo del norte EN PANTALLA, en radianes y sentido horario desde arriba
+   * (0 = el norte apunta hacia arriba). Para la cámara 3D usar compassAngle(). Se puede llamar cada cuadro.
+   */
   setCompass(angleRad: number): void;
   /** Sincroniza un interruptor si la app lo cambia por su cuenta. */
   setToggle?(k: 'labels' | 'cutaway', on: boolean): void;
@@ -49,7 +54,8 @@ type Setter<T> = (v: T) => void;
 type ToggleKey = 'labels' | 'cutaway';
 type TagKind = 'crane' | 'mixer' | 'pump' | 'acopio' | 'work' | 'info';
 
-const MOBILE_QUERY = '(max-width: 819.98px), (max-height: 560px)';
+const MOBILE_QUERY = '(max-width: 819.98px), (max-height: 560px), (max-width: 1099.98px) and (orientation: portrait)';
+const TAU = Math.PI * 2;
 const SPEEDS = [1, 2, 4, 8];
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap';
@@ -270,6 +276,15 @@ export function createTag(text: string, kind: TagKind = 'info'): HTMLElement {
   return el;
 }
 
+/**
+ * Ángulo para Hud.setCompass a partir de la cámara.
+ * northAngle: rumbo del norte en planta (radianes, desde +x hacia −z, como SITE.northAngle).
+ * camDx, camDz: posición de la cámara menos su objetivo (camera.position − controls.target), en x y z.
+ */
+export function compassAngle(northAngle: number, camDx: number, camDz: number): number {
+  return Math.PI - northAngle - Math.atan2(camDz, camDx);
+}
+
 // --- secciones del tablero ----------------------------------------------------------------------
 function buildBrand() {
   const el = h(
@@ -348,11 +363,12 @@ function buildEtapa() {
       detail(s.activityDetail);
       steps(s.steps);
       let active = -1, done = 0;
-      for (let i = 0; i < s.steps.length; i++) {
+      const n = s.steps.length;
+      for (let i = 0; i < n; i++) {
         if (s.steps[i].state === 'done') done++;
         else if (s.steps[i].state === 'active' && active < 0) active = i;
       }
-      count(`Paso ${active >= 0 ? active + 1 : done} / ${s.steps.length}`);
+      count(active >= 0 ? `Paso ${active + 1} / ${n}` : done === 0 ? 'Por iniciar' : done === n ? 'Ciclo completo' : `Paso ${done} / ${n}`);
     },
   };
 }
@@ -552,6 +568,7 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
     <div class="hud-glass compass" title="Norte"><div class="rose" data-r="rose">${COMPASS}</div></div>`,
   );
   const rose = refs(tools).rose;
+  let compass: number | null = null;
   const viewBtns = [...tools.querySelectorAll<HTMLButtonElement>('[data-v]')];
   const toggleBtns = [...tools.querySelectorAll<HTMLButtonElement>('[data-k]')];
   const toggles: Record<ToggleKey, boolean> = { labels: true, cutaway: false };
@@ -603,9 +620,10 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
   const playingFlag = flag(transport, 'is-playing');
   const speedBtns = [...tr.speeds.querySelectorAll<HTMLButtonElement>('button')];
   let playing = false, speed = 0, duration = 1, dragging = false;
-  let markers: { t: number; el: HTMLElement }[] = [];
+  let markers: { t: number; el: HTMLElement; em: HTMLElement; shift: number; thin: boolean }[] = [];
   let curMarker = -2;
   let ariaPct = -1;
+  let ariaText = '';
   const setPlaying = (p: boolean) => {
     playing = p;
     playingFlag(p);
@@ -615,8 +633,34 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
     speed = s;
     speedBtns.forEach((b) => b.classList.toggle('is-on', +(b.dataset.s ?? 0) === s));
   };
-  // las marcas se ubican como fracción de la duración (puede llegar después que setMarkers)
-  const placeMarkers = () => markers.forEach((m) => (m.el.style.left = `${(clamp01(m.t / duration) * 100).toFixed(3)}%`));
+  /**
+   * Marcas como fracción de la duración (puede llegar después que setMarkers). Las etiquetas de los
+   * extremos sobresalen de la pista a lo más 12 px y las que chocan se ocultan (la del tramo actual
+   * siempre se ve). Corre solo al cambiar marcas, duración, tramo actual, tamaño o fuentes.
+   */
+  const layoutMarkers = () => {
+    const w = tr.scrub.clientWidth;
+    const cur = curMarker;
+    let lastR = -Infinity;
+    const box = (i: number) => {
+      const m = markers[i];
+      const x = clamp01(m.t / duration) * w, hw = m.em.offsetWidth / 2;
+      const shift = Math.max(0, hw - x - 12) - Math.max(0, x + hw - w - 12);
+      return { m, l: x + shift - hw, r: x + shift + hw, shift };
+    };
+    const curL = cur >= 0 && w > 0 ? box(cur).l : Infinity;
+    for (let i = 0; i < markers.length; i++) {
+      const { m, l, r, shift } = box(i);
+      m.el.style.left = `${(clamp01(m.t / duration) * 100).toFixed(3)}%`;
+      const thin = w > 0 && i !== cur && (l < lastR + 6 || (i < cur && r + 6 > curL));
+      if (!thin) lastR = r;
+      if (thin !== m.thin) m.el.classList.toggle('is-thin', (m.thin = thin));
+      const s = w > 0 ? Math.round(shift) : 0;
+      if (s !== m.shift) m.em.style.transform = (m.shift = s) ? `translateX(${s}px)` : '';
+    }
+  };
+  new ResizeObserver(layoutMarkers).observe(tr.scrub);
+  document.fonts?.addEventListener('loadingdone', layoutMarkers);
   const setTimeK = (k: number) => {
     trK(k);
     const p = Math.round(clamp01(k) * 100);
@@ -659,10 +703,19 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
   };
   tr.scrub.addEventListener('pointerup', endDrag);
   tr.scrub.addEventListener('pointercancel', endDrag);
+  const SEEK_KEYS: Record<string, (k: number) => number> = {
+    ArrowLeft: (k) => k - 0.01,
+    ArrowRight: (k) => k + 0.01,
+    PageDown: (k) => k - 0.1,
+    PageUp: (k) => k + 0.1,
+    Home: () => 0,
+    End: () => 1,
+  };
   tr.scrub.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const f = SEEK_KEYS[e.key];
+    if (!f) return;
     e.preventDefault();
-    const k = clamp01(ariaPct / 100 + (e.key === 'ArrowRight' ? 0.01 : -0.01));
+    const k = clamp01(f(ariaPct / 100));
     setTimeK(k);
     cb.onSeek(k * duration);
   });
@@ -822,6 +875,10 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
 
   const mq = matchMedia(MOBILE_QUERY);
   let mobile = false;
+  // columnas que no caben en ventanas bajas: se desplazan y un degradé indica que hay más abajo
+  const cols = [left, right];
+  const updateMore = () =>
+    cols.forEach((c) => c.classList.toggle('is-more', !mobile && c.scrollHeight - c.scrollTop - c.clientHeight > 2));
   const layout = () => {
     mobile = mq.matches;
     el.classList.toggle('is-mobile', mobile);
@@ -834,15 +891,19 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
       left.append(brand.el, etapa.el, floors.el);
       right.append(kpis.el, crew.el, feed.el);
     }
+    updateMore();
   };
   mq.addEventListener('change', layout);
   layout();
+  const ro = new ResizeObserver(updateMore);
+  [...cols, brand.el, etapa.el, floors.el, kpis.el, crew.el, feed.el].forEach((e) => ro.observe(e));
+  cols.forEach((c) => c.addEventListener('scroll', updateMore, { passive: true }));
 
-  // teclado: espacio = reproducir/pausar, Esc = cerrar selección
+  // teclado: espacio = reproducir/pausar, Esc = cerrar selección (no mientras carga)
   const editable = (t: EventTarget | null) =>
     t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
   window.addEventListener('keydown', (e) => {
-    if (editable(e.target)) return;
+    if (editable(e.target) || !loading.classList.contains('is-done')) return;
     if (e.code === 'Space') {
       e.preventDefault();
       if (!e.repeat) {
@@ -862,25 +923,29 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
   return {
     el,
     update(s) {
+      let relayout = false;
       if (s.duration > 0 && s.duration !== duration) {
         duration = s.duration;
-        placeMarkers();
+        relayout = true;
       }
       setPlaying(s.playing);
       setSpeed(s.speed);
       trDay(s.dayLabel);
       trTip(s.dayLabel);
+      if (s.dayLabel !== ariaText) tr.scrub.setAttribute('aria-valuetext', (ariaText = s.dayLabel));
       trOv(String(Math.round(clamp01(s.overall) * 100)));
       if (!dragging) setTimeK(s.time / duration);
       let cur = -1;
       for (let i = 0; i < markers.length && markers[i].t <= s.time; i++) cur = i;
       if (cur !== curMarker) {
         curMarker = cur;
+        relayout = true;
         markers.forEach((m, i) => {
           m.el.classList.toggle('is-past', i < cur);
           m.el.classList.toggle('is-cur', i === cur);
         });
       }
+      if (relayout) layoutMarkers();
       brand.update(s);
       etapa.update(s);
       floors.update(s);
@@ -900,12 +965,13 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
         .sort((a, b) => a.t - b.t)
         .map((mk) => {
           const e = h('span', 'mk', '<i></i><em></em>');
-          (e.lastChild as HTMLElement).textContent = mk.label;
-          return { t: mk.t, el: e };
+          const em = e.lastChild as HTMLElement;
+          em.textContent = mk.label;
+          return { t: mk.t, el: e, em, shift: 0, thin: false };
         });
       tr.marks.replaceChildren(...markers.map((x) => x.el));
-      placeMarkers();
       curMarker = -2;
+      layoutMarkers();
     },
     showSelection,
     setLoading(k, txt) {
@@ -928,6 +994,10 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
     },
     setView,
     setCompass(a) {
+      // continuidad con el valor anterior: la transición nunca gira "por el lado largo" al cruzar ±π
+      if (compass !== null) a = compass + ((((a - compass + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
+      if (compass !== null && Math.abs(a - compass) < 1e-3) return;
+      compass = a;
       rose.style.transform = `rotate(${a.toFixed(4)}rad)`;
     },
     setToggle,

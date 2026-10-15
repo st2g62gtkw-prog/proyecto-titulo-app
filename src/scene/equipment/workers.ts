@@ -5,7 +5,9 @@
  * Cada figura tiene su origen en el suelo bajo la pelvis y mira hacia +x local
  * (heading 0 = +x del mundo, positivo hacia +z). La pose se arma en CPU como ángulos de
  * articulaciones (caminar, trabajar, cargar, reposo), se mezcla suavemente al cambiar de
- * acción y se "aterriza" apoyando siempre el pie más bajo en el suelo.
+ * acción y se "aterriza" apoyando siempre el pie más bajo en el suelo. Al caminar, cada bota
+ * queda plantada mientras sostiene el cuerpo (talón → planta → punta) y las piernas se
+ * resuelven con IK de dos huesos, así los pies no patinan sobre la losa.
  *
  * Colores por instancia: chaleco y casco (pose.vest / pose.helmet) van en instanceColor;
  * camisa y piel (fijos por persona) en el atributo iColor2. Un único material comparte
@@ -273,14 +275,14 @@ const pulse = (c: number, a: number, b: number) => {
   return smooth((c - a) / e) * smooth((b - c) / e);
 };
 
-/** Tobillo de una bota apoyada: (x, y) sobre el suelo y cabeceo q (rad, + = punta arriba). */
-const foot = new Float64Array(3);
+/** Tobillo de la bota en curso: (x, y) sobre el suelo respecto de la cadera y cabeceo q (rad, + = punta arriba). */
+const ank = new Float64Array(3);
 /** Bota en el suelo con el tobillo plano en x = fx, girando sobre el talón (q > 0) o la punta (q < 0). */
 function plant(fx: number, q: number) {
   const p = q > 0 ? HEEL : TOE;
-  foot[0] = fx + p * (1 - Math.cos(q)) - ANKLE * Math.sin(q);
-  foot[1] = ANKLE * Math.cos(q) - p * Math.sin(q);
-  foot[2] = q;
+  ank[0] = fx + p * (1 - Math.cos(q)) - ANKLE * Math.sin(q);
+  ank[1] = ANKLE * Math.cos(q) - p * Math.sin(q);
+  ank[2] = q;
 }
 
 /** Altura máxima de la cadera para que la pierna alcance un tobillo en (x, y). */
@@ -298,23 +300,23 @@ function footPath(u: number, S: number, amp: number) {
     // apoyo: talón → planta → punta, siempre girando sobre el punto que toca el suelo
     const k = u / DUTY;
     plant(S * (0.5 - k), k < 0.15 ? qh * (1 - smooth(k / 0.15)) : -qt * smooth((k - 0.55) / 0.45));
-    return reach(foot[0], foot[1]);
+    return reach(ank[0], ank[1]);
   }
   // vuelo: Hermite entre el despegue y el siguiente apoyo, con la velocidad del apoyo en los extremos
   const k = (u - DUTY) / (1 - DUTY);
   plant(-S / 2, -qt);
-  const x0 = foot[0], y0 = foot[1];
+  const x0 = ank[0], y0 = ank[1];
   plant(S / 2, qh);
-  const x1 = foot[0], y1 = foot[1];
+  const x1 = ank[0], y1 = ank[1];
   const land = reach(x1, y1);
   const m = (-S * (1 - DUTY)) / DUTY;
   const k2 = k * k, k3 = k2 * k, e = smooth(k);
   const q = -qt + (qh + qt) * e;
   const y = y0 + (y1 - y0) * e;
   const low = y + Math.min(HEEL * Math.sin(q), TOE * Math.sin(q)) - ANKLE * Math.cos(q);
-  foot[0] = (2 * k3 - 3 * k2 + 1) * x0 + (k3 - 2 * k2 + k) * m + (3 * k2 - 2 * k3) * x1 + (k3 - k2) * m;
-  foot[1] = y - Math.min(0, low) + LIFT * amp * Math.sin(Math.PI * k);
-  foot[2] = q;
+  ank[0] = (2 * k3 - 3 * k2 + 1) * x0 + (k3 - 2 * k2 + k) * m + (3 * k2 - 2 * k3) * x1 + (k3 - k2) * m;
+  ank[1] = y - Math.min(0, low) + LIFT * amp * Math.sin(Math.PI * k);
+  ank[2] = q;
   return land + (HIP_UP - land) * (1 - smooth((k - 0.5) / 0.5));
 }
 
@@ -339,7 +341,7 @@ function walkLegs(o: Float32Array, c: number, amp: number) {
   let h = HIP_UP;
   for (let side = 0; side < 2; side++) {
     h = Math.min(h, footPath(fract(c + side * 0.5), S, amp));
-    legs.set(foot, side * 3);
+    legs.set(ank, side * 3);
   }
   for (let side = 0; side < 2; side++) legIK(o, side, legs[side * 3], legs[side * 3 + 1] - h, legs[side * 3 + 2]);
   const s = Math.cos(TAU * c) * amp;
@@ -560,7 +562,7 @@ export function createCrowd(max: number): Crowd {
   // estado por trabajador (mezcla de acciones, marcha, rumbo suavizado)
   const W = new Float32Array(max * 4);
   const lastT = new Float64Array(max), lastWalk = new Float64Array(max), gait = new Float64Array(max);
-  const amp = new Float32Array(max), dir = new Float32Array(max);
+  const amp = new Float32Array(max), dir = new Float64Array(max);
   const ready = new Uint8Array(max), vis = new Uint8Array(max);
   const vestOf = new Int8Array(max).fill(-1), helmetOf = new Int8Array(max).fill(-1);
   let colorsDirty = false;
@@ -666,17 +668,20 @@ export function createCrowd(max: number): Crowd {
     }
   };
 
+  /** Dibuja solo hasta el último visible y sube a la GPU solo ese tramo de matrices. */
+  const flush = (s: THREE.InstancedMesh, n: number) => {
+    s.count = n;
+    if (!n) return;
+    s.instanceMatrix.clearUpdateRanges();
+    s.instanceMatrix.addUpdateRange(0, n * 16);
+    s.instanceMatrix.needsUpdate = true;
+  };
+
   const commit = () => {
     let n = max;
     while (n > 0 && !vis[n - 1]) n--;
-    for (const s of singles) {
-      s.count = n;
-      s.instanceMatrix.needsUpdate = true;
-    }
-    for (const s of pairs) {
-      s.count = 2 * n;
-      s.instanceMatrix.needsUpdate = true;
-    }
+    for (const s of singles) flush(s, n);
+    for (const s of pairs) flush(s, 2 * n);
     if (colorsDirty) {
       torso.instanceColor!.needsUpdate = true;
       head.instanceColor!.needsUpdate = true;

@@ -233,6 +233,10 @@
 .hud-col::-webkit-scrollbar {
   display: none;
 }
+.hud-col.is-more {
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 64px), transparent calc(100% - 6px));
+  mask-image: linear-gradient(#000 calc(100% - 64px), transparent calc(100% - 6px));
+}
 .hud-left {
   top: calc(var(--gap) + var(--sat));
   bottom: var(--sab);
@@ -891,7 +895,7 @@
 .rose {
   width: 36px;
   height: 36px;
-  transition: transform 0.3s ease;
+  transition: transform 0.15s linear;
 }
 .rose svg {
   display: block;
@@ -908,7 +912,7 @@
   stroke-width: 1.2;
 }
 .c-n {
-  font: 700 7.5px var(--h-font);
+  font: 800 8.5px var(--h-font);
   fill: var(--h-red);
 }
 .c-north {
@@ -991,9 +995,12 @@
   min-width: 0;
 }
 .tp-day {
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .tp-ov {
   margin-left: auto;
@@ -1012,6 +1019,7 @@
   font-size: 11px;
 }
 .tp-speeds {
+  flex: none;
   display: flex;
   gap: 2px;
   padding: 2px;
@@ -1086,7 +1094,7 @@
   background: rgba(20, 12, 0, 0.45);
 }
 .mk em {
-  margin-top: 2px;
+  margin-top: 5px;
   font: normal 500 9.5px/1 var(--h-mono);
   color: var(--h-mute);
   white-space: nowrap;
@@ -1098,6 +1106,9 @@
 .mk.is-cur em {
   color: var(--h-amber-hi);
   font-weight: 700;
+}
+.mk.is-thin em {
+  visibility: hidden;
 }
 .scrub-handle {
   position: absolute;
@@ -1546,6 +1557,29 @@
   .kpi-v b { font-size: 19px; }
   .et-act { font-size: 16px; }
 }
+/* escritorio angosto (820–1019 px, horizontal): no cabe la línea de tiempo entre columnas →
+   ocupa todo el ancho abajo y las columnas terminan sobre ella; vistas solo con ícono */
+@media (max-width: 1019.98px) {
+  .hud:not(.is-mobile) {
+    --tp-room: 91px;
+  }
+  .hud:not(.is-mobile) .hud-bottom {
+    left: calc(var(--sal) + var(--gap));
+    right: calc(var(--sar) + var(--gap));
+  }
+  .hud:not(.is-mobile) .hud-transport {
+    max-width: none;
+  }
+  .hud:not(.is-mobile) .hud-col {
+    bottom: calc(var(--sab) + var(--tp-room));
+  }
+  .hud:not(.is-mobile) .hud-sel {
+    max-height: calc(100% - var(--gap) * 2 - var(--tb) - 12px - var(--sat) - var(--sab) - var(--tp-room));
+  }
+  .hud:not(.is-mobile) .seg button[data-v] .lbl {
+    display: none;
+  }
+}
 /* pantallas bajas: paneles más compactos */
 @media (max-height: 860px) {
   .hud-card { padding: 12px 14px 13px; }
@@ -1568,6 +1602,17 @@
 @media (max-height: 800px) {
   .hud:not(.is-mobile) .kpi-s { display: none; }
   .hud:not(.is-mobile) .kpi-v { margin-top: 3px; }
+}
+/* portátiles bajos (≈ 1280×720): la columna izquierda cabe sin desplazarse */
+@media (max-height: 760px) {
+  .hud:not(.is-mobile) .step { min-height: 22px; padding: 1px 0; }
+  .hud:not(.is-mobile) .step::before { top: 21px; bottom: -1px; }
+  .hud:not(.is-mobile) .step-bar { margin: 5px 0 2px; }
+  .hud:not(.is-mobile) .fl { height: 12px; }
+  .hud:not(.is-mobile) .fl-bar { height: 8px; }
+  .hud:not(.is-mobile) .floors { gap: 3px; }
+  .hud:not(.is-mobile) .fl-legend { display: none; }
+  .hud:not(.is-mobile) .sep { margin: 9px -14px 7px; }
 }
 
 /* ------------------------------------------------------------ modo teléfono */
@@ -1748,13 +1793,22 @@
 }
 /* teléfono horizontal: la hoja y la línea de tiempo a la izquierda, el riel de vistas libre a la derecha */
 @media (max-height: 560px) and (min-width: 640px) {
+  .hud.is-mobile {
+    --sel-w: min(360px, 46%);
+  }
   .hud.is-mobile .hud-bottom {
     right: auto;
     width: min(560px, calc(100% - 80px - var(--sal) - var(--sar)));
+    transition: width 0.35s cubic-bezier(0.2, 0.9, 0.25, 1);
+  }
+  /* con una selección abierta la hoja y la línea de tiempo se angostan para no quedar bajo el panel */
+  .hud.is-mobile.sel-open .hud-bottom {
+    width: min(560px, calc(100% - var(--sel-w) - 24px - var(--sal) - var(--sar)));
   }
   .hud.is-mobile .hud-sel {
     left: auto;
-    width: min(380px, 60%);
+    width: var(--sel-w);
+    max-height: calc(100% - 80px - var(--sat) - var(--sab));
   }
 }
 /* en teléfonos bajos el riel de vistas se oculta mientras la hoja está abierta */
@@ -1769,6 +1823,8 @@
 .tag {
   --c: var(--h-amber);
   --ca: rgba(255, 176, 32, 0.28);
+  --pill: 24px;
+  --lead: 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1782,13 +1838,13 @@
 /* contrapeso: el centro del elemento (ancla del CSS2DObject) queda en la punta de la guía */
 .tag::after {
   content: '';
-  height: 48px;
+  height: calc(var(--pill) + var(--lead));
 }
 .tag-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
+  height: var(--pill);
   padding: 0 10px 0 8px;
   border-radius: 999px;
   background: rgba(9, 14, 24, 0.86);
@@ -1805,7 +1861,7 @@
 .tag-line {
   position: relative;
   width: 1.5px;
-  height: 24px;
+  height: var(--lead);
   background: linear-gradient(rgba(255, 255, 255, 0.85), var(--c));
 }
 .tag-line::after {
@@ -1845,6 +1901,23 @@
   from { transform: scale(0.4); opacity: 1; }
   to { transform: scale(1.6); opacity: 0; }
 }
+/* teléfono: etiquetas más compactas para que no se tapen entre sí con la obra completa en pantalla */
+@media (max-width: 819.98px), (max-height: 560px) {
+  .tag {
+    --pill: 20px;
+    --lead: 16px;
+    font-size: 10.5px;
+  }
+  .tag-pill {
+    gap: 5px;
+    padding: 0 8px 0 6px;
+  }
+  .tag-dot {
+    width: 6px;
+    height: 6px;
+    box-shadow: 0 0 0 2px var(--ca);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .hud *,
@@ -1855,4 +1928,9 @@
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* En pantallas chicas se ocultan las etiquetas de acopios y faena para no saturar la vista */
+@media (max-width: 819px) {
+  .tag--acopio, .tag--info { display: none; }
 }

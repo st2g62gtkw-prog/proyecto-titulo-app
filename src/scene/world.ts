@@ -349,15 +349,16 @@ export class World {
     // --- cuadrillas ---
     const act = this.sched.at(T);
     const a = this.site.anchors;
-    const ground: { x: number; z: number; action: 'idle' | 'walk' | 'work' | 'carry' }[] = [
-      { x: a.acopioFierro.x, z: a.acopioFierro.z, action: 'work' },
-      { x: SITE.tallerFierro.x, z: SITE.tallerFierro.z, action: 'work' },
-      { x: SITE.tallerFierro.x - 2, z: SITE.tallerFierro.z + 2, action: 'work' },
-      { x: a.acopioMoldajeMuro.x, z: a.acopioMoldajeMuro.z, action: 'work' },
-      { x: SITE.mixerCapacho.x - 4, z: SITE.mixerCapacho.z + 2.5, action: 'idle' },
-      { x: a.acopioMoldajeLosa.x, z: a.acopioMoldajeLosa.z, action: 'work' },
-      { x: SITE.faena.x + 6, z: SITE.faena.z + 4, action: 'idle' },
-      { x: SITE.crane.x + 2.5, z: SITE.crane.z + 2.5, action: 'idle' },
+    // en terreno: alrededor de los acopios (no encima), taller de fierro, mixer y faena
+    const ground: { x: number; z: number; r?: number; action: 'idle' | 'walk' | 'work' | 'carry' }[] = [
+      { x: a.acopioFierro.x - 4.5, z: a.acopioFierro.z + 1, r: 0.8, action: 'work' },
+      { x: SITE.tallerFierro.x, z: SITE.tallerFierro.z, r: 1.6, action: 'work' },
+      { x: SITE.tallerFierro.x - 2, z: SITE.tallerFierro.z + 2, r: 1.2, action: 'work' },
+      { x: a.acopioMoldajeMuro.x + 6.5, z: a.acopioMoldajeMuro.z - 1.5, r: 0.8, action: 'work' },
+      { x: SITE.mixerCapacho.x - 4, z: SITE.mixerCapacho.z + 3.2, r: 0.6, action: 'idle' },
+      { x: a.acopioMoldajeLosa.x - 5.5, z: a.acopioMoldajeLosa.z + 1.5, r: 0.8, action: 'work' },
+      { x: SITE.faena.x + 7, z: SITE.faena.z + 5, r: 1.5, action: 'idle' },
+      { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },
     ];
     this.crews.update(T, act, ground);
     this.crews.members.forEach((m, i) => this.crowd.set(i, { ...m, t: clock + i * 0.37 }));

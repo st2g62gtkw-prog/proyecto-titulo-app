@@ -3,7 +3,7 @@
  * terreno con talud de corte, caminos de ripio, cierros y portón, instalación de faena,
  * acopios al alcance de la grúa, taller de fierro y el barrio alrededor.
  *
- * Todo lo estático se fusiona por material (≈ 45 mallas en total). Cada acopio y la faena
+ * Todo lo estático se fusiona por material (≈ 50 mallas en total). Cada acopio y la faena
  * son grupos propios con userData.pick para poder seleccionarlos con un clic.
  */
 import * as THREE from 'three';
@@ -82,19 +82,27 @@ function fbm(x: number, y: number, oct = 4, seed = 0) {
  */
 function noiseField(w: number, h: number, px: number, py: number, oct: number, seed: number) {
   const out = new Float32Array(w * h);
+  // tablas por columna (celda, vecina y peso suavizado) que se reutilizan en cada fila
+  const c0 = new Int32Array(w), c1 = new Int32Array(w), cu = new Float32Array(w);
   let amp = 0.5, total = 0;
   for (let o = 0; o < oct; o++) {
     const nx = px << o, ny = py << o;
     const lat = new Float32Array(nx * ny);
     for (let i = 0; i < lat.length; i++) lat[i] = hash(i % nx, Math.floor(i / nx), seed + o * 17);
+    for (let x = 0; x < w; x++) {
+      const fx = (x / w) * nx, ix = Math.floor(fx), tx = fx - ix;
+      c0[x] = ix;
+      c1[x] = (ix + 1) % nx;
+      cu[x] = tx * tx * (3 - 2 * tx);
+    }
     for (let y = 0; y < h; y++) {
       const fy = (y / h) * ny, iy = Math.floor(fy), ty = fy - iy, uy = ty * ty * (3 - 2 * ty);
-      const r0 = iy * nx, r1 = ((iy + 1) % ny) * nx;
+      const r0 = iy * nx, r1 = ((iy + 1) % ny) * nx, row = y * w;
       for (let x = 0; x < w; x++) {
-        const fx = (x / w) * nx, ix = Math.floor(fx), tx = fx - ix, ux = tx * tx * (3 - 2 * tx), ix1 = (ix + 1) % nx;
-        const top = lat[r0 + ix] + (lat[r0 + ix1] - lat[r0 + ix]) * ux;
-        const bot = lat[r1 + ix] + (lat[r1 + ix1] - lat[r1 + ix]) * ux;
-        out[y * w + x] += amp * (top + (bot - top) * uy);
+        const a = c0[x], b = c1[x], ux = cu[x];
+        const top = lat[r0 + a] + (lat[r0 + b] - lat[r0 + a]) * ux;
+        const bot = lat[r1 + a] + (lat[r1 + b] - lat[r1 + a]) * ux;
+        out[row + x] += amp * (top + (bot - top) * uy);
       }
     }
     total += amp;
@@ -230,6 +238,41 @@ function buildTerrain(mat: THREE.Material) {
   const mesh = new THREE.Mesh(g, mat);
   mesh.receiveShadow = true;
   mesh.name = 'terreno';
+  return { mesh, xs, zs, pos, nrm };
+}
+
+/**
+ * Cara del talud: capa con textura (cárcavas, estratos, piedras) sobre los MISMOS vértices y
+ * triángulos del terreno (sin z-fighting). u = cota relativa (pie → coronamiento), v = largo en x.
+ * El alfa sigue la pendiente, igual que el color de corte del terreno.
+ */
+function buildCutFace(t: ReturnType<typeof buildTerrain>, mat: THREE.Material) {
+  const { xs, zs, pos, nrm } = t;
+  const nx = xs.length;
+  const cols: number[] = [], rows: number[] = [];
+  // termina poco después del cierro: más allá corre la calle exterior
+  xs.forEach((x, i) => outsideX(x) < 4.5 && cols.push(i));
+  zs.forEach((z, j) => z > SITE.talud.zTop - 6 && z < SITE.talud.zStart + 2 && rows.push(j));
+  const b = new Batch(true), white = new THREE.Color(1, 1, 1);
+  const at = new Map<number, number>();
+  for (const j of rows) for (const i of cols) {
+    const k = j * nx + i, x = pos[k * 3], y = pos[k * 3 + 1], z = pos[k * 3 + 2];
+    const a = smooth(0.06, 0.13, 1 - nrm.getY(k)) * (1 - smooth(0, 4, outsideX(x)));
+    const u = clamp((y - G) / SITE.talud.height, 0, 1);
+    at.set(k, b.vert(x, y + 0.02, z, nrm.getX(k), nrm.getY(k), nrm.getZ(k), u, x / 28, white, a));
+  }
+  for (let r = 0; r < rows.length - 1; r++) for (let c = 0; c < cols.length - 1; c++) {
+    const ka = rows[r] * nx + cols[c], kb = ka + 1, kc = rows[r + 1] * nx + cols[c], kd = kc + 1;
+    const A = at.get(ka)!, B = at.get(kb)!, C = at.get(kc)!, D = at.get(kd)!;
+    if (cols[c + 1] !== cols[c] + 1 || rows[r + 1] !== rows[r] + 1) continue;
+    // solo los cuadros donde se ve el corte
+    if (Math.max(b.alpha(A), b.alpha(B), b.alpha(C), b.alpha(D)) < 0.01) continue;
+    b.idx.push(A, C, B, B, C, D);
+  }
+  const mesh = new THREE.Mesh(b.build()!, mat);
+  mesh.receiveShadow = true;
+  mesh.renderOrder = -4;
+  mesh.name = 'talud';
   return mesh;
 }
 
@@ -246,6 +289,10 @@ class Batch {
   constructor(readonly rgba = false) {}
   get count() {
     return this.p.length / 3;
+  }
+  /** Alfa del vértice i (1 si el lote no lleva alfa). */
+  alpha(i: number) {
+    return this.rgba ? this.c[i * 4 + 3] : 1;
   }
   vert(x: number, y: number, z: number, nx: number, ny: number, nz: number, u: number, v: number, col: THREE.Color, a = 1) {
     this.p.push(x, y, z);
@@ -341,6 +388,22 @@ function part(b: Batch, g: THREE.BufferGeometry, x: number, y: number, z: number
   else for (let k = 0; k < P.count; k++) b.idx.push(base + k);
 }
 
+/** Montón de áridos de diámetro 1 y alto 1 (talud natural ~30° al escalarlo), con terrones. */
+function heapGeometry(seed: number) {
+  // perfil de abajo hacia arriba (así las caras del torno miran hacia afuera)
+  const prof = [[0.53, 0], [0.48, 0.07], [0.4, 0.27], [0.28, 0.58], [0.16, 0.86], [0.07, 0.97], [0, 1]];
+  const lathe = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 18);
+  const g = mergeVertices(lathe.deleteAttribute('uv').deleteAttribute('normal'));
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const d = (vnoise(x * 7 + 3, z * 7 + 3, seed) - 0.5) * 0.3;
+    p.setXYZ(i, x * (1 + d), y * (1 + d * 0.5), z * (1 + d));
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 /** Icosaedro con vértices compartidos (12 en vez de 60); el material del follaje usa flatShading. */
 function indexedBlob() {
   const g = new THREE.IcosahedronGeometry(0.5, 0);
@@ -349,6 +412,18 @@ function indexedBlob() {
   const m = mergeVertices(g);
   m.computeVertexNormals();
   return m;
+}
+
+/** Proporción del techo de la cabina de los autos respecto de su base (largo). */
+const CABIN_TOP = 0.62;
+
+/** Caja unitaria cuya cara superior se reduce a (tx, tz): cabinas de autos. */
+function taperedBox(tx: number, tz: number) {
+  const g = new THREE.BoxGeometry(1, 1, 1);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) if (p.getY(i) > 0) p.setXYZ(i, p.getX(i) * tx, p.getY(i), p.getZ(i) * tz);
+  g.computeVertexNormals();
+  return g;
 }
 
 /** Plantillas compartidas (geometrías unitarias). */
@@ -362,6 +437,7 @@ const GEO = {
   blob: indexedBlob(),
   twig: new THREE.CylinderGeometry(0.5, 0.5, 1, 4, 1, true),
   torus: new THREE.TorusGeometry(0.5, 0.1, 6, 22),
+  cabin: taperedBox(CABIN_TOP, 0.86),
 };
 
 /** Caja apoyada: (x, z) centro en planta, y0 = cara inferior. */
@@ -457,7 +533,6 @@ interface RibbonOpt {
   lift?: number;
   step?: number;
   alpha?: number;
-  color?: THREE.ColorRepresentation;
 }
 
 function ribbon(b: Batch, path: V2[], o: RibbonOpt) {
@@ -465,7 +540,7 @@ function ribbon(b: Batch, path: V2[], o: RibbonOpt) {
   const hw = o.width / 2, f = o.fade ?? 0, lift = o.lift ?? 0.03, uRep = o.uRep ?? 1, al = o.alpha ?? 1;
   const across = f > 0 ? [-hw - f, -hw + f, hw - f, hw + f] : [-hw, hw];
   const alpha = f > 0 ? [0, al, al, 0] : [al, al];
-  const col = new THREE.Color(o.color ?? '#ffffff');
+  const col = new THREE.Color(1, 1, 1);
   let s = 0, prev = -1;
   for (let i = 0; i < pts.length; i++) {
     const p = pts[i];
@@ -475,8 +550,10 @@ function ribbon(b: Batch, path: V2[], o: RibbonOpt) {
     const tx = (c[0] - a[0]) / tl, tz = (c[1] - a[1]) / tl;
     const base = b.count;
     across.forEach((w, k) => {
-      const px = p[0] - tz * w, pz = p[1] + tx * w;
-      b.vert(px, heightAt(px, pz) + lift, pz, 0, 1, 0, ((w + hw) / o.width) * uRep, s / o.texLen, col, alpha[k]);
+      const px = p[0] - tz * w, pz = p[1] + tx * w, h = heightAt(px, pz);
+      // normal del terreno (las calles del barrio suben la loma)
+      _n.set(h - heightAt(px + 0.5, pz), 0.5, h - heightAt(px, pz + 0.5)).normalize();
+      b.vert(px, h + lift, pz, _n.x, _n.y, _n.z, ((w + hw) / o.width) * uRep, s / o.texLen, col, alpha[k]);
     });
     if (prev >= 0) {
       for (let k = 0; k < across.length - 1; k++) b.idx.push(prev + k, prev + k + 1, base + k + 1, prev + k, base + k + 1, base + k);
@@ -508,11 +585,12 @@ function pixels(g: CanvasRenderingContext2D, w: number, h: number, fn: (x: numbe
     for (let x = 0; x < w; x++) {
       o[3] = 1;
       fn(x, y, o);
+      // Uint8ClampedArray: recorta a 0..255 sola
       const i = (y * w + x) * 4;
-      img.data[i] = clamp(o[0], 0, 1) * 255;
-      img.data[i + 1] = clamp(o[1], 0, 1) * 255;
-      img.data[i + 2] = clamp(o[2], 0, 1) * 255;
-      img.data[i + 3] = clamp(o[3], 0, 1) * 255;
+      img.data[i] = o[0] * 255;
+      img.data[i + 1] = o[1] * 255;
+      img.data[i + 2] = o[2] * 255;
+      img.data[i + 3] = o[3] * 255;
     }
   }
   g.putImageData(img, 0, 0);
@@ -540,6 +618,49 @@ function groundTexture() {
         g.beginPath(); g.ellipse(x + dx, y + dy, rad, rad * 0.75, 0, 0, 7); g.fill();
       }
     }
+  });
+}
+
+/**
+ * Cara del talud en maicillo: u = cota (0 pie, 1 coronamiento), v = largo (periódica).
+ * Cárcavas que bajan por la pendiente con relieve sombreado, estratos, capa vegetal arriba,
+ * derrame de material suelto al pie y piedras.
+ */
+function cutTexture() {
+  const W = 128, H = 1024;
+  const N = noiseField(W, H, 3, 24, 4, 51); // manchas
+  const R = noiseField(W, H, 3, 44, 3, 52); // cárcavas: alargadas en u
+  const S = noiseField(W, H, 1, 40, 2, 53); // borde irregular de estratos
+  const light = [0.84, 0.53, 0.33], dark = [0.66, 0.37, 0.21], pale = [0.86, 0.68, 0.49], soil = [0.5, 0.33, 0.22];
+  return canvasTex(W, H, (g) => {
+    pixels(g, W, H, (x, y, o) => {
+      const u = x / (W - 1), i = y * W + x;
+      const n = N[i], wob = (S[i] - 0.5) * 0.12;
+      // relieve: diferencia de la cárcava entre filas vecinas = cara iluminada / en sombra
+      const r = R[i], dr = R[((y + 4) % H) * W + x] - R[((y + H - 4) % H) * W + x];
+      const t = smooth(0.28, 0.72, n * 0.8 + r * 0.25);
+      for (let c = 0; c < 3; c++) o[c] = lerp(light[c], dark[c], t);
+      // estrato claro de maicillo a media altura y vetas horizontales finas
+      const band = smooth(0.0, 0.05, 0.08 - Math.abs(u - 0.42 - wob));
+      const fine = 0.025 * Math.sin((u + wob * 0.5) * 80);
+      for (let c = 0; c < 3; c++) o[c] = lerp(o[c], pale[c], band * 0.35) * (1 + fine);
+      // cárcavas: surco oscuro con un borde iluminado
+      const gully = smooth(0.6, 0.78, r) * smooth(0.02, 0.25, u) * (1 - smooth(0.9, 0.98, u));
+      const shade = 1 - gully * 0.16 + clamp(dr * 1.6, -0.07, 0.08) * (0.4 + gully);
+      // capa vegetal oscura en el coronamiento y derrame claro al pie
+      const top = smooth(0.9, 0.97, u + wob * 0.3), foot = 1 - smooth(0.0, 0.14, u + (n - 0.5) * 0.1);
+      for (let c = 0; c < 3; c++) {
+        let v = o[c] * shade;
+        v = lerp(v, soil[c], top * 0.75);
+        v = lerp(v, pale[c] * (0.92 + n * 0.1), foot * 0.7);
+        o[c] = v;
+      }
+      // piedras: punto claro con sombra abajo
+      // (1 px en u ≈ 3 px en v: la textura cubre ~11 m de talud a lo alto y 28 m a lo largo)
+      const cy = Math.floor(y / 3);
+      if (hash(x, cy, 54) > 0.995) for (let c = 0; c < 3; c++) o[c] = o[c] * 0.7 + 0.3 * 0.92;
+      else if (hash(x + 1, cy, 54) > 0.995) for (let c = 0; c < 3; c++) o[c] *= 0.8;
+    });
   });
 }
 
@@ -806,6 +927,7 @@ function createMaterials() {
   const decal = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 };
   return {
     ground: std({ map: groundTexture(), vertexColors: true, roughness: 1 }),
+    cut: std({ map: cutTexture(), vertexColors: true, roughness: 1, ...decal }),
     road: std({ map: gravelTexture(true), vertexColors: true, roughness: 1, ...decal }),
     pad: std({ map: gravelTexture(false), vertexColors: true, roughness: 1, ...decal }),
     asphalt: std({ map: asphaltTexture(), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
@@ -1057,7 +1179,9 @@ function waterTank(k: Kit, M: Mats, x: number, z: number) {
   part(b, GEO.sphere, x, G + 0.3, z, 1.7, 0.6, 1.7, COL.yellow);
   part(b, GEO.cyl, x, G + 1.8, z, 0.45, 0.08, 0.45, '#d89f00');
   for (const yy of [0.6, 1.1]) part(b, GEO.cyl, x, G + yy, z, 1.74, 0.06, 1.74, '#e2a800');
-  rod(b, GEO.tube, x + 0.8, G + 0.25, z, x + 3.5, G + 0.05, z + 1.5, 0.05, COL.blue);
+  // manguera de la salida inferior, tendida en el suelo hasta los baños
+  const hose: [number, number, number][] = [[x + 0.78, G + 0.22, z - 0.25], [x + 1.0, G + 0.03, z - 0.7], [x + 0.6, G + 0.03, z - 1.9], [x - 0.6, G + 0.03, z - 2.6]];
+  for (let i = 1; i < hose.length; i++) rod(b, GEO.tube, ...hose[i - 1], ...hose[i], 0.05, COL.blue);
 }
 
 function buildFaena(M: Mats) {
@@ -1135,9 +1259,10 @@ function buildMoldajeMuro(M: Mats) {
   const k = new Kit();
   const r = rng(11);
   const tints = ['#ffffff', '#eef2f6', '#e2e7ec', '#f6f4ef'];
+  // filas en z ≤ 17: al girar desde la pata del circuito, la cola de los camiones barre hasta z ≈ 17,4
   const piles: [number, number, number][] = [
-    [-20.7, 14.75, 11], [-20.7, 16.05, 7], [-20.7, 17.35, 5],
-    [-17.7, 14.75, 9], [-17.7, 16.05, 13], [-17.7, 17.35, 6],
+    [-20.7, 13.9, 11], [-20.7, 15.15, 7], [-20.7, 16.4, 5],
+    [-17.7, 13.9, 9], [-17.7, 15.15, 13], [-17.7, 16.4, 6],
   ];
   const T = 0.11;
   let top = G;
@@ -1147,10 +1272,10 @@ function buildMoldajeMuro(M: Mats) {
       const dx = (r() - 0.5) * 0.08, dz = (r() - 0.5) * 0.05;
       part(k.b(M.form), GEO.box, px + dx, G + 0.12 + T * (i + 0.5), pz + dz, 0.9, T, 2.4, tints[Math.floor(r() * 4)], { ry: Math.PI / 2 + (r() - 0.5) * 0.03 });
     }
-    if (px === -17.7 && pz === 16.05) top = G + 0.12 + T * n;
+    if (px === -17.7 && pz === 15.15) top = G + 0.12 + T * n;
   }
   // panelera (caballete en A) con paneles parados apoyados a ambos lados
-  const rx = -14.2, rz0 = 14.3, rz1 = 18.4, b = k.b(M.metal);
+  const rx = -14.2, rz0 = 13.5, rz1 = 17.6, b = k.b(M.metal);
   for (const zz of [rz0, rz1]) {
     rod(b, GEO.box, rx - 0.9, G, zz, rx, G + 2.3, zz, 0.08, '#3b4855');
     rod(b, GEO.box, rx + 0.9, G, zz, rx, G + 2.3, zz, 0.08, '#3b4855');
@@ -1167,17 +1292,17 @@ function buildMoldajeMuro(M: Mats) {
     }
   }
   // alineadores (perfiles largos) y esquineros
-  sleepers(k.b(M.rough), -24.2, 16.2, 1.4, 'z', [-1.6, 1.6]);
+  sleepers(k.b(M.rough), -24.2, 15.0, 1.4, 'z', [-1.6, 1.6]);
   for (let l = 0; l < 3; l++) for (let i = 0; i < 6 - l; i++) {
-    box(k.b(M.metal), -24.8 + i * 0.22 + l * 0.11, G + 0.12 + l * 0.12, 16.2, 0.16, 0.12, 4.4, '#56636f');
+    box(k.b(M.metal), -24.8 + i * 0.22 + l * 0.11, G + 0.12 + l * 0.12, 15.0, 0.16, 0.12, 4.4, '#56636f');
   }
   for (let i = 0; i < 5; i++) {
-    const ex = -15.6 + (r() - 0.5) * 0.3, ez = 14.2 + i * 0.3;
+    const ex = -16.0 + (r() - 0.5) * 0.3, ez = 14.2 + i * 0.3;
     box(k.b(M.form), ex, G, ez, 0.3, 0.3, 0.22, '#ffffff');
   }
   const g = k.into(new THREE.Group());
   g.userData.pick = { type: 'acopio', id: 'moldaje-muro' };
-  return { group: g, anchor: new THREE.Vector3(-17.7, top, 16.05) };
+  return { group: g, anchor: new THREE.Vector3(-17.7, top, 15.15) };
 }
 
 /** Moldaje de losa: paquetes de vigas H20 amarillas y pilas de placas fenólicas. */
@@ -1328,6 +1453,7 @@ function buildTaller(M: Mats) {
 function buildPuntales(M: Mats) {
   const k = new Kit();
   const A = SITE.acopioPuntales;
+  // la grúa engancha en la pila más alta (la última)
   let top = G;
   const piles: [number, number][] = [[A.x - 1.25, A.z - 2], [A.x + 1.25, A.z - 2], [A.x - 1.25, A.z + 2], [A.x + 1.25, A.z + 2]];
   piles.forEach(([px, pz], pi) => {
@@ -1342,12 +1468,13 @@ function buildPuntales(M: Mats) {
         rod(k.b(M.metal), GEO.tube, x, y, z0 + 1.9 * flip, x, y, z0 + 3.1 * flip, 0.045, '#c3c9ce');
         box(k.b(M.metal), x, y - 0.06, z0 - 0.005 * flip, 0.13, 0.13, 0.01, '#5d6a74');
       }
-      top = Math.max(top, G + 0.12 + 0.07 + l * 0.065);
+      top = G + 0.12 + 0.035 + l * 0.065 + 0.07; // cara superior de las placas base
     }
   });
   const g = k.into(new THREE.Group());
   g.userData.pick = { type: 'acopio', id: 'puntales' };
-  return { group: g, anchor: new THREE.Vector3(A.x - 1.25, top, A.z + 2) };
+  const [ax, az] = piles[piles.length - 1];
+  return { group: g, anchor: new THREE.Vector3(ax, top, az) };
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1367,30 +1494,32 @@ function cone(b: Batch, x: number, z: number) {
 function car(k: Kit, M: Mats, x: number, z: number, ry: number, color: string, pickup = false) {
   const f = frame(x, z, ry), p = k.b(M.paint);
   const L = pickup ? 5.2 : 4.3, Wd = pickup ? 1.85 : 1.76;
-  box(p, x, G + 0.28, z, L, 0.62, Wd, color, { ry });
-  const [cx, cz] = f(pickup ? 0.75 : -0.15, 0);
-  const cl = pickup ? 1.9 : 2.3;
-  box(k.b(M.glass), cx, G + 0.88, cz, cl, 0.52, Wd - 0.12, 0, { ry });
-  box(p, cx, G + 1.4, cz, cl - 0.15, 0.07, Wd - 0.16, color, { ry });
+  // carrocería, parachoques/faldón oscuro y cabina de vidrio en tronco de pirámide con techo
+  box(p, x, G + 0.3, z, L, 0.5, Wd, color, { ry });
+  box(p, x, G + 0.2, z, L + 0.06, 0.22, Wd - 0.04, '#2b2f33', { ry });
+  const [cx, cz] = f(pickup ? 0.75 : -0.2, 0);
+  const cl = pickup ? 1.9 : 2.45, cw = Wd - 0.08;
+  part(k.b(M.glass), GEO.cabin, cx, G + 0.8 + 0.26, cz, cl, 0.52, cw, 0, { ry });
+  box(p, cx, G + 1.32, cz, cl * CABIN_TOP + 0.06, 0.06, cw * 0.86 + 0.04, color, { ry });
   if (pickup) {
     const [bx, bz] = f(-1.35, 0);
     for (const s of [-1, 1]) {
       const [sx, sz] = f(-1.35, s * (Wd / 2 - 0.04));
-      box(p, sx, G + 0.9, sz, 2.2, 0.32, 0.06, color, { ry });
+      box(p, sx, G + 0.8, sz, 2.3, 0.3, 0.06, color, { ry });
     }
-    const [tx, tz] = f(-2.42, 0);
-    box(p, tx, G + 0.9, tz, 0.06, 0.32, Wd, color, { ry });
-    box(k.b(M.rough), bx, G + 0.9, bz, 2.1, 0.02, Wd - 0.14, '#2b2b2b', { ry });
+    const [tx, tz] = f(-2.47, 0);
+    box(p, tx, G + 0.8, tz, 0.06, 0.3, Wd, color, { ry });
+    box(k.b(M.rough), bx, G + 0.8, bz, 2.2, 0.015, Wd - 0.12, '#2b2b2b', { ry });
   }
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     const [wx, wz] = f(sx * (L / 2 - 0.85), sz * (Wd / 2 - 0.1));
     part(p, GEO.cyl, wx, G + 0.33, wz, 0.66, 0.24, 0.66, '#1b1d20', { ry, rx: Math.PI / 2 });
   }
   for (const sz of [-1, 1]) {
-    const [hx, hz] = f(L / 2, sz * 0.6);
-    box(p, hx, G + 0.62, hz, 0.04, 0.12, 0.3, '#f1f3f5', { ry });
-    const [tx, tz] = f(-L / 2, sz * 0.62);
-    box(p, tx, G + 0.65, tz, 0.04, 0.12, 0.28, '#b3261e', { ry });
+    const [hx, hz] = f(L / 2 + 0.01, sz * 0.6);
+    box(p, hx, G + 0.6, hz, 0.04, 0.12, 0.32, '#f1f3f5', { ry });
+    const [tx, tz] = f(-L / 2 - 0.01, sz * 0.62);
+    box(p, tx, G + 0.6, tz, 0.04, 0.12, 0.28, '#b3261e', { ry });
   }
 }
 
@@ -1417,13 +1546,13 @@ function buildMisc(k: Kit, M: Mats) {
   for (const [cx, cz, c, n] of coils) for (let i = 0; i < n; i++) coil(p, cx + (r() - 0.5) * 0.15, G + i * 0.24, cz + (r() - 0.5) * 0.15, 0.62 - i * 0.02, c);
   // conos de seguridad
   const cones: V2[] = [
-    [-29.6, 25.2], [-29.6, 27], [30.6, 25.2], [30.6, 27], [-50, 27.1], [-46, 27.1],
-    [43, 22.9], [45.5, 22.9], [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-26.5, 19.3], [24.6, 17.8],
+    [-30.5, 23.4], [-30.4, 25.6], [31.6, 24.6], [31.6, 26.8], [-50, 27.1], [-46, 27.1],
+    [43, 22.9], [45.5, 22.9], [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-28.4, 18.2], [24.6, 17.4],
   ];
   for (const [cx, cz] of cones) cone(p, cx, cz);
   // pallets sueltos
-  palletStack(k.b(M.rough), -32.0, 23.6, 0.2, 5, r);
-  palletStack(k.b(M.rough), -30.5, 23.9, -0.1, 3, r);
+  palletStack(k.b(M.rough), -32.4, 25.1, 0.2, 5, r);
+  palletStack(k.b(M.rough), -32.2, 23.7, -0.1, 3, r);
   palletStack(k.b(M.rough), 41.5, 5.5, 0.3, 6, r);
   palletStack(k.b(M.rough), 41.6, 7.2, 0.1, 2, r);
   // batea de escombros
@@ -1460,9 +1589,9 @@ function buildMisc(k: Kit, M: Mats) {
   }
   // acopio de áridos y excedentes de excavación
   const mounds: [number, number, number, number, number, string][] = [
-    [56, 4, 9, 2.6, 7, '#cfae82'], [62, 13, 7, 2.0, 6, '#9e968a'], [60, -6, 8, 2.2, 6, '#d2b285'],
+    [56, 4, 9, 2.6, 7, '#cfae82'], [62, 13, 7, 2.0, 6, '#9e968a'], [60, -6, 8, 2.2, 6, '#c99266'],
   ];
-  mounds.forEach(([mx, mz, sx, sy, sz, c], i) => part(k.b(M.rough), GEO.sphere, mx, G - 0.25, mz, sx, sy * 2, sz, c, { jitter: 0.22, seed: i + 3, ry: i }));
+  mounds.forEach(([mx, mz, sx, sy, sz, c], i) => part(k.b(M.ground), heapGeometry(i + 3), mx, G - 0.05, mz, sx, sy, sz, c, { ry: i, uv: 10 }));
   // postes de iluminación en las esquinas
   for (const [lx, lz, a] of [[FENCE.x0 + 1.5, FENCE.z1 - 1.5, -0.8], [FENCE.x1 - 1.5, FENCE.z1 - 1.5, -2.4], [FENCE.x1 - 1.5, -13.5, 2.4], [FENCE.x0 + 1.5, -13.5, 0.8]] as const) {
     part(k.b(M.metal), GEO.cyl, lx, G + 4.5, lz, 0.16, 9, 0.16, COL.galv);
@@ -1515,15 +1644,23 @@ function buildStreets(asphalt: Batch, k: Kit, M: Mats) {
 const WALLS = ['#f6f2ea', '#efe4cc', '#f3e7d3', '#ebe8e1', '#f1dcc0', '#f8f6f1'];
 const ROOFS = ['#b4532f', '#a84a2a', '#c0613a', '#9d4630', '#b85b36'];
 
-function house(fac: Batch, tile: Batch, x: number, z: number, ry: number, r: () => number) {
+const DOORS = ['#6b4a33', '#7a5638', '#f2efe8', '#4f3526'];
+
+function house(fac: Batch, tile: Batch, paint: Batch, x: number, z: number, ry: number, r: () => number) {
   const w = 7.2 + r() * 1.6, d = 8 + r() * 1.5, h = 5.6 + (r() - 0.5) * 0.4;
   const y0 = heightAt(x, z) - 0.4;
   const wall = WALLS[Math.floor(r() * WALLS.length)], roof = ROOFS[Math.floor(r() * ROOFS.length)];
+  const f = frame(x, z, ry);
   part(fac, GEO.box, x, y0 + h / 2, z, w, h, d, wall, { ry });
   hipRoof(tile, x, z, y0 + h, w + 0.8, d + 0.8, 1.9 + r() * 0.5, ry, roof);
+  // puerta y alero de acceso hacia el antejardín (+z local)
+  const [dx, dz] = f(0, d / 2 + 0.03), gy = heightAt(dx, dz);
+  box(paint, dx, gy - 0.05, dz, 1.0, 2.25, 0.08, DOORS[Math.floor(hash(Math.round(x), Math.round(z), 7) * DOORS.length)], { ry });
+  const [cx, cz] = f(0, d / 2 + 0.45);
+  box(paint, cx, gy + 2.32, cz, 1.6, 0.08, 0.9, '#d9d4cb', { ry });
   if (r() > 0.45) {
     // ampliación de un piso hacia el patio
-    const f = frame(x, z, ry), s = r() > 0.5 ? 1 : -1;
+    const s = r() > 0.5 ? 1 : -1;
     const [ax, az] = f(s * w * 0.2, -(d / 2 + 1.4));
     part(fac, GEO.box, ax, y0 + 1.5, az, w * 0.55, 3.0, 2.8, wall, { ry });
     hipRoof(tile, ax, az, y0 + 3.0, w * 0.55 + 0.6, 3.4, 0.9, ry, roof);
@@ -1577,7 +1714,7 @@ function buildSurroundings(M: Mats, group: THREE.Group) {
   const onStreet = (x: number, z: number) => TOWN.zSt.some((X) => Math.abs(x - X) < 7) || TOWN.xSt.some((Z) => Math.abs(z - Z) < 7 && x > ST_W);
   const addHouse = (x: number, z: number, ry: number) => {
     const k = kit(x, z);
-    house(k.b(M.facade), k.b(M.tile), x, z, ry, r);
+    house(k.b(M.facade), k.b(M.tile), k.b(M.paint), x, z, ry, r);
     if (r() > 0.4) {
       const gx = x + (r() - 0.5) * 6, gz = z + (r() - 0.5) * 6;
       const f = frame(gx, gz, ry);
@@ -1632,7 +1769,8 @@ export function createSite(): SiteRig {
   const group = new THREE.Group();
   group.name = 'faena';
 
-  group.add(buildTerrain(M.ground));
+  const terrain = buildTerrain(M.ground);
+  group.add(terrain.mesh, buildCutFace(terrain, M.cut));
 
   // caminos de ripio, explanadas y calles del barrio
   const roads = new Batch(true), pads = new Batch(true), asphalt = new Batch(false);
@@ -1645,7 +1783,8 @@ export function createSite(): SiteRig {
   padAt(50, SITE.roadZ, 13, 15);
   for (const A of [SITE.acopioMoldajeMuro, SITE.acopioMoldajeLosa, SITE.acopioFierro, SITE.tallerFierro, SITE.acopioPuntales]) padAt(A.x, A.z, A.w + 1.5, A.d + 1.5, 0.75);
   ribbon(roads, [[SITE.loopX0, SITE.roadZ], [SITE.loopX0, SITE.loopZ], [SITE.loopX1, SITE.loopZ], [SITE.loopX1, SITE.roadZ]], { width: 5, texLen: 12, radius: 6, fade: 0.6, step: 2 });
-  ribbon(roads, [[ST_W, SITE.roadZ], [52, SITE.roadZ]], { width: 7, texLen: 12, uRep: 2, fade: 0.6, step: 4, lift: 0.035 });
+  // el acceso parte en el borde de la calzada exterior (no se pinta ripio sobre el asfalto)
+  ribbon(roads, [[ST_W + 4.3, SITE.roadZ], [52, SITE.roadZ]], { width: 7, texLen: 12, uRep: 2, fade: 0.6, step: 4, lift: 0.035 });
   const decals: [Batch, THREE.Material, number][] = [[pads, M.pad, -3], [roads, M.road, -2]];
   for (const [b, m, order] of decals) {
     const mesh = new THREE.Mesh(b.build()!, m);

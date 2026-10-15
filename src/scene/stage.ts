@@ -89,7 +89,8 @@ export function createStage(container: HTMLElement, opts: { shadows?: boolean } 
     resize() {
       const w = container.clientWidth, h = container.clientHeight;
       const aspect = w / Math.max(h, 1);
-      const f = isMobile && aspect < 1 ? frustum * 1.25 : frustum;
+      // en vertical el encuadre se define por el ancho: ~70 m para que el edificio llene la pantalla
+      const f = aspect < 1 ? 70 : frustum;
       camera.left = (-f * aspect) / 2;
       camera.right = (f * aspect) / 2;
       camera.top = f / 2;
