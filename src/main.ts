@@ -43,14 +43,15 @@ const hud = createHud(app, {
 });
 hud.setLoading(0.05, 'Cargando modelo del Edificio E…');
 
-const ISO_TARGET = new THREE.Vector3(2, 5, 6);
+/** Objetivo de la vista principal: algo corrido hacia −x para que el portón (arriba a la izquierda) quede a la vista. */
+const ISO_TARGET = new THREE.Vector3(-1.3, 5, 8.3);
 /**
  * Vistas fijas: la principal mira desde el frente poniente (grúa y acopios adelante); la posterior
  * gira 180° para ver desde el talud el camino de mixers, el portón, la bomba y la tubería.
  */
 const VIEWS = {
-  iso: { target: ISO_TARGET, az: 55, el: 33, zoom: 1.05 },
-  back: { target: new THREE.Vector3(-16, 3, -13), az: 55 + 180, el: 33, zoom: 1.3 },
+  iso: { target: ISO_TARGET, az: 55, el: 33, zoom: 1.0 },
+  back: { target: new THREE.Vector3(1, 2, 0), az: 55 + 180, el: 33, zoom: 0.92 },
   top: { target: new THREE.Vector3(0, 0, 4), az: 90, el: 89.5, zoom: 1.1 },
 };
 const MIN_POLAR = THREE.MathUtils.degToRad(12);
@@ -165,7 +166,17 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
         note: 'Sube fierro y moldajes desde los acopios y hormigona los muros con capacho.',
       };
     case 'capacho':
-      return { title: 'Capacho 1 m³', subtitle: 'Balde de hormigonado colgado de la grúa', badge: 'CAPACHO', rows: [['Viajes realizados', fmt(prog.capachos)], ['Uso', 'Hormigonado de muros y zapatas']] };
+      return {
+        title: 'Capacho 1 m³',
+        subtitle: 'Balde de hormigonado colgado de la grúa',
+        badge: 'CAPACHO',
+        rows: [
+          ['Viajes realizados', fmt(prog.capachos)],
+          ['Uso', 'Hormigonado de muros y zapatas'],
+          ['Llenado', 'En el camino posterior, bajo la canaleta del mixer'],
+        ],
+        note: 'Entre hormigonados queda en el suelo junto al carril; la grúa lo engancha ahí, lo pasa por sobre el edificio hasta el muro y lo devuelve al terminar.',
+      };
     case 'mixer':
       return {
         title: 'Camión mixer',
@@ -307,6 +318,15 @@ async function start() {
   if (q.get('play') === '0') playing = false;
   // ?view=back abre en la vista posterior
   setView(q.get('view') === 'back' ? 'back' : 'iso', false);
+  // ?labels=0 oculta las etiquetas y ?cut=1 activa el corte (para revisar detalles)
+  if (q.get('labels') === '0') {
+    world.setLabels(false);
+    hud.setToggle?.('labels', false);
+  }
+  if (q.get('cut') === '1') {
+    world.setCutaway(true);
+    hud.setToggle?.('cutaway', true);
+  }
   // cámara por parámetros (?cam=x,y,z&zoom=&az=&el=), útil para revisar un detalle
   if (q.has('cam')) {
     const [cx, cy, cz] = q.get('cam')!.split(',').map(Number);
@@ -360,6 +380,8 @@ function loop(now: number) {
   hud.setCompass(compassAngle(SITE.northAngle, cam.x - tgt.x, cam.z - tgt.z));
   // mirando desde atrás (cámara del lado del talud) se oculta el bosque que taparía el camino
   w.site.setBackView?.(cam.z - tgt.z < -40);
+  // el corte quita la mitad del edificio que queda hacia la cámara
+  w.setCutSide(cam.z - tgt.z < 0);
   stage.render();
   hudAcc += dt;
   if (hudAcc > 1 / 20) {

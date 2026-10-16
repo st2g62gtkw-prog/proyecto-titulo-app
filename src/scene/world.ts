@@ -121,13 +121,14 @@ export class World {
       m.setChute(0);
     }
     // el capacho se llena apoyado en el suelo, con la punta de la canaleta sobre su boca (un poco
-    // hacia el camión); en reposo queda a un costado del carril, entre la bomba y el edificio
+    // hacia el camión); en reposo queda a un costado del carril (lado del edificio), un poco más
+    // atrás que el punto de llenado para que al moverlo no roce la parte trasera del mixer
     const capachoFill = {
       x: SITE.mixerCapacho.x + this.mixerChuteLocal.x + 0.25,
       y: SITE.groundY,
       z: SITE.mixerCapacho.z + this.mixerChuteLocal.z,
     };
-    this.capachoRest.set(capachoFill.x, SITE.groundY, SITE.road.bayZ);
+    this.capachoRest.set(capachoFill.x - 1.0, SITE.groundY, SITE.road.inZ + 3.0);
 
     // bomba estacionaria en su caseta y la tubería que sube por el shaft del ascensor
     this.pump = createStationaryPump();
@@ -139,7 +140,7 @@ export class World {
     const outlet = this.pump.outlet.getWorldPosition(new THREE.Vector3());
     // la tubería sale de la caseta por su muro trasero (−z local de la bomba)
     const outletDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.pump.group.quaternion);
-    this.pipeline = createPipeline(data, this.sched, outlet, outletDir);
+    this.pipeline = createPipeline(data, this.sched, outlet, outletDir, this.structure.clipping);
     scene.add(this.pipeline.group);
     this.pickables.push(...this.pipeline.pickables);
 
@@ -164,6 +165,7 @@ export class World {
         acopioPuntales: P(anchors.acopioPuntales),
       },
       capachoFill,
+      capachoRest: P(this.capachoRest),
       hang,
       topAt: (t) => {
         const a = this.sched.at(t);
@@ -224,19 +226,34 @@ export class World {
     for (const l of this.labels) l.obj.visible = on;
   }
 
+  /**
+   * Plano del corte longitudinal (z = 1,2, a media planta). Mirando desde el frente se quita la
+   * mitad delantera (+z); en la vista posterior, la mitad trasera, para ver el interior desde atrás.
+   */
+  private cutPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 1.2);
+
   /** Activa/desactiva el corte longitudinal del edificio para ver el interior. */
   setCutaway(on: boolean) {
     const planes = this.structure.clipping;
     planes.length = 0;
-    if (on) planes.push(new THREE.Plane(new THREE.Vector3(0, 0, -1), 1.2));
-    this.structure.group.traverse((o) => {
-      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-      if (m) {
-        m.needsUpdate = true;
-        const depth = m.userData?.depth as THREE.Material | undefined;
-        if (depth) depth.needsUpdate = true;
-      }
-    });
+    if (on) planes.push(this.cutPlane);
+    // el vano de la puerta (en el grupo de la tubería) se corta junto con el edificio
+    for (const g of [this.structure.group, this.pipeline.group]) {
+      g.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+        if (m) {
+          m.needsUpdate = true;
+          const depth = m.userData?.depth as THREE.Material | undefined;
+          if (depth) depth.needsUpdate = true;
+        }
+      });
+    }
+  }
+
+  /** Orienta el corte según el lado desde el que mira la cámara (se puede llamar cada cuadro). */
+  setCutSide(fromBack: boolean) {
+    const s = fromBack ? 1 : -1;
+    if (this.cutPlane.normal.z !== s) this.cutPlane.set(new THREE.Vector3(0, 0, s), -s * 1.2);
   }
 
   /** Dibuja el contorno del piso seleccionado (o lo oculta). */
@@ -282,7 +299,8 @@ export class World {
     // capacho en reposo junto al punto del mixer cuando no está colgado
     if (cs.payload !== 'capacho') {
       if (this.capacho.group.parent !== this.stage.scene) this.stage.scene.add(this.capacho.group);
-      this.capacho.group.position.copy(this.capachoRest).add(new THREE.Vector3(0, this.capacho.height - 0.02, 0));
+      // misma cota que cuando la grúa lo apoya (gancho = suelo + 1 cm + alto del capacho)
+      this.capacho.group.position.copy(this.capachoRest).add(new THREE.Vector3(0, this.capacho.height + 0.01, 0));
       this.capacho.setFill(0);
       this.capacho.setOpen(0);
     } else {
@@ -357,8 +375,8 @@ export class World {
       { x: SITE.tallerFierro.x, z: SITE.tallerFierro.z, r: 1.6, action: 'work' },
       { x: SITE.tallerFierro.x - 2, z: SITE.tallerFierro.z + 2, r: 1.2, action: 'work' },
       { x: a.acopioMoldajeMuro.x + 6.5, z: a.acopioMoldajeMuro.z - 1.5, r: 0.8, action: 'work' },
-      // rigger del capacho: entre el carril y la bahía, junto al punto de llenado
-      { x: this.capachoRest.x - 1.6, z: SITE.road.inZ + 1.8, r: 0.3, spread: 0.5, action: act.kind === 'muroHormigon' || act.kind === 'fundaciones' ? 'work' : 'idle' },
+      // rigger del capacho: al borde del carril (lado del edificio), junto al punto de llenado
+      { x: this.capachoRest.x + 2.5, z: SITE.road.inZ + 2.6, r: 0.3, spread: 0.5, action: act.kind === 'muroHormigon' || act.kind === 'fundaciones' ? 'work' : 'idle' },
       { x: a.acopioMoldajeLosa.x - 5.5, z: a.acopioMoldajeLosa.z + 1.5, r: 0.8, action: 'work' },
       { x: SITE.faena.x + 7, z: SITE.faena.z + 5, r: 1.5, action: 'idle' },
       { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },

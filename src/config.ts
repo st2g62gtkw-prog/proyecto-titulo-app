@@ -33,13 +33,20 @@ export const SITE = {
 
   /**
    * Tendido de la tubería por el suelo (planta): de la salida de la bomba entra por la puerta
-   * posterior del hall (x = xDoor), cruza al pasillo (z = zHall), sigue por el vestíbulo del
-   * ascensor (x = xLobby) y entra al shaft por el vano de su puerta (z = zShaftDoor).
+   * posterior del hall (x = xDoor; la puerta del IFC va de x −2,56 a −0,79 y su cara exterior está
+   * en z = zDoor), pasa entre los muros del hall y cruza al pasillo (z = zHall), sigue por el
+   * vestíbulo del ascensor (x = xLobby) y entra al shaft por el vano de su puerta (z = zShaftDoor,
+   * entre el tabique de la puerta y el muro H.A., z 3,69…4,39). Ningún tramo cruza muros de H.A.
+   * `door` es el vano de esa puerta (ancho en x y alto), que se dibuja en el muro de fachada.
    */
-  pipeline: { xDoor: -1.2, zHall: 0.45, xLobby: 0.6, zShaftDoor: 4.0 },
+  pipeline: { xDoor: -1.2, zDoor: -5.8, zHall: 0.45, xLobby: 0.6, zShaftDoor: 4.0, door: { x0: -2.5, x1: -0.85, h: 2.07 } },
 
-  /** Centro del mixer cuando descarga al capacho (muros): detenido en el carril de entrada. */
-  mixerCapacho: { x: 0, z: -14.4 },
+  /**
+   * Centro del mixer cuando descarga al capacho (muros): detenido en el carril de entrada justo
+   * antes de pasar frente a la caseta de la bomba. El capacho se llena en el suelo bajo la punta de
+   * la canaleta (≈ 6 m detrás del centro) y la grúa lo toma ahí, a ~29 m del mástil.
+   */
+  mixerCapacho: { x: -6.5, z: -14.4 },
   /**
    * Centro del mixer cuando su canaleta descarga en la tolva de la bomba: retrocede por la
    * bahía hasta que la punta de la canaleta (6,28 m detrás del centro) queda sobre la tolva.
@@ -47,8 +54,9 @@ export const SITE = {
   mixerPump: { x: 11.48, z: -10.6 },
 
   /**
-   * Accesos y caminos. Los camiones entran por el portón norponiente (esquina -x del costado
-   * posterior; arriba a la izquierda en la vista principal), avanzan por el carril de entrada
+   * Accesos y caminos. Los camiones entran por el portón norponiente (en el cierro -x que da a la
+   * calle, junto al costado posterior; arriba a la izquierda en la vista principal; con northAngle
+   * queda al nor-noroeste del edificio), avanzan por el carril de entrada
    * (z = inZ, hacia +x), dan la vuelta en la rotonda del extremo +x (centro turnX/turnZ, radio turnR)
    * y salen por el carril de salida (z = outZ, hacia -x). La bahía (z = bayZ) es donde el
    * mixer retrocede hasta la bomba y por donde sale hacia la rotonda.

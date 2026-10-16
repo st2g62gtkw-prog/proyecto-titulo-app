@@ -54,6 +54,11 @@ export interface CraneSetup {
    * del mixer detenido en el carril posterior (la grúa lo toma ahí, pasando sobre el edificio).
    */
   capachoFill: P3;
+  /**
+   * Punto (mundo) del suelo donde queda el capacho entre hormigonados: a un costado del carril, fuera
+   * del paso de los mixers. La grúa lo engancha ahí antes del primer viaje y lo deja al terminar.
+   */
+  capachoRest: P3;
   /** Distancia del gancho al fondo de cada tipo de carga. */
   hang: Record<PayloadKind, number>;
   /** Cota superior del edificio construido en el tiempo t (para izar con holgura). */
@@ -127,8 +132,11 @@ export class CranePlan {
     this.tasks.push({ t0, t1: t0 + D, task });
   }
 
-  /** Viaje de capacho: llenado en el mixer y descarga sobre muros o zapatas. */
-  private capacho(t0: number, D: number, to: P3, task: string) {
+  /**
+   * Viaje de capacho: llenado en el mixer y descarga sobre muros o zapatas. En el primero de la
+   * serie (`first`) el capacho ya cuelga sobre la canaleta (lo trae pickCapacho) y solo baja.
+   */
+  private capacho(t0: number, D: number, to: P3, task: string, first = false) {
     const s = this.s;
     const h = s.hang.capacho;
     const fill = s.capachoFill;
@@ -137,8 +145,10 @@ export class CranePlan {
     // el capacho baja hasta apoyar sus patas en el suelo, con la boca bajo la canaleta
     const atMixer = { x: fill.x, y: fill.y + 0.01, z: fill.z };
     const over = { x: to.x, y: to.y + 0.35, z: to.z };
-    this.key(T(0.04), null, safe);
-    this.key(T(0.16), atMixer, safe);
+    if (!first) {
+      this.key(T(0.04), null, safe);
+      this.key(T(0.16), atMixer, safe);
+    }
     this.key(T(0.22), atMixer, atMixer.y + h);
     this.key(T(0.32), atMixer, atMixer.y + h);
     this.key(T(0.38), atMixer, safe);
@@ -150,10 +160,52 @@ export class CranePlan {
     this.tasks.push({ t0, t1: t0 + D, task });
   }
 
-  /** El capacho cuelga del gancho desde que se engancha junto al mixer hasta el último viaje. */
-  private carryCapacho(n: number) {
-    const cs = this.cycles.slice(-n);
-    this.carries.push({ t0: cs[0].fill[0] - 0.05, t1: cs[cs.length - 1].pour[1] + 0.6, kind: 'capacho', task: '' });
+  /**
+   * Antes del primer viaje (entre t0 y t1): la grúa engancha el capacho donde quedó en reposo, lo
+   * levanta lo justo para pasar sobre el carril y lo deja colgando sobre el punto de llenado cuando
+   * el mixer ya se detuvo; el primer viaje lo baja al suelo. Devuelve el instante del enganche.
+   */
+  private pickCapacho(t0: number, t1: number) {
+    const s = this.s, h = s.hang.capacho;
+    const rest = s.capachoRest, fill = s.capachoFill;
+    const T = (x: number) => t0 + x * (t1 - t0);
+    const safe = this.safeY(t1, 'capacho', rest, fill);
+    const low = rest.y + 0.01 + h; // patas apoyadas en el suelo
+    const lift = low + 1.8;
+    this.key(T(0.05), null, safe);
+    this.key(T(0.3), rest, safe);
+    this.key(T(0.5), rest, low);
+    this.key(T(0.58), rest, low);
+    this.key(T(0.7), rest, lift);
+    this.key(T(0.95), fill, lift);
+    this.tasks.push({ t0, t1, task: 'Engancha el capacho junto al camino posterior' });
+    return T(0.54);
+  }
+
+  /** Después del último viaje (entre t0 y t1): deja el capacho vacío en su lugar de reposo. Devuelve el instante en que lo suelta. */
+  private returnCapacho(t0: number, t1: number) {
+    const s = this.s, h = s.hang.capacho;
+    const rest = s.capachoRest;
+    const T = (x: number) => t0 + x * (t1 - t0);
+    const low = rest.y + 0.01 + h;
+    const safe = this.safeY(t0, 'capacho', rest);
+    this.key(T(0.12), null, safe);
+    this.key(T(0.5), rest, safe);
+    this.key(T(0.8), rest, low);
+    this.key(T(1), rest, low + 1.2);
+    this.tasks.push({ t0, t1, task: 'Deja el capacho junto al camino posterior' });
+    return T(0.84);
+  }
+
+  /** Serie de capachos de una actividad: lo engancha, hace todos los viajes y lo devuelve. */
+  private capachoSeries(a: Activity, to: (tr: Activity['trips'][number]) => P3, task: (k: number) => string) {
+    const tr = a.trips;
+    const attach = this.pickCapacho(a.t0, tr[0].t0);
+    tr.forEach((x, k) => this.capacho(x.t0, x.t1 - x.t0, to(x), task(k), k === 0));
+    const last = tr[tr.length - 1];
+    const release = this.returnCapacho(last.t0 + 0.93 * (last.t1 - last.t0), a.t1 - 0.05);
+    // el capacho cuelga del gancho desde que se engancha hasta que vuelve al suelo
+    this.carries.push({ t0: attach, t1: release, kind: 'capacho', task: '' });
   }
 
   /** Grúa en espera: deja la pluma lejos de la bomba. */
@@ -173,8 +225,7 @@ export class CranePlan {
     const formF = [0.04, 0.18, 0.25, 0.31, 0.38, 0.56, 0.62, 0.66, 0.74];
     switch (a.kind) {
       case 'fundaciones':
-        for (const tr of a.trips) this.capacho(tr.t0, D0(tr), { x: tr.x, y: -0.1, z: tr.z }, 'Capacho: hormigón a zapatas');
-        this.carryCapacho(a.trips.length);
+        this.capachoSeries(a, (tr) => ({ x: tr.x, y: -0.1, z: tr.z }), () => 'Capacho: hormigón a zapatas');
         break;
       case 'radier':
       case 'losaHormigon':
@@ -187,8 +238,7 @@ export class CranePlan {
         a.trips.forEach((tr, k) => this.trip(tr.t0, D0(tr), A.acopioMoldajeMuro, { x: tr.x, y: s.wallTopY(a.level) + 0.6, z: tr.z }, 'panel', `Paneles de moldaje, sector ${k + 1}/${a.trips.length}`, formF));
         break;
       case 'muroHormigon':
-        a.trips.forEach((tr, k) => this.capacho(tr.t0, D0(tr), { x: tr.x, y: s.wallTopY(a.level), z: tr.z }, `Capacho ${k + 1}/${a.trips.length}: hormigón a muros`));
-        this.carryCapacho(a.trips.length);
+        this.capachoSeries(a, (tr) => ({ x: tr.x, y: s.wallTopY(a.level), z: tr.z }), (k) => `Capacho ${k + 1}/${a.trips.length}: hormigón a muros`);
         break;
       case 'muroDesmolde':
         a.trips.forEach((tr, k) => {

@@ -1652,7 +1652,8 @@ function buildStreets(asphalt: Batch, k: Kit, M: Mats) {
       s0 = cut + 5;
     }
   };
-  for (const x of TOWN.zSt) walk('z', x, -10, TOWN.z1 + 20, x === ST_W ? [...TOWN.xSt, SITE.gate.z] : TOWN.xSt);
+  // la calle del portón tiene vereda hasta el pie del talud, cortada en el acceso de camiones
+  for (const x of TOWN.zSt) walk('z', x, x === ST_W ? SITE.talud.zStart - 1 : -10, TOWN.z1 + 20, x === ST_W ? [...TOWN.xSt, SITE.gate.z] : TOWN.xSt);
   for (const z of TOWN.xSt) walk('x', z, ST_W + 6, TOWN.x1 + 20, TOWN.zSt);
 }
 

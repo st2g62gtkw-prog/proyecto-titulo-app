@@ -96,7 +96,7 @@ const EVENTS: { t: number; text: string; kind: FeedItem['kind'] }[] = [];
   };
   ev(0.1, 'Inicio de obra gruesa: excavación y emplantillado', 'info');
   ev(0.6, 'Grúa sube enfierradura de zapatas', 'crane');
-  mixers(3, FUND, FUND_M3, (n) => `Mixer N° ${n} ingresa por portón poniente · 7 m³ G25`);
+  mixers(3, FUND, FUND_M3, (n) => `Mixer N° ${n} ingresa por el portón norponiente · 7 m³ G25`);
   ev(FUND - 0.1, `Fundaciones hormigonadas · ${fmt(FUND_M3, 1)} m³`, 'ok');
   for (let f = 0; f < FLOORS; f++) {
     const name = `${f + 1}P`;
@@ -198,7 +198,7 @@ const SELECTIONS: Record<string, Selection> = {
       ['Pluma / contrapluma', '50 m / 12,5 m'],
       ['Altura de giro', '31,5 m'],
       ['Carga máx. / en punta', '6,0 t / 1,3 t'],
-      ['Ubicación', 'Al centro del edificio, frente al acceso poniente'],
+      ['Ubicación', 'Al centro del frente poniente, opuesta al camino de mixers'],
       ['Capachos de muro', '412 viajes (1 m³)'],
     ],
     note: 'Sube fierro y moldajes desde los acopios y hormigona los muros con capacho.',
