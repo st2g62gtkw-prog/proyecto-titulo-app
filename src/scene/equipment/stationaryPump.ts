@@ -192,8 +192,8 @@ function makeSurfaces() {
     coupling: metal('#4a4f55'),
     yellowSteel: metal('#e3a51c'),
     osb: new THREE.MeshStandardMaterial({ map: osbTexture(), roughness: 0.9 }),
-    /** Hormigón fresco: gris más oscuro y brillante que el acero de la tolva. */
-    wet: new THREE.MeshStandardMaterial({ color: '#6a6b6b', roughness: 0.16, metalness: 0.02 }),
+    /** Hormigón fresco: gris cálido y húmedo (brilla), distinto del acero azulado de la tolva. */
+    wet: new THREE.MeshStandardMaterial({ color: '#716e67', roughness: 0.2, metalness: 0 }),
     roof: new THREE.MeshStandardMaterial({ map: roofTexture(), roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide }),
     sign: new THREE.MeshStandardMaterial({ map: signTexture(), roughness: 0.55 }),
   };
@@ -226,6 +226,16 @@ function hollowFrustum(bot: XY, top: XY, y0: number, y1: number, t: number) {
   }
   q.push([B[3], B[2], B[1], B[0]], [Bi[0], Bi[1], Bi[2], Bi[3]]);
   return quadGeometry(q);
+}
+
+/** Saco de arena: esfera llevada a forma de cojín (superelipsoide), radio 1; se escala a la medida. */
+function sandbagGeometry() {
+  const g = new THREE.SphereGeometry(1, 12, 8);
+  const p = g.attributes.position;
+  const f = (v: number, e: number) => Math.sign(v) * Math.pow(Math.abs(v), e);
+  for (let i = 0; i < p.count; i++) p.setXYZ(i, f(p.getX(i), 0.4), f(p.getY(i), 0.85), f(p.getZ(i), 0.4));
+  g.computeVertexNormals();
+  return g;
 }
 
 /** Plancha de zinc acanalado sobre todo el techo; las ondas corren a lo largo de la pendiente (x). */
@@ -478,15 +488,17 @@ function buildShed(kit: PartKit) {
   const { x: X, zBack, zFront, t } = SHED;
   // losa de apoyo (toda la huella) con manchas de hormigón frente a la tolva
   box(kit, M.floor, -FOOT.w / 2, -0.1, -FOOT.d / 2, FOOT.w / 2, 0.008, FOOT.d / 2);
-  kit.add(M.spill, new THREE.CylinderGeometry(1, 1, 0.006, 20), [0.05, 0.009, 2.95], [0, 0, 0], [1.0, 1, 0.5]);
-  kit.add(M.spill, new THREE.CylinderGeometry(1, 1, 0.006, 16), [0.6, 0.01, 3.2], [0, 0.6, 0], [0.45, 1, 0.25]);
+  const stains: [number, number, number, number, number][] = [
+    [0.1, 2.75, 0.55, 0.3, 0.3], [-0.35, 3.15, 0.3, 0.18, -0.5], [0.55, 3.2, 0.28, 0.14, 0.9], [0.25, 3.35, 0.16, 0.1, 0.2],
+  ];
+  stains.forEach(([x, z, a, b, r], i) => kit.add(M.spill, new THREE.CylinderGeometry(1, 1, 0.004, 11), [x, 0.009 + i * 0.0015, z], [0, r, 0], [a, 1, b]));
   // muros laterales de OSB (lado exterior en ±X) y muro trasero con pasada para la tubería
   for (const s of [-1, 1]) {
     const x0 = s > 0 ? X - t : -X, x1 = s > 0 ? X : -X + t;
     kit.add(M.osb, osbBox(x0, 0, zBack, x1, wallTop(s * X), zFront, 'x'));
   }
   const shape = new THREE.Shape([new THREE.Vector2(-X, 0), new THREE.Vector2(X, 0), new THREE.Vector2(X, wallTop(X)), new THREE.Vector2(-X, wallTop(-X))]);
-  const hole = 0.14;
+  const hole = 0.11;
   shape.holes.push(new THREE.Path([
     new THREE.Vector2(PIPE_X - hole, PY - hole), new THREE.Vector2(PIPE_X - hole, PY + hole),
     new THREE.Vector2(PIPE_X + hole, PY + hole), new THREE.Vector2(PIPE_X + hole, PY - hole),
@@ -514,8 +526,8 @@ function buildShed(kit: PartKit) {
   box(kit, M.dark, 1.5, by, 1.74, 1.7, by + 0.02, 1.86);
   kit.cyl(M.dark, 0.06, 0.06, 0.05, [1.6, by + 0.045, 1.8], 'y', 12);
   // sacos de arena contra el muro +x (bajo el alero)
-  const bags: XYZ[] = [[1.6, 0.06, -1.15], [1.6, 0.06, -0.68], [1.6, 0.06, -0.21], [1.61, 0.18, -0.92], [1.6, 0.18, -0.45]];
-  bags.forEach((p, i) => kit.add(M.sand, new THREE.SphereGeometry(1, 10, 7), p, [0, (i % 3) * 0.12 - 0.1, 0], [0.16, 0.065, 0.235]));
+  const bags: XYZ[] = [[1.6, 0.07, -1.16], [1.6, 0.07, -0.66], [1.6, 0.07, -0.16], [1.6, 0.2, -0.91], [1.6, 0.2, -0.41]];
+  bags.forEach((p, i) => kit.add(M.sand, sandbagGeometry(), p, [0, (i % 3) * 0.06 - 0.05, 0], [0.17, 0.07, 0.25]));
   // carretilla junto a la tolva (lado +x), con restos de hormigón
   const bx = 1.37, bz = 2.45;
   kit.add(M.barrow, hollowFrustum([0.2, 0.26], [0.3, 0.36], 0.36, 0.6, 0.012), [bx, 0, bz]);
@@ -577,12 +589,16 @@ export function createStationaryPump(): StationaryPumpRig {
     return m;
   });
 
-  // superficie del hormigón en la tolva (malla unitaria escalada al ancho de la tolva a esa cota)
-  const fillGeo = new THREE.PlaneGeometry(1, 1, 8, 4);
+  // superficie del hormigón en la tolva (malla unitaria escalada al ancho de la tolva a esa cota):
+  // grumos y un montículo bajo el punto donde cae la canaleta
+  const fillGeo = new THREE.PlaneGeometry(1, 1, 14, 6);
   fillGeo.rotateX(-Math.PI / 2);
   const rnd = rng(31);
   const fp = fillGeo.attributes.position;
-  for (let i = 0; i < fp.count; i++) fp.setY(i, (rnd() - 0.5) * 0.03);
+  for (let i = 0; i < fp.count; i++) {
+    const u = fp.getX(i) / 0.2, v = fp.getZ(i) / 0.38;
+    fp.setY(i, 0.055 * Math.exp(-(u * u + v * v)) + (rnd() - 0.5) * 0.024);
+  }
   fillGeo.computeVertexNormals();
   const fill = new THREE.Mesh(fillGeo, M.wet);
   fill.position.set(0, 0, HOP.z);
@@ -644,10 +660,10 @@ export function createStationaryPump(): StationaryPumpRig {
     const k = Math.floor(s), f = s - k;
     const side = ((k % 2) + 2) % 2 === 0 ? 1 : -1;
     setValve(THREE.MathUtils.lerp(-side * SWING, side * SWING, smooth(f / 0.14)));
-    setLevel(1.0 + 0.018 * (1 - 2 * f) + 0.004 * Math.sin(t * 7.3));
+    setLevel(1.07 + 0.02 * (1 - 2 * f) + 0.004 * Math.sin(t * 7.3));
     agitator.rotation.x = -t * 2.6;
     engineGroup.position.set(0.003 * Math.sin(t * 91), 0.0025 * Math.sin(t * 127 + 1.3), 0.002 * Math.sin(t * 73 + 0.7));
-    const p = (t * 0.9) % 1;
+    const p = t * 0.9 - Math.floor(t * 0.9);
     beaconMat.emissiveIntensity = p < 0.1 || (p > 0.2 && p < 0.3) ? 2.6 : 0.05;
   };
   setPumping(false, 0);

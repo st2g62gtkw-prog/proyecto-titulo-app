@@ -33,7 +33,7 @@ export default function demo(stage: Stage) {
   if (q.get('shed') === '0') {
     rig.group.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
-      if ((o as THREE.Mesh).isMesh && m?.map && o.parent === rig.group.children[0]) o.visible = false;
+      if ((o as THREE.Mesh).isMesh && m?.map && (o.parent === rig.group.children[0] || o.parent === rig.group)) o.visible = false;
     });
   }
   const pivot = new THREE.Vector3(truckX - L / 2 + 0.35, G + 2.12, truckZ);
