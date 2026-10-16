@@ -59,14 +59,15 @@ src/
   core/
     schedule.ts        cronograma por piso (muros → losa)
     cranePlan.ts       viajes de la grúa (fierro, moldajes, capacho)
-    logistics.ts       mixers y camión bomba (llegada, cola, salida)
+    logistics.ts       mixers, capacho y bomba estacionaria (llegada, cola, salida)
     crews.ts           cuadrillas en la losa y en terreno
     progress.ts        indicadores de avance
   scene/
     structure.ts       edificio que crece (hormigón, fierro, moldajes, puntales)
     reveal.ts          materiales que hacen aparecer/crecer/retirar elementos en el tiempo
     site.ts            terreno, talud, caminos, faena y acopios
-    equipment/         grúa, mixer, bomba, capacho, cargas, trabajadores
+    pipeline.ts        tubería de la bomba por el suelo y el shaft del ascensor
+    equipment/         grúa, mixer, bomba estacionaria, capacho, cargas, trabajadores
     world.ts           arma la escena y la sincroniza con el tiempo
   ui/                  tablero (HUD) y estilos
 ```
