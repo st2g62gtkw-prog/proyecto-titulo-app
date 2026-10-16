@@ -166,7 +166,9 @@ export function buildSchedule(data: BuildingData): Schedule {
 
     // 1) Enfierradura de muros: avanza por sectores; la grúa sube paquetes de fierro.
     const aF = push('muroFierro', L, PACE.muroFierro, DAYS.muroFierro, `${piso} · Enfierradura de muros`,
-      L > 0 ? 'Se arma el andamio perimetral con malla; mallas Ø8–Ø12 A630-420H sobre los arranques' : 'Mallas Ø8–Ø12 A630-420H amarradas sobre los arranques de las zapatas');
+      L > 0
+        ? `${L === 1 ? 'Se arma' : 'La grúa trepa'} la bandeja de trabajo perimetral en ménsulas; mallas Ø8–Ø12 A630-420H sobre los arranques`
+        : 'Mallas Ø8–Ø12 A630-420H amarradas sobre los arranques de las zapatas');
     order.forEach((wi, k) => {
       const s = aF.t0 + 0.5 + (k / order.length) * (PACE.muroFierro - 2.6);
       timing[wi].rebar = [s, s + 1.8];

@@ -19,7 +19,11 @@ export function buildFeed(sched: Schedule, log: Logistics): FeedEvent[] {
     if (a.kind === 'muroHormigon') ev.push({ t: a.t1 - 0.5, text: `Muros ${a.levelName} hormigonados · ${fmt(WALL_M3[a.levelName] ?? 0)} m³`, kind: 'ok' });
     if (a.kind === 'muroMoldaje') ev.push({ t: a.t0 + 0.3, text: `Grúa sube paneles de moldaje al ${a.levelName}`, kind: 'crane' });
     if (a.kind === 'muroFierro') ev.push({ t: a.t0 + 0.3, text: `Grúa sube paquetes de fierro al ${a.levelName}`, kind: 'crane' });
-    if (a.kind === 'muroFierro' && a.level > 0) ev.push({ t: a.t0 + 0.1, text: `Andamio perimetral armado en el ${a.levelName}`, kind: 'info' });
+    if (a.kind === 'muroFierro' && a.level > 0) {
+      ev.push(a.level === 1
+        ? { t: a.t0 + 0.1, text: `Bandeja perimetral en ménsulas armada en el ${a.levelName}`, kind: 'info' }
+        : { t: a.t0 + 0.7, text: `Grúa trepa la bandeja perimetral en ménsulas al ${a.levelName}`, kind: 'crane' });
+    }
     if (a.kind === 'losaHormigon') {
       const p = sched.slab[a.level].pour;
       ev.push({ t: p[1], text: `${a.levelName === 'Techumbre' ? 'Losa de techumbre' : `Losa de piso ${a.levelName}`} hormigonada · ${fmt(SLAB_M3[a.levelName] ?? 0)} m³`, kind: 'ok' });

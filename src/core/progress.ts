@@ -22,7 +22,7 @@ export interface Progress {
 }
 
 export const FLOOR_STEPS: { kind: ActivityKind; label: string }[] = [
-  { kind: 'muroFierro', label: 'Andamio y enfierradura de muros' },
+  { kind: 'muroFierro', label: 'Bandeja y enfierradura de muros' },
   { kind: 'muroMoldaje', label: 'Moldaje de muros' },
   { kind: 'muroHormigon', label: 'Hormigonado con capacho' },
   { kind: 'muroDesmolde', label: 'Desmolde' },

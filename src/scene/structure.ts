@@ -1,13 +1,14 @@
 /**
  * Estructura del Edificio E construida en el tiempo: muros, losas, fierro, moldajes,
- * puntales, barandas y terminaciones. Todo se genera una vez desde los polígonos del IFC
- * y se anima con materiales reveal según el cronograma.
+ * puntales, barandas, bandeja perimetral en ménsulas y terminaciones. Todo se genera una vez
+ * desde los polígonos del IFC y se anima con materiales reveal según el cronograma.
  */
 import * as THREE from 'three';
 import type { BuildingData, LevelData, WallData } from '../data/building';
 import type { Schedule } from '../core/schedule';
 import { haWalls } from '../core/schedule';
 import { GeoBuilder, offsetPolygon, pointInPolygon, polyBounds, samplePerimeter, scanlineLoops, signedArea, type V2 } from './geom';
+import { BANDEJA_LIFT, bandejaSpan, buildBandeja } from './bandeja';
 import { NEVER, revealMaterial, revealMesh, type RevealMaterial } from './reveal';
 import { SITE } from '../config';
 import { concreteTexture, formPanelTexture, plywoodTexture } from './textures';
@@ -96,10 +97,11 @@ function makeSharedMaterials(clip: THREE.Plane[]) {
     fill: withClip(revealMaterial({ color: '#a8977f', roughness: 1 }, { mode: 'pop' })),
     sewer: withClip(revealMaterial({ color: '#e8642a', roughness: 0.55 }, { mode: 'drop', dropHeight: 0.4 })),
     hdpe: withClip(revealMaterial({ color: '#2f6fd1', roughness: 0.5 }, { mode: 'drop', dropHeight: 0.4 })),
-    scaffold: withClip(revealMaterial({ color: '#9aa4ad', roughness: 0.5, metalness: 0.55 }, { mode: 'rise', outLift: new THREE.Vector3(0, 2.5, 0) })),
-    scaffoldRail: withClip(revealMaterial({ color: '#d6322b', roughness: 0.6 }, { mode: 'rise', outLift: new THREE.Vector3(0, 2.5, 0) })),
-    scaffoldDeck: withClip(revealMaterial({ color: '#b98e4f', roughness: 0.85 }, { mode: 'rise', outLift: new THREE.Vector3(0, 2.5, 0) })),
-    scaffoldMesh: withClip(revealMaterial({ color: '#2b7a47', roughness: 0.9, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false }, { mode: 'rise', outLift: new THREE.Vector3(0, 2.5, 0) })),
+    // bandeja en ménsulas: ménsulas y pies derechos de acero oscuro, baranda roja, tablones y raschel
+    scaffold: withClip(revealMaterial({ color: '#3b3e43', roughness: 0.55, metalness: 0.5 }, { mode: 'rise', outLift: new THREE.Vector3(0, BANDEJA_LIFT, 0) })),
+    scaffoldRail: withClip(revealMaterial({ color: '#d6322b', roughness: 0.6 }, { mode: 'rise', outLift: new THREE.Vector3(0, BANDEJA_LIFT, 0) })),
+    scaffoldDeck: withClip(revealMaterial({ color: '#b98e4f', roughness: 0.85 }, { mode: 'rise', outLift: new THREE.Vector3(0, BANDEJA_LIFT, 0) })),
+    scaffoldMesh: withClip(revealMaterial({ color: '#2b7a47', roughness: 0.9, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false }, { mode: 'rise', outLift: new THREE.Vector3(0, BANDEJA_LIFT, 0) })),
   };
 }
 
@@ -212,6 +214,19 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     add(hdpe.build(), M.hdpe, 'agua-potable', 0, inst.t0, out + 0.3, false, false);
     add(cam.build(), M.footing, 'camaras', 0, inst.t0, out + 0.3, false, false);
   }
+
+  // Bandeja de trabajo perimetral en ménsulas (piso L = 1..6, sobre la losa del piso L): se arma
+  // al comenzar los muros del 2P y, cuando parte el piso siguiente, la grúa la "trepa" un piso
+  // (se levanta 2,5 m y en ese instante aparece la del piso de arriba); la última se retira al
+  // terminar la obra gruesa. Solo el piso en obra tiene bandeja.
+  const startWalls = (lvl: number) => sched.activities.find((a) => a.kind === 'muroFierro' && a.level === lvl)!.t0;
+  /** Trepada de la bandeja del piso L al siguiente (o retiro final): [out0, out1]. */
+  const climb = (L: number): [number, number] => {
+    const o0 = L + 1 < nWall ? startWalls(L + 1) - 0.3 : sched.slab[L + 1].pour[1] + 2.5;
+    return [o0, o0 + 1.0];
+  };
+  /** [llegada, out0, out1] de la bandeja del piso L (llega justo cuando termina de trepar la de abajo). */
+  const bandejaTime = (L: number): [number, number, number] => [L === 1 ? startWalls(1) - 0.2 : climb(L - 1)[1] - 0.02, ...climb(L)];
 
   // --- Losas: radier (0) y losas 2P…Techumbre (1..7) ------------------------------------
   levels.forEach((lv, S) => {
@@ -334,12 +349,21 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
       for (let i = 0; i < hl.length; i++) ge.wallPanel(hl[i], hl[(i + 1) % hl.length], sl.y0 - 0.06, sl.y1 + 0.06, 0.035, voidSide(hl, true, 0.035));
     }
     const rail = offsetPolygon(outer, 0.12);
-    gg.timing(guardIn, guardIn + 0.5, guardOut, guardOut + 0.6);
-    for (const { p } of samplePerimeter(rail, 1.9)) gg.aabb(p[0] - 0.035, sl.y1, p[1] - 0.035, p[0] + 0.035, sl.y1 + 1.1, p[1] + 0.035);
-    for (let i = 0; i < rail.length; i++) {
-      const a = rail[i], c = rail[(i + 1) % rail.length];
-      for (const h of [0.5, 1.02]) gg.bar(new THREE.Vector3(a[0], sl.y1 + h, a[1]), new THREE.Vector3(c[0], sl.y1 + h, c[1]), 0.05);
-      gg.bar(new THREE.Vector3(a[0], sl.y1 + 0.08, a[1]), new THREE.Vector3(c[0], sl.y1 + 0.08, c[1]), 0.15, false);
+    // mientras la bandeja en ménsulas está en esta losa, su baranda reemplaza a la de borde
+    // (se saca antes de que llegue la bandeja que trepa desde abajo y vuelve cuando esta se va)
+    let windows: [number, number][] = [[guardIn, guardOut]];
+    if (S < nWall) {
+      const arrive = S === 1 ? bandejaTime(S)[0] : climb(S - 1)[0];
+      windows = [[guardIn, arrive - 0.7], [bandejaTime(S)[2] + 0.2, guardOut]];
+    }
+    for (const [w0, w1] of windows.filter(([a, b]) => b > a + 0.5)) {
+      gg.timing(w0, w0 + 0.5, w1, w1 + 0.6);
+      for (const { p } of samplePerimeter(rail, 1.9)) gg.aabb(p[0] - 0.035, sl.y1, p[1] - 0.035, p[0] + 0.035, sl.y1 + 1.1, p[1] + 0.035);
+      for (let i = 0; i < rail.length; i++) {
+        const a = rail[i], c = rail[(i + 1) % rail.length];
+        for (const h of [0.5, 1.02]) gg.bar(new THREE.Vector3(a[0], sl.y1 + h, a[1]), new THREE.Vector3(c[0], sl.y1 + h, c[1]), 0.05);
+        gg.bar(new THREE.Vector3(a[0], sl.y1 + 0.08, a[1]), new THREE.Vector3(c[0], sl.y1 + 0.08, c[1]), 0.15, false);
+      }
     }
     add(ge.build(), M.edge, 'frontales', S, st.deck[0], st.pour[1] + 5.5);
     add(gg.build(), M.guard, 'barandas', S, guardIn, guardOut + 0.7, false, false);
@@ -389,52 +413,23 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     }
   }
 
-  // --- Andamio perimetral: se arma al comenzar cada piso y "trepa" al siguiente ------------
+  // --- Bandeja de trabajo perimetral en ménsulas ------------------------------------------
+  // (los tiempos están en bandejaTime, más arriba)
   for (let L = 1; L < nWall; L++) {
-    const start = (lvl: number) => sched.activities.find((a) => a.kind === 'muroFierro' && a.level === lvl)!.t0;
-    const in0 = start(L) - 0.2;
-    const in1 = in0 + 2.6;
-    const out0 = L + 1 < nWall ? start(L + 1) - 0.3 : sched.slab[L + 1].pour[1] + 2.5;
-    const out1 = out0 + 1.0;
     const y = levels[L].slab.y1;
-    const H = 3.6;
-    const outer = levels[L].slab.outer;
-    const sign = signedArea(outer) > 0 ? 1 : -1;
-    const inner = offsetPolygon(outer, -0.25);
-    const outerL = offsetPolygon(outer, -1.1);
-    const frame = new GeoBuilder(), rails = new GeoBuilder(), deck = new GeoBuilder(), mesh = new GeoBuilder();
-    for (const gb of [frame, rails, deck, mesh]) gb.timing(in0, in1, out0, out1, y - 0.25, H + 0.3);
-    // parantes en ambas líneas y travesaños en cada plataforma
-    for (const { p, t } of samplePerimeter(inner, 1.9)) {
-      const nx = sign * t[1], nz = -sign * t[0];
-      const q: V2 = [p[0] + nx * 0.85, p[1] + nz * 0.85];
-      frame.barN(p[0], y - 0.25, p[1], p[0], y + H, p[1], 0.045);
-      frame.barN(q[0], y - 0.25, q[1], q[0], y + H, q[1], 0.045);
-      for (const h of [0, 2.0]) frame.barN(p[0], y + h, p[1], q[0], y + h, q[1], 0.04);
-      // diagonal de arriostramiento cada dos vanos
-      frame.barN(q[0], y, q[1], q[0] + t[0] * 1.9, y + 2.0, q[1] + t[1] * 1.9, 0.03);
-    }
-    for (const loop of [inner, outerL]) {
-      for (let i = 0; i < loop.length; i++) {
-        const a = loop[i], c = loop[(i + 1) % loop.length];
-        if (Math.hypot(c[0] - a[0], c[1] - a[1]) < 0.1) continue;
-        for (const h of [0, 2.0]) frame.barN(a[0], y + h, a[1], c[0], y + h, c[1], 0.04);
-      }
-    }
-    // barandas rojas y rodapié por el lado exterior
-    for (let i = 0; i < outerL.length; i++) {
-      const a = outerL[i], c = outerL[(i + 1) % outerL.length];
-      if (Math.hypot(c[0] - a[0], c[1] - a[1]) < 0.1) continue;
-      for (const h of [1.0, 2.5, 3.0, 3.55]) rails.barN(a[0], y + h, a[1], c[0], y + h, c[1], 0.05);
-      mesh.wallPanel(a, c, y - 0.2, y + H, 0.012, voidSide(outerL, false, 0.012) + (voidSide(outerL, false, 0.012) === 0 ? 0.06 : -0.06));
-    }
-    // plataformas de tablones
-    deck.extrude(outerL, [inner], y - 0.02, y + 0.03, true, true);
-    deck.extrude(outerL, [inner], y + 1.98, y + 2.03, true, true);
-    add(frame.build(), M.scaffold, 'andamio', L, in0, out1 + 0.1);
-    add(rails.build(), M.scaffoldRail, 'andamio-barandas', L, in0, out1 + 0.1, false, false);
-    add(deck.build(), M.scaffoldDeck, 'andamio-plataformas', L, in0, out1 + 0.1);
-    add(mesh.build(), M.scaffoldMesh, 'andamio-malla', L, in0, out1 + 0.1, false, false);
+    const [by, bh] = bandejaSpan(y);
+    // la caja de aparición incluye el tramo que sube al trepar, para que no se recorte arriba
+    const box = bh + BANDEJA_LIFT + 0.1;
+    const [in0, out0, out1] = bandejaTime(L);
+    // la del 2P se arma de abajo hacia arriba (~2,4 s); las demás aparecen cuando llega la que trepa
+    const in1 = in0 + (L === 1 ? 2.4 * (box / bh) : 0.04);
+    const parts = { frame: new GeoBuilder(), rails: new GeoBuilder(), deck: new GeoBuilder(), mesh: new GeoBuilder() };
+    for (const gb of Object.values(parts)) gb.timing(in0, in1, out0, out1, by, box);
+    buildBandeja(parts, levels[L].slab.outer, haWalls(levels[L - 1]).map((w) => w.poly), y);
+    add(parts.frame.build(), M.scaffold, 'andamio', L, in0, out1 + 0.1);
+    add(parts.rails.build(), M.scaffoldRail, 'andamio-barandas', L, in0, out1 + 0.1, false, false);
+    add(parts.deck.build(), M.scaffoldDeck, 'andamio-plataformas', L, in0, out1 + 0.1);
+    add(parts.mesh.build(), M.scaffoldMesh, 'andamio-malla', L, in0, out1 + 0.1, false, false);
   }
 
   const struct: Structure = {

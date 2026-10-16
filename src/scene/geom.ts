@@ -263,6 +263,131 @@ function norm2(v: V2): V2 {
   return [v[0] / l, v[1] / l];
 }
 
+/**
+ * Contorno envolvente "hacia afuera" de una fachada: quita escalones y chaflanes chicos
+ * (pilastras, astillas del dibujo) y rellena entrantes angostos moviendo siempre el tramo
+ * interior hacia el exterior, de modo que el resultado contiene al polígono original y queda
+ * con tramos rectos y limpios para tender bandejas, barandas o mallas a su alrededor.
+ * Devuelve el contorno en sentido antihorario (signedArea > 0).
+ * @param step  largo máximo de los escalones y chaflanes que se eliminan (m)
+ * @param notch ancho máximo de los entrantes que se rellenan (m); con un desplazamiento
+ *              hacia afuera de d, los entrantes de menos de 2·d se cruzan y deben rellenarse
+ */
+export function outerEnvelope(poly: V2[], step = 0.35, notch = 2.4): V2[] {
+  let p: V2[] = poly.map(([x, z]) => [x, z]);
+  if (signedArea(p) < 0) p.reverse();
+  p = cleanLoop(p);
+  const skip = new Set<string>();
+  const key = (a: V2, b: V2) => `${a[0].toFixed(3)},${a[1].toFixed(3)};${b[0].toFixed(3)},${b[1].toFixed(3)}`;
+  for (let iter = 0; iter < 400 && p.length > 4; iter++) {
+    const n = p.length;
+    let best = -1, bestLen = Infinity, bestKind: 'step' | 'notch' | 'corner' = 'step';
+    for (let i = 0; i < n; i++) {
+      const a = p[i], b = p[(i + 1) % n];
+      const len = dist2(a, b);
+      if (len >= Math.max(step, notch) || len >= bestLen || skip.has(key(a, b))) continue;
+      const dp = dir2(p[(i - 1 + n) % n], a), de = dir2(a, b), dn = dir2(b, p[(i + 2) % n]);
+      const turnA = cross2(dp, de), turnB = cross2(de, dn), dd = dp[0] * dn[0] + dp[1] * dn[1];
+      // escalón (tramos vecinos paralelos), entrante angosto (dos vértices cóncavos) o chaflán convexo
+      const kind = dd > 0.85 && len < step ? 'step'
+        : dd < -0.85 && turnA < 0 && turnB < 0 ? 'notch'
+          : dd >= -0.85 && turnA > 0 && turnB > 0 && len < step ? 'corner' : null;
+      if (kind) { best = i; bestLen = len; bestKind = kind; }
+    }
+    if (best < 0) break;
+    const next = envelopeFix(p, best, bestKind);
+    if (next && signedArea(next) >= signedArea(p) - 1e-6 && isSimpleLoop(next)) p = cleanLoop(next);
+    else skip.add(key(p[best], p[(best + 1) % n]));
+  }
+  return p;
+}
+
+/** Un paso de outerEnvelope sobre el tramo i → i+1 (devuelve null si no se puede). */
+function envelopeFix(p: V2[], i: number, kind: 'step' | 'notch' | 'corner'): V2[] | null {
+  const n = p.length;
+  const at = (k: number) => p[((k % n) + n) % n];
+  const out = p.slice();
+  const set = (k: number, v: V2) => { out[((k % n) + n) % n] = v; };
+  const a = at(i), b = at(i + 1), pa = at(i - 1), nb = at(i + 2);
+  if (kind === 'notch') {
+    // el fondo del entrante sale hasta la boca más cercana
+    const m = Math.min(dist2(pa, a), dist2(b, nb));
+    const dp = dir2(pa, a), dn = dir2(b, nb);
+    set(i, [a[0] - dp[0] * m, a[1] - dp[1] * m]);
+    set(i + 1, [b[0] + dn[0] * m, b[1] + dn[1] * m]);
+    return out;
+  }
+  if (kind === 'corner') {
+    const X = lineHit(pa, a, b, nb);
+    if (!X) return null;
+    set(i, X); set(i + 1, X);
+    return out;
+  }
+  // escalón: el tramo que queda más adentro se lleva a la recta del que queda más afuera
+  const dp = dir2(pa, a);
+  const s = (b[0] - a[0]) * dp[1] - (b[1] - a[1]) * dp[0]; // avance según la normal exterior (dz, -dx)
+  if (s >= 0) {
+    const X = lineHit(at(i - 2), pa, b, nb);
+    if (!X) return null;
+    set(i - 1, X); set(i, X); set(i + 1, X);
+  } else {
+    const Y = lineHit(nb, at(i + 3), pa, a);
+    if (!Y) return null;
+    set(i, Y); set(i + 1, Y); set(i + 2, Y);
+  }
+  return out;
+}
+
+/** Quita vértices repetidos y alineados (también espigas de ancho nulo). */
+function cleanLoop(p: V2[]): V2[] {
+  const q = p.slice();
+  for (let changed = true; changed && q.length > 3;) {
+    changed = false;
+    for (let i = 0; i < q.length && q.length > 3; i++) {
+      const n = q.length;
+      const a = q[(i - 1 + n) % n], b = q[i], c = q[(i + 1) % n];
+      const l1 = dist2(a, b), l2 = dist2(b, c);
+      if (l1 < 1e-3 || (l2 >= 1e-3 && Math.abs(cross2([b[0] - a[0], b[1] - a[1]], [c[0] - b[0], c[1] - b[1]])) / (l1 * l2) < 0.02)) {
+        q.splice(i, 1);
+        changed = true;
+        i--;
+      }
+    }
+  }
+  return q;
+}
+
+/** true si ningún par de tramos no contiguos del contorno se corta. */
+function isSimpleLoop(p: V2[]) {
+  const n = p.length;
+  for (let i = 0; i < n; i++) {
+    const a = p[i], b = p[(i + 1) % n];
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      const c = p[j], d = p[(j + 1) % n];
+      const d1 = cross2([b[0] - a[0], b[1] - a[1]], [c[0] - a[0], c[1] - a[1]]);
+      const d2 = cross2([b[0] - a[0], b[1] - a[1]], [d[0] - a[0], d[1] - a[1]]);
+      const d3 = cross2([d[0] - c[0], d[1] - c[1]], [a[0] - c[0], a[1] - c[1]]);
+      const d4 = cross2([d[0] - c[0], d[1] - c[1]], [b[0] - c[0], b[1] - c[1]]);
+      if (d1 * d2 < 0 && d3 * d4 < 0) return false;
+    }
+  }
+  return true;
+}
+
+/** Intersección de las rectas p1→p2 y q1→q2 (null si son paralelas). */
+function lineHit(p1: V2, p2: V2, q1: V2, q2: V2): V2 | null {
+  const dx = p2[0] - p1[0], dz = p2[1] - p1[1], ex = q2[0] - q1[0], ez = q2[1] - q1[1];
+  const den = dx * ez - dz * ex;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((q1[0] - p1[0]) * ez - (q1[1] - p1[1]) * ex) / den;
+  return [p1[0] + dx * t, p1[1] + dz * t];
+}
+
+const dist2 = (a: V2, b: V2) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+const dir2 = (a: V2, b: V2): V2 => norm2([b[0] - a[0], b[1] - a[1]]);
+const cross2 = (u: V2, v: V2) => u[0] * v[1] - u[1] * v[0];
+
 /** Recorre un polígono cerrado y entrega puntos cada `step` metros (con su tangente). */
 export function samplePerimeter(poly: V2[], step: number): { p: V2; t: V2 }[] {
   const out: { p: V2; t: V2 }[] = [];
