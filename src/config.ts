@@ -27,7 +27,7 @@ export const SITE = {
    * Bomba estacionaria de hormigón (losas y radier), dentro de su caseta frente al edificio.
    * heading = giro de la caseta; con 0 la tolva mira hacia el camino interior (+z).
    */
-  pump: { x: 6.8, z: 16.3, heading: 0 },
+  pump: { x: 6.8, z: 17.0, heading: 0 },
 
   /** Tendido de la tubería por el suelo: frente al edificio, entrada por el hall y llegada al shaft. */
   pipeline: { zFront: 11.2, xEntry: 2.9, zHall: 6.2 },

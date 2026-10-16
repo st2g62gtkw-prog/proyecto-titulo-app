@@ -287,14 +287,29 @@ async function start() {
   hud.setMarkers(markers);
   const q = new URLSearchParams(location.search);
   if (q.has('t')) T = +q.get('t')!;
+  // ?act=<id>&k=<0..1> salta a un momento de una actividad (p. ej. losaHormigon-3)
+  const act = q.get('act') ? [...world.sched.activities, ...world.sched.parallel].find((a) => a.id === q.get('act')) : null;
+  if (act) T = act.t0 + (act.t1 - act.t0) * +(q.get('k') ?? 0.5);
   if (q.has('speed')) speed = +q.get('speed')!;
   if (q.get('play') === '0') playing = false;
   setView('iso');
+  // cámara por parámetros (?cam=x,y,z&zoom=&az=&el=), útil para revisar un detalle
+  if (q.has('cam')) {
+    const [cx, cy, cz] = q.get('cam')!.split(',').map(Number);
+    stage.controls.target.set(cx, cy, cz);
+    stage.setIsoView(+(q.get('az') ?? 55), +(q.get('el') ?? 33));
+  }
+  if (q.has('zoom')) {
+    stage.camera.zoom = +q.get('zoom')!;
+    stage.camera.updateProjectionMatrix();
+  }
   // entrada: la cámara parte alejada y se acerca a la obra
-  const finalZoom = stage.camera.zoom;
-  stage.camera.zoom = finalZoom * 0.55;
-  stage.camera.updateProjectionMatrix();
-  stage.focus(ISO_TARGET, finalZoom, 2.6);
+  if (!q.has('cam')) {
+    const finalZoom = stage.camera.zoom;
+    stage.camera.zoom = finalZoom * 0.55;
+    stage.camera.updateProjectionMatrix();
+    stage.focus(stage.controls.target.clone(), finalZoom, 2.6);
+  }
   // compila shaders con todo visible una vez para evitar tirones al aparecer capas
   world.update(T, 0, 0);
   stage.renderer.compile(stage.scene, stage.camera);

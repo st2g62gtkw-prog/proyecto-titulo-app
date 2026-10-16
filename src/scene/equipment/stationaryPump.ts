@@ -16,7 +16,7 @@
  *      −3,50 ─ alero trasero
  */
 import * as THREE from 'three';
-import { PartKit, createWheels, markPickable, metal, paint, smooth, tinted, truckSurfaces, type XY, type XYZ } from './mixer';
+import { PartKit, createWheels, markPickable, metal, paint, smooth, tinted, type Surface, type XY, type XYZ } from './mixer';
 
 export interface StationaryPumpRig {
   /** Origen = suelo bajo el centro de la bomba; tolva hacia +z, salida de la tubería hacia −z. */
@@ -54,7 +54,7 @@ const VALVE_Z = 2.95;
 const LEVER_L = 0.44;
 const RAM_Y = PY + LEVER_L;
 const RAM_X0 = 0.36; // extremo interior de las camisas
-const RAM_X1 = 0.7;
+const RAM_X1 = 0.6;
 const SWING = 0.3; // rad
 const STROKE = 1.8; // s por embolada
 
@@ -70,6 +70,12 @@ const wallTop = (x: number) => roofY(x) - AMP - RAFTER_H;
 const POST_X = SHED.x - SHED.t - 0.045;
 const POSTS_Z = [-3.04, -1.9, -0.75, 0.4, 1.555];
 const OSB_TILE = 2.44; // la textura cubre 2 planchas de 1,22 × 2,44 m
+
+/** Eje del remolque: posición en z, trocha (centro de rueda en x), escala de la rueda del camión. */
+const AXLE_Z = -0.2;
+const WHEEL_X = 0.86;
+const WHEEL_K = 0.72;
+const WHEEL_Y = 0.52 * WHEEL_K;
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -96,12 +102,12 @@ function rng(seed: number) {
 function osbTexture() {
   const S = 512;
   return canvasTex(S, S, (g) => {
-    g.fillStyle = '#c6a16b';
+    g.fillStyle = '#cdb48a';
     g.fillRect(0, 0, S, S);
     const rnd = rng(4242);
     for (let i = 0; i < 5200; i++) {
-      const l = 0.8 + rnd() * 0.32;
-      g.fillStyle = `rgba(${Math.min(255, 206 * l) | 0},${Math.min(255, 168 * l) | 0},${Math.min(255, 113 * l) | 0},0.62)`;
+      const l = 0.8 + rnd() * 0.3;
+      g.fillStyle = `rgba(${Math.min(255, 220 * l) | 0},${Math.min(255, 190 * l) | 0},${Math.min(255, 142 * l) | 0},0.6)`;
       g.save();
       g.translate(rnd() * S, rnd() * S);
       g.rotate(rnd() * Math.PI);
@@ -110,7 +116,7 @@ function osbTexture() {
       g.restore();
     }
     for (let i = 0; i < 900; i++) {
-      g.fillStyle = `rgba(112,78,42,${0.15 + rnd() * 0.25})`;
+      g.fillStyle = `rgba(120,92,58,${0.12 + rnd() * 0.2})`;
       g.fillRect(rnd() * S, rnd() * S, 1.5 + rnd() * 4, 1 + rnd() * 2);
     }
     // juntas entre planchas: borde izquierdo, centro (cada 1,22 m) y borde superior (2,44 m)
@@ -175,7 +181,7 @@ function makeSurfaces() {
     pad: paint('#a17d4f'),
     floor: paint('#aba597'),
     spill: paint('#8f8c84'),
-    crust: paint('#a6a39b'),
+    crust: paint('#9d9b95'),
     sand: paint('#d9cfb3'),
     barrow: paint('#c5432b'),
     tube: paint('#c9cbc6'),
@@ -186,6 +192,8 @@ function makeSurfaces() {
     coupling: metal('#4a4f55'),
     yellowSteel: metal('#e3a51c'),
     osb: new THREE.MeshStandardMaterial({ map: osbTexture(), roughness: 0.9 }),
+    /** Hormigón fresco: gris más oscuro y brillante que el acero de la tolva. */
+    wet: new THREE.MeshStandardMaterial({ color: '#6a6b6b', roughness: 0.16, metalness: 0.02 }),
     roof: new THREE.MeshStandardMaterial({ map: roofTexture(), roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide }),
     sign: new THREE.MeshStandardMaterial({ map: signTexture(), roughness: 0.55 }),
   };
@@ -261,8 +269,13 @@ function osbBox(x0: number, y0: number, z0: number, x1: number, y1: number, z1: 
   return osbUV(g, plane);
 }
 
+/** Caja entre dos esquinas en cualquier orden (las coordenadas con signo ±s no quedan invertidas). */
+function box(kit: PartKit, s: Surface, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) {
+  kit.box(s, Math.min(x0, x1), Math.min(y0, y1), Math.min(z0, z1), Math.max(x0, x1), Math.max(y0, y1), Math.max(z0, z1));
+}
+
 /** Codo de 90° en un plano horizontal: arco de radio R alrededor de `c` desde el ángulo a0 (rad, en xz). */
-function elbow(kit: PartKit, s: Parameters<PartKit['add']>[0], c: XYZ, R: number, r: number, a0: number) {
+function elbow(kit: PartKit, s: Surface, c: XYZ, R: number, r: number, a0: number) {
   const g = new THREE.TorusGeometry(R, r, 10, 10, Math.PI / 2);
   g.rotateX(Math.PI / 2); // arco de +x a +z
   g.rotateY(-a0);
@@ -276,49 +289,49 @@ function buildPumpStatic(kit: PartKit) {
   const M = surfaces();
   // largueros, travesaños, ballestas y eje
   for (const s of [-1, 1]) {
-    kit.box(M.dark, s * 0.45, 0.62, -2.0, s * 0.55, 0.8, 2.27);
-    kit.box(M.dark, s * 0.53, 0.42, -0.48, s * 0.47, 0.62, 0.08);
-    kit.box(M.dark, s * 0.56, 0.4, -0.5, s * 0.44, 0.44, 0.1);
+    box(kit, M.dark, s * 0.45, 0.62, -2.0, s * 0.55, 0.8, 2.27);
+    box(kit, M.dark, s * 0.53, WHEEL_Y, AXLE_Z - 0.28, s * 0.47, 0.62, AXLE_Z + 0.28);
+    box(kit, M.dark, s * 0.56, WHEEL_Y - 0.02, AXLE_Z - 0.3, s * 0.44, WHEEL_Y + 0.02, AXLE_Z + 0.3);
   }
-  for (const z of [-1.95, -0.2, 1.4]) kit.box(M.dark, -0.45, 0.64, z - 0.04, 0.45, 0.78, z + 0.04);
-  kit.cyl(M.dark, 0.04, 0.04, 1.5, [0, 0.416, -0.2], 'x', 10);
+  for (const z of [-1.95, -0.2, 1.4]) box(kit, M.dark, -0.45, 0.64, z - 0.04, 0.45, 0.78, z + 0.04);
+  kit.cyl(M.dark, 0.04, 0.04, 1.5, [0, WHEEL_Y, AXLE_Z], 'x', 10);
   // tapabarros sobre las ruedas
   for (const s of [-1, 1]) {
-    kit.add(M.yellow, new THREE.CylinderGeometry(0.47, 0.47, 0.28, 14, 1, true, Math.PI, Math.PI), [s * 0.865, 0.416, -0.2], [0, 0, -Math.PI / 2]);
-    kit.box(M.dark, s * 0.72, 0.8, -0.3, s * 0.74, 0.9, -0.1);
+    kit.add(M.yellow, new THREE.CylinderGeometry(0.43, 0.43, 0.26, 14, 1, true, Math.PI, Math.PI), [s * WHEEL_X, WHEEL_Y, AXLE_Z], [0, 0, -Math.PI / 2]);
+    box(kit, M.dark, s * 0.72, 0.78, AXLE_Z - 0.1, s * 0.74, 0.86, AXLE_Z + 0.1);
   }
   // lanza en A con cabezal y argolla, gata de apoyo sobre un taco
   for (const s of [-1, 1]) kit.bar(M.dark, [s * 0.48, 0.7, -1.98], [0, 0.55, -2.72], 0.04);
   kit.boxAt(M.dark, 0.13, 0.11, 0.24, [0, 0.55, -2.78]);
   kit.add(M.dark, new THREE.TorusGeometry(0.055, 0.016, 6, 14), [0, 0.55, -2.94], [Math.PI / 2, 0, 0]);
-  kit.box(M.dark, -0.22, 0.58, -2.44, 0.22, 0.66, -2.36);
+  box(kit, M.dark, -0.22, 0.58, -2.44, 0.22, 0.66, -2.36);
   kit.cyl(M.yellow, 0.045, 0.045, 0.5, [0, 0.62, -2.4], 'y', 10);
   kit.cyl(M.chrome, 0.032, 0.032, 0.34, [0, 0.25, -2.4], 'y', 10);
-  kit.box(M.dark, -0.08, 0.075, -2.48, 0.08, 0.1, -2.32);
-  kit.box(M.pad, -0.14, 0, -2.54, 0.14, 0.075, -2.26);
+  box(kit, M.dark, -0.08, 0.075, -2.48, 0.08, 0.1, -2.32);
+  box(kit, M.pad, -0.14, 0, -2.54, 0.14, 0.075, -2.26);
   kit.bar(M.dark, [0, 0.87, -2.4], [0.13, 0.9, -2.4], 0.012, 6);
   kit.bar(M.dark, [0.13, 0.9, -2.4], [0.13, 0.98, -2.4], 0.014, 6);
   // estabilizadores abatibles (delante y junto a la tolva) sobre tacos de madera
   for (const z of [-1.75, 2.4]) {
     for (const s of [-1, 1]) {
-      kit.box(M.yellow, s * 0.755, 0.2, z - 0.045, s * 0.845, 0.84, z + 0.045);
-      kit.box(M.dark, s * 0.5, 0.72, z - 0.05, s * 0.8, 0.8, z + 0.05);
+      box(kit, M.yellow, s * 0.755, 0.2, z - 0.045, s * 0.845, 0.84, z + 0.045);
+      box(kit, M.dark, s * 0.5, 0.72, z - 0.05, s * 0.8, 0.8, z + 0.05);
       kit.cyl(M.chrome, 0.025, 0.025, 0.1, [s * 0.8, 0.16, z], 'y', 8);
-      kit.box(M.dark, s * 0.7, 0.1, z - 0.1, s * 0.9, 0.12, z + 0.1);
-      kit.box(M.pad, s * 0.62, 0, z - 0.18, s * 0.98, 0.1, z + 0.18);
+      box(kit, M.dark, s * 0.7, 0.1, z - 0.1, s * 0.9, 0.12, z + 0.1);
+      box(kit, M.pad, s * 0.62, 0, z - 0.18, s * 0.98, 0.1, z + 0.18);
     }
   }
   // estanque de agua (entre el capó y la tolva) con tapa de plancha diamantada
-  kit.box(M.steel, -0.55, 0.8, 1.45, 0.55, 1.16, 2.27);
-  kit.box(M.steelDark, -0.53, 1.16, 1.47, 0.53, 1.18, 2.25);
-  kit.box(M.steel, -0.2, 1.18, 1.65, 0.2, 1.2, 2.05);
+  box(kit, M.steel, -0.55, 0.8, 1.45, 0.55, 1.16, 2.27);
+  box(kit, M.steelDark, -0.53, 1.16, 1.47, 0.53, 1.18, 2.25);
+  box(kit, M.steel, -0.2, 1.18, 1.65, 0.2, 1.2, 2.05);
   kit.cyl(M.dark, 0.03, 0.03, 0.1, [-0.56, 0.86, 1.9], 'x', 8);
   // tablero de mando (lado +x): caja gris, visera, setas roja y verde, manómetros
-  kit.box(M.dark, 0.6, 0.8, 1.76, 0.78, 0.95, 1.94);
-  kit.box(M.panel, 0.58, 0.95, 1.58, 0.84, 1.5, 2.12);
-  kit.box(M.dark, 0.56, 1.5, 1.55, 0.9, 1.53, 2.15);
-  kit.box(M.dark, 0.84, 0.97, 1.6, 0.843, 1.48, 1.605);
-  kit.box(M.yellow, 0.84, 1.33, 1.67, 0.85, 1.43, 1.77);
+  box(kit, M.dark, 0.6, 0.8, 1.76, 0.78, 0.95, 1.94);
+  box(kit, M.panel, 0.58, 0.95, 1.58, 0.84, 1.5, 2.12);
+  box(kit, M.dark, 0.56, 1.5, 1.55, 0.9, 1.53, 2.15);
+  box(kit, M.dark, 0.84, 0.97, 1.6, 0.843, 1.48, 1.605);
+  box(kit, M.yellow, 0.84, 1.33, 1.67, 0.85, 1.43, 1.77);
   kit.cyl(M.red, 0.035, 0.035, 0.04, [0.865, 1.38, 1.72], 'x', 12);
   kit.cyl(M.green, 0.026, 0.026, 0.03, [0.86, 1.38, 1.86], 'x', 12);
   kit.cyl(M.dark, 0.022, 0.022, 0.03, [0.86, 1.38, 1.98], 'x', 8);
@@ -326,22 +339,22 @@ function buildPumpStatic(kit: PartKit) {
     kit.cyl(M.dark, 0.05, 0.05, 0.02, [0.85, 1.18, z], 'x', 14);
     kit.cyl(M.face, 0.041, 0.041, 0.006, [0.861, 1.18, z], 'x', 14);
   }
-  kit.box(M.face, 0.84, 1.03, 1.64, 0.845, 1.08, 2.04);
+  box(kit, M.face, 0.84, 1.03, 1.64, 0.845, 1.08, 2.04);
 
   // ── tolva: tronco de pirámide de acero, parrilla, protección trasera y costras de hormigón
   kit.add(M.steel, hollowFrustum(HOP.bot, HOP.top, HOP.y0, HOP.y1, HOP.t), [0, 0, HOP.z]);
   const [tx, tz] = HOP.top;
   const gy = HOP.y1 + 0.018;
   for (const s of [-1, 1]) {
-    kit.box(M.steelDark, -tx, HOP.y1, HOP.z + s * tz - 0.025, tx, HOP.y1 + 0.035, HOP.z + s * tz + 0.025);
-    kit.box(M.steelDark, s * tx - 0.025, HOP.y1, HOP.z - tz, s * tx + 0.025, HOP.y1 + 0.035, HOP.z + tz);
+    box(kit, M.steelDark, -tx, HOP.y1, HOP.z + s * tz - 0.025, tx, HOP.y1 + 0.035, HOP.z + s * tz + 0.025);
+    box(kit, M.steelDark, s * tx - 0.025, HOP.y1, HOP.z - tz, s * tx + 0.025, HOP.y1 + 0.035, HOP.z + tz);
   }
-  for (let i = 0; i < 11; i++) kit.boxAt(M.steelDark, 0.022, 0.03, 2 * tz - 0.04, [-0.6 + i * 0.12, gy, HOP.z]);
-  for (const dz of [-0.13, 0.13]) kit.boxAt(M.steelDark, 2 * tx - 0.04, 0.03, 0.03, [0, gy + 0.005, HOP.z + dz]);
+  for (let i = 0; i < 9; i++) kit.boxAt(M.steelDark, 0.018, 0.03, 2 * tz - 0.04, [-0.6 + i * 0.15, gy, HOP.z]);
+  kit.boxAt(M.steelDark, 2 * tx - 0.04, 0.03, 0.025, [0, gy + 0.005, HOP.z]);
   // plancha vertical hacia la bomba (frena las salpicaduras) con cartelas
   const zb = HOP.z - tz;
-  kit.box(M.steel, -tx, HOP.y1, zb - 0.022, tx, HOP.y1 + 0.58, zb);
-  kit.box(M.crust, -tx + 0.03, HOP.y1 + 0.02, zb + 0.0, tx - 0.05, HOP.y1 + 0.22, zb + 0.006);
+  box(kit, M.steel, -tx, HOP.y1, zb - 0.022, tx, HOP.y1 + 0.58, zb);
+  box(kit, M.crust, -tx + 0.03, HOP.y1 + 0.02, zb + 0.0, tx - 0.05, HOP.y1 + 0.22, zb + 0.006);
   for (const s of [-1, 1]) kit.boxAt(M.steelDark, 0.02, 0.4, 0.2, [s * (tx - 0.02), HOP.y1 + 0.22, zb - 0.11], [-0.5, 0, 0]);
   // costras y salpicaduras
   const blobs: [number, number, number, number][] = [
@@ -351,7 +364,7 @@ function buildPumpStatic(kit: PartKit) {
   for (const [x, y, z, r] of blobs) kit.add(M.crust, new THREE.SphereGeometry(1, 8, 5), [x, y, z], [0, x * 3, 0], [r * 1.4, r * 0.35, r]);
   // motor hidráulico del agitador (+x) y descanso (−x)
   kit.cyl(M.dark, 0.085, 0.085, 0.13, [0.665, 0.68, HOP.z], 'x', 14);
-  kit.box(M.dark, 0.6, 0.6, HOP.z - 0.11, 0.62, 0.76, HOP.z + 0.11);
+  box(kit, M.dark, 0.6, 0.6, HOP.z - 0.11, 0.62, 0.76, HOP.z + 0.11);
   kit.cyl(M.dark, 0.06, 0.06, 0.06, [-0.64, 0.68, HOP.z], 'x', 12);
   kit.bar(M.coupling, [0.73, 0.68, HOP.z + 0.05], [0.73, 0.98, HOP.z - 0.25], 0.012, 6);
   kit.bar(M.coupling, [0.73, 0.98, HOP.z - 0.25], [0.6, 1.0, HOP.z - 0.75], 0.012, 6);
@@ -363,8 +376,7 @@ function buildPumpStatic(kit: PartKit) {
     const xm = (RAM_X0 + RAM_X1) / 2;
     kit.cyl(M.yellow, 0.05, 0.05, RAM_X1 - RAM_X0, [s * xm, RAM_Y, VALVE_Z], 'x', 12);
     kit.cyl(M.dark, 0.055, 0.055, 0.03, [s * RAM_X0, RAM_Y, VALVE_Z], 'x', 12);
-    kit.boxAt(M.dark, 0.06, 0.13, 0.09, [s * (RAM_X1 + 0.02), RAM_Y, 2.92]);
-    kit.boxAt(M.dark, 0.05, 0.05, 0.1, [s * (RAM_X1 + 0.02), RAM_Y - 0.03, 2.88]);
+    kit.boxAt(M.dark, 0.06, 0.13, 0.09, [s * (RAM_X1 + 0.01), RAM_Y, 2.92]);
   }
 
   // ── tubería de impulsión: sale por la cara +z, dobla hacia −x y corre por el costado hasta el muro −z
@@ -372,7 +384,7 @@ function buildPumpStatic(kit: PartKit) {
   kit.cyl(M.pipe, PIPE_R, PIPE_R, zA - 2.94, [0, PY, (2.94 + zA) / 2], 'z', 16);
   elbow(kit, M.pipe, [-R, PY, zA], R, PIPE_R, 0);
   const zS = zA + R;
-  kit.cyl(M.pipe, PIPE_R, PIPE_R, 1.0 - 2 * R, [-0.55, PY, zS], 'x', 16);
+  kit.cyl(M.pipe, PIPE_R, PIPE_R, -PIPE_X - 2 * R, [PIPE_X / 2, PY, zS], 'x', 16);
   elbow(kit, M.pipe, [PIPE_X + R, PY, zA], R, PIPE_R, Math.PI / 2);
   kit.cyl(M.pipe, PIPE_R, PIPE_R, zA - OUTLET[2], [PIPE_X, PY, (zA + OUTLET[2]) / 2], 'z', 16);
   const coupling = (pos: XYZ, axis: 'x' | 'z') => {
@@ -380,13 +392,13 @@ function buildPumpStatic(kit: PartKit) {
     kit.boxAt(M.coupling, axis === 'z' ? 0.05 : 0.1, 0.05, axis === 'z' ? 0.1 : 0.05, [pos[0], pos[1] + 0.1, pos[2]]);
     kit.boxAt(M.coupling, 0.03, 0.06, 0.03, [pos[0], pos[1] - 0.1, pos[2]]);
   };
-  coupling([-0.55, PY, zS], 'x');
+  coupling([PIPE_X / 2, PY, zS], 'x');
   for (const z of [2.3, 0.8, -0.7, -2.2, -3.2]) coupling([PIPE_X, PY, z], 'z');
   // caballetes de la tubería
   for (const z of [1.5, -1.5]) {
     kit.bar(M.dark, [PIPE_X, 0.02, z], [PIPE_X, PY - PIPE_R, z], 0.025, 6);
-    kit.box(M.dark, PIPE_X - 0.12, 0, z - 0.12, PIPE_X + 0.12, 0.02, z + 0.12);
-    kit.box(M.dark, PIPE_X - 0.09, PY - PIPE_R - 0.03, z - 0.04, PIPE_X + 0.09, PY - PIPE_R, z + 0.04);
+    box(kit, M.dark, PIPE_X - 0.12, 0, z - 0.12, PIPE_X + 0.12, 0.02, z + 0.12);
+    box(kit, M.dark, PIPE_X - 0.09, PY - PIPE_R - 0.03, z - 0.04, PIPE_X + 0.09, PY - PIPE_R, z + 0.04);
   }
 }
 
@@ -395,26 +407,26 @@ function buildEngine(kit: PartKit) {
   const M = surfaces();
   const z0 = -1.85, z1 = 1.45;
   kit.profile(M.white, [[-0.72, 0.8], [0.72, 0.8], [0.72, 1.82], [0.6, 1.98], [-0.6, 1.98], [-0.72, 1.82]], z0, z1);
-  kit.box(M.yellow, -0.726, 0.8, z0 - 0.004, 0.726, 0.97, z1 + 0.004);
-  kit.box(M.yellow, -0.725, 1.7, z0 - 0.003, 0.725, 1.76, z1 + 0.003);
+  box(kit, M.yellow, -0.726, 0.8, z0 - 0.004, 0.726, 0.97, z1 + 0.004);
+  box(kit, M.yellow, -0.725, 1.7, z0 - 0.003, 0.725, 1.76, z1 + 0.003);
   for (const s of [-1, 1]) {
     const xo = s * 0.722;
     // celosía del motor
-    kit.box(M.dark, s > 0 ? 0.72 : -0.725, 1.1, -1.66, s > 0 ? 0.725 : -0.72, 1.62, -0.6);
+    box(kit, M.dark, s > 0 ? 0.72 : -0.725, 1.1, -1.66, s > 0 ? 0.725 : -0.72, 1.62, -0.6);
     for (let i = 0; i < 6; i++) kit.boxAt(M.white, 0.03, 0.026, 1.0, [s * 0.735, 1.15 + i * 0.085, -1.13], [0, 0, s * 0.55]);
     // juntas de las puertas y manillas
-    for (const z of [-0.45, 0.55]) kit.box(M.dark, Math.min(xo, xo + s * 0.004), 0.97, z - 0.006, Math.max(xo, xo + s * 0.004), 1.7, z + 0.006);
+    for (const z of [-0.45, 0.55]) box(kit, M.dark, Math.min(xo, xo + s * 0.004), 0.97, z - 0.006, Math.max(xo, xo + s * 0.004), 1.7, z + 0.006);
     for (const z of [-0.3, 0.7]) kit.boxAt(M.dark, 0.03, 0.05, 0.14, [s * 0.735, 1.38, z]);
-    kit.box(M.dark, s > 0 ? 0.72 : -0.726, 1.25, 0.9, s > 0 ? 0.726 : -0.72, 1.45, 1.25);
+    box(kit, M.dark, s > 0 ? 0.72 : -0.726, 1.25, 0.9, s > 0 ? 0.726 : -0.72, 1.45, 1.25);
   }
   // rejilla del radiador (cara −z)
-  kit.box(M.dark, -0.55, 1.0, z0 - 0.015, 0.55, 1.65, z0);
-  for (let i = 0; i < 6; i++) kit.box(M.white, -0.53, 1.04 + i * 0.1, z0 - 0.03, 0.53, 1.07 + i * 0.1, z0 - 0.01);
+  box(kit, M.dark, -0.55, 1.0, z0 - 0.015, 0.55, 1.65, z0);
+  for (let i = 0; i < 6; i++) box(kit, M.white, -0.53, 1.04 + i * 0.1, z0 - 0.03, 0.53, 1.07 + i * 0.1, z0 - 0.01);
   // techo del capó: argolla de izaje, tapas de estanques, escape vertical con sombrerete
   kit.add(M.dark, new THREE.TorusGeometry(0.07, 0.016, 6, 14), [0, 2.05, -0.3], [0, Math.PI / 2, 0]);
   kit.cyl(M.dark, 0.06, 0.06, 0.05, [-0.35, 2.0, 0.75], 'y', 12);
   kit.cyl(M.yellow, 0.045, 0.045, 0.05, [-0.35, 2.0, 0.35], 'y', 12);
-  kit.box(M.dark, 0.2, 1.98, 0.2, 0.5, 2.02, 0.9);
+  box(kit, M.dark, 0.2, 1.98, 0.2, 0.5, 2.02, 0.9);
   kit.cyl(M.dark, 0.11, 0.11, 0.05, [0.42, 2.0, -1.25], 'y', 14);
   kit.cyl(M.tube, 0.075, 0.075, 1.6, [0.42, 2.78, -1.25], 'y', 14);
   kit.cyl(M.dark, 0.11, 0.11, 0.025, [0.42, 3.62, -1.25], 'y', 14);
@@ -451,7 +463,7 @@ function buildShed(kit: PartKit) {
   const M = surfaces();
   const { x: X, zBack, zFront, t } = SHED;
   // losa de apoyo (toda la huella) con manchas de hormigón frente a la tolva
-  kit.box(M.floor, -FOOT.w / 2, -0.1, -FOOT.d / 2, FOOT.w / 2, 0.008, FOOT.d / 2);
+  box(kit, M.floor, -FOOT.w / 2, -0.1, -FOOT.d / 2, FOOT.w / 2, 0.008, FOOT.d / 2);
   kit.add(M.spill, new THREE.CylinderGeometry(1, 1, 0.006, 20), [0.05, 0.009, 2.95], [0, 0, 0], [1.0, 1, 0.5]);
   kit.add(M.spill, new THREE.CylinderGeometry(1, 1, 0.006, 16), [0.6, 0.01, 3.2], [0, 0.6, 0], [0.45, 1, 0.25]);
   // muros laterales de OSB (lado exterior en ±X) y muro trasero con pasada para la tubería
@@ -470,10 +482,10 @@ function buildShed(kit: PartKit) {
   kit.add(M.osb, osbUV(back, 'z'));
   // pies derechos, soleras superiores, cabezal del lado abierto, tijerales y listones sobre el zinc
   for (const s of [-1, 1]) {
-    for (const z of POSTS_Z) kit.box(M.timber, s * POST_X - 0.045, 0, z - 0.045, s * POST_X + 0.045, wallTop(s * POST_X) - 0.09, z + 0.045);
-    kit.box(M.timberDark, s * POST_X - 0.045, wallTop(s * POST_X) - 0.09, zBack, s * POST_X + 0.045, wallTop(s * POST_X), zFront);
+    for (const z of POSTS_Z) box(kit, M.timber, s * POST_X - 0.045, 0, z - 0.045, s * POST_X + 0.045, wallTop(s * POST_X) - 0.09, z + 0.045);
+    box(kit, M.timberDark, s * POST_X - 0.045, wallTop(s * POST_X) - 0.09, zBack, s * POST_X + 0.045, wallTop(s * POST_X), zFront);
   }
-  for (const x of [-0.45, 0.45]) kit.box(M.timber, x - 0.045, 0, zBack + t, x + 0.045, wallTop(x) - 0.01, zBack + t + 0.09);
+  for (const x of [-0.45, 0.45]) box(kit, M.timber, x - 0.045, 0, zBack + t, x + 0.045, wallTop(x) - 0.01, zBack + t + 0.09);
   const rafterLen = (2 * SHED.roofX + 0.1) / Math.cos(ROOF_TILT);
   for (const z of POSTS_Z) kit.boxAt(M.timberDark, rafterLen, RAFTER_H, 0.05, [0, roofY(0) - AMP - RAFTER_H / 2, z], [0, 0, ROOF_TILT]);
   kit.boxAt(M.timber, 2 * X, 0.14, 0.03, [0, roofY(0) - AMP - RAFTER_H - 0.07, zFront + 0.02], [0, 0, ROOF_TILT]);
@@ -482,10 +494,10 @@ function buildShed(kit: PartKit) {
   kit.add(M.roof, corrugatedRoof(-SHED.roofX, SHED.roofX, SHED.roofZ0, SHED.roofZ1, 0.13));
   kit.cyl(M.steelDark, 0.085, 0.14, 0.08, [0.42, roofY(0.42) + 0.03, -1.25], 'y', 14);
   // letrero "BOMBA" (en su propia malla) se agrega aparte; aquí su marco
-  kit.box(M.dark, X, 1.66, 0.28, X + 0.006, 2.04, 1.22);
+  box(kit, M.dark, X, 1.66, 0.28, X + 0.006, 2.04, 1.22);
   // baliza: base sobre la esquina +x/+z del techo
   const by = roofY(1.6) + AMP;
-  kit.box(M.dark, 1.5, by, 1.74, 1.7, by + 0.02, 1.86);
+  box(kit, M.dark, 1.5, by, 1.74, 1.7, by + 0.02, 1.86);
   kit.cyl(M.dark, 0.06, 0.06, 0.05, [1.6, by + 0.045, 1.8], 'y', 12);
   // sacos de arena contra el muro +x (bajo el alero)
   const bags: XYZ[] = [[1.6, 0.06, -1.15], [1.6, 0.06, -0.68], [1.6, 0.06, -0.21], [1.61, 0.18, -0.92], [1.6, 0.18, -0.45]];
@@ -493,13 +505,13 @@ function buildShed(kit: PartKit) {
   // carretilla junto a la tolva (lado +x), con restos de hormigón
   const bx = 1.37, bz = 2.45;
   kit.add(M.barrow, hollowFrustum([0.2, 0.26], [0.3, 0.36], 0.36, 0.6, 0.012), [bx, 0, bz]);
-  kit.box(M.crust, bx - 0.18, 0.375, bz - 0.24, bx + 0.18, 0.4, bz + 0.24);
+  box(kit, M.crust, bx - 0.18, 0.375, bz - 0.24, bx + 0.18, 0.4, bz + 0.24);
   kit.cyl(M.dark, 0.17, 0.17, 0.08, [bx, 0.17, bz + 0.45], 'x', 14);
   kit.cyl(M.steelDark, 0.05, 0.05, 0.1, [bx, 0.17, bz + 0.45], 'x', 10);
   for (const s of [-1, 1]) {
     kit.bar(M.dark, [bx + s * 0.06, 0.17, bz + 0.45], [bx + s * 0.25, 0.55, bz - 0.72], 0.016, 6);
     kit.bar(M.dark, [bx + s * 0.18, 0.33, bz - 0.2], [bx + s * 0.2, 0.0, bz - 0.25], 0.014, 6);
-    kit.bar(M.dark, [bx + s * 0.25, 0.55, bz - 0.72], [bx + s * 0.255, 0.56, bz - 0.86], 0.022, 6);
+    kit.bar(M.dark, [bx + s * 0.25, 0.55, bz - 0.72], [bx + s * 0.255, 0.56, bz - 0.82], 0.022, 6);
   }
 }
 
@@ -520,13 +532,13 @@ export function createStationaryPump(): StationaryPumpRig {
   const engineGroup = engine.build();
   group.add(engineGroup);
 
-  // ruedas del remolque (las del camión, giradas 90° y a escala 0,8 → radio 0,42 m)
+  // ruedas del remolque (las del camión, giradas 90° y a escala → radio ≈ 0,37 m)
   const wheels = createWheels([
-    { x: 0.25, z: 1.075, dual: false },
-    { x: 0.25, z: -1.075, dual: false },
+    { x: -AXLE_Z / WHEEL_K, z: WHEEL_X / WHEEL_K, dual: false },
+    { x: -AXLE_Z / WHEEL_K, z: -WHEEL_X / WHEEL_K, dual: false },
   ]);
   wheels.group.rotation.y = Math.PI / 2;
-  wheels.group.scale.setScalar(0.8);
+  wheels.group.scale.setScalar(WHEEL_K);
   group.add(wheels.group);
 
   const agitator = buildAgitator();
@@ -558,7 +570,7 @@ export function createStationaryPump(): StationaryPumpRig {
   const fp = fillGeo.attributes.position;
   for (let i = 0; i < fp.count; i++) fp.setY(i, (rnd() - 0.5) * 0.03);
   fillGeo.computeVertexNormals();
-  const fill = new THREE.Mesh(fillGeo, truckSurfaces().concrete);
+  const fill = new THREE.Mesh(fillGeo, M.wet);
   fill.position.set(0, 0, HOP.z);
   fill.castShadow = fill.receiveShadow = true;
   group.add(fill);
