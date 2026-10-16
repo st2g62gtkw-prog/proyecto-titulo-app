@@ -7,8 +7,9 @@ import * as THREE from 'three';
 import type { BuildingData, LevelData, WallData } from '../data/building';
 import type { Schedule } from '../core/schedule';
 import { haWalls } from '../core/schedule';
-import { GeoBuilder, offsetPolygon, pointInPolygon, polyBounds, samplePerimeter, scanline, type V2 } from './geom';
+import { GeoBuilder, offsetPolygon, pointInPolygon, polyBounds, samplePerimeter, scanlineLoops, signedArea, type V2 } from './geom';
 import { NEVER, revealMaterial, revealMesh, type RevealMaterial } from './reveal';
+import { SITE } from '../config';
 import { concreteTexture, formPanelTexture, plywoodTexture } from './textures';
 
 export interface Layer {
@@ -92,6 +93,13 @@ function makeSharedMaterials(clip: THREE.Plane[]) {
     door: withClip(revealMaterial({ color: C.door, roughness: 0.6 }, { mode: 'drop', dropHeight: 0.6 })),
     excavation: withClip(revealMaterial({ color: '#7d5b3b', roughness: 1 }, { mode: 'pop' })),
     trench: withClip(revealMaterial({ color: '#4c3523', roughness: 1 }, { mode: 'pop' })),
+    fill: withClip(revealMaterial({ color: '#a8977f', roughness: 1 }, { mode: 'pop' })),
+    sewer: withClip(revealMaterial({ color: '#e8642a', roughness: 0.55 }, { mode: 'drop', dropHeight: 0.4 })),
+    hdpe: withClip(revealMaterial({ color: '#2f6fd1', roughness: 0.5 }, { mode: 'drop', dropHeight: 0.4 })),
+    scaffold: withClip(revealMaterial({ color: '#9aa4ad', roughness: 0.5, metalness: 0.55 }, { mode: 'rise', outLift: new THREE.Vector3(0, 2.5, 0) })),
+    scaffoldRail: withClip(revealMaterial({ color: '#d6322b', roughness: 0.6 }, { mode: 'rise', outLift: new THREE.Vector3(0, 2.5, 0) })),
+    scaffoldDeck: withClip(revealMaterial({ color: '#b98e4f', roughness: 0.85 }, { mode: 'rise', outLift: new THREE.Vector3(0, 2.5, 0) })),
+    scaffoldMesh: withClip(revealMaterial({ color: '#2b7a47', roughness: 0.9, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false }, { mode: 'rise', outLift: new THREE.Vector3(0, 2.5, 0) })),
   };
 }
 
@@ -130,19 +138,30 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
   const bboxAll = polyBounds(levels[levels.length - 1].slab.outer);
   const X0 = bboxAll.x0, X1 = bboxAll.x1;
 
-  // --- Excavación y fundaciones -------------------------------------------------------
+  // --- Excavación, fundaciones e instalaciones bajo radier ------------------------------
   {
-    const g = new GeoBuilder();
     const rad = sched.slab[0].pour;
-    g.timing(0, 0, rad[1], rad[1] + 0.2);
-    g.extrude(offsetPolygon(levels[0].slab.outer, -1.6), [], -0.2, -0.186, false, false);
-    add(g.build(), M.excavation, 'excavacion', 0, 0, rad[1] + 0.3, false, false);
+    const fund = sched.activities.find((a) => a.kind === 'fundaciones')!;
+    const inst = sched.parallel.find((a) => a.kind === 'instalaciones')!;
+    const area0 = offsetPolygon(levels[0].slab.outer, -1.6);
 
-    // zanjas excavadas para las zapatas (se ven oscuras hasta que se hormigonan)
+    // excavación abierta mientras se hacen las zapatas
+    const g = new GeoBuilder();
+    g.timing(0, 0, fund.t1, fund.t1 + 0.2);
+    g.extrude(area0, [], -0.2, -0.186, false, false);
+    add(g.build(), M.excavation, 'excavacion', 0, 0, fund.t1 + 0.3, false, false);
+
+    // zanjas de las zapatas (se rellenan al terminar las fundaciones)
     const z = new GeoBuilder();
-    z.timing(0, 0, rad[1], rad[1] + 0.2);
+    z.timing(0, 0, fund.t1, fund.t1 + 0.2);
     haWalls(levels[0]).forEach((w) => z.extrude(offsetPolygon(w.poly, -0.32), [], -0.2, -0.183, false, false));
-    add(z.build(), M.trench, 'zanjas', 0, 0, rad[1] + 0.3, false, false);
+    add(z.build(), M.trench, 'zanjas', 0, 0, fund.t1 + 0.3, false, false);
+
+    // relleno compactado del 1er piso: queda a la vista hasta que se hormigona el radier
+    const r = new GeoBuilder();
+    r.timing(fund.t1 - 0.4, fund.t1, rad[1], rad[1] + 0.2);
+    r.extrude(area0, [], -0.2, -0.187, false, false);
+    add(r.build(), M.fill, 'relleno', 0, fund.t1 - 0.5, rad[1] + 0.3, false, false);
 
     const f = new GeoBuilder();
     f.uvScale = 1 / 2.4;
@@ -151,7 +170,47 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
       f.timing(p0, p1, NEVER, NEVER, -0.75, 0.6);
       f.extrude(offsetPolygon(w.poly, -0.22), [], -0.75, -0.15);
     });
-    add(f.build(), M.footing, 'zapatas', 0, sched.foundations[0], sched.slab[0].pour[1] + 2);
+    add(f.build(), M.footing, 'zapatas', 0, sched.foundations[0], rad[1] + 2);
+
+    // redes bajo radier: colector de alcantarillado PVC (naranjo), agua potable HDPE (azul) y cámaras
+    const b0 = polyBounds(levels[0].slab.outer);
+    const inside = (x: number, zz: number) => pointInPolygon(x, zz, levels[0].slab.outer);
+    const pvc = new GeoBuilder(), hdpe = new GeoBuilder(), cam = new GeoBuilder(), zan = new GeoBuilder();
+    const yP = -0.13;
+    const tIn = (x: number) => inst.t0 + fx(x, b0.x0, b0.x1) * (inst.t1 - inst.t0) * 0.7;
+    const zMain = b0.cz + 0.6;
+    const out = rad[1];
+    for (let x = b0.x0 + 2; x < b0.x1 - 2.5; x += 2.5) {
+      const xe = Math.min(x + 2.5, b0.x1 - 2);
+      if (!inside(x, zMain) || !inside(xe, zMain)) continue;
+      const t0 = tIn(x);
+      zan.timing(t0, t0 + 0.3, out, out + 0.2);
+      zan.aabb(x, -0.2, zMain - 0.28, xe, -0.181, zMain + 0.48);
+      pvc.timing(t0 + 0.3, t0 + 0.6, out, out + 0.2);
+      pvc.barN(x, yP, zMain, xe, yP, zMain, 0.11);
+      hdpe.timing(t0 + 0.4, t0 + 0.7, out, out + 0.2);
+      hdpe.barN(x, yP + 0.01, zMain + 0.32, xe, yP + 0.01, zMain + 0.32, 0.05);
+    }
+    // ramales hacia los baños y cocinas, con una cámara en cada empalme
+    for (let x = b0.x0 + 4; x < b0.x1 - 3; x += 6.2) {
+      if (!inside(x, zMain)) continue;
+      const t0 = tIn(x) + 0.5;
+      for (const dir of [-1, 1]) {
+        let z1 = zMain;
+        while (inside(x, z1 + dir * 0.5) && Math.abs(z1 - zMain) < 5.5) z1 += dir * 0.5;
+        if (Math.abs(z1 - zMain) < 1.5) continue;
+        zan.timing(t0, t0 + 0.3, out, out + 0.2);
+        zan.aabb(x - 0.25, -0.2, Math.min(zMain, z1), x + 0.25, -0.181, Math.max(zMain, z1));
+        pvc.timing(t0 + 0.3, t0 + 0.6, out, out + 0.2);
+        pvc.barN(x, yP, zMain, x, yP, z1, 0.075);
+      }
+      cam.timing(t0, t0 + 0.4, out, out + 0.2);
+      cam.aabb(x - 0.35, -0.2, zMain - 0.35, x + 0.35, -0.06, zMain + 0.35);
+    }
+    add(zan.build(), M.trench, 'zanjas-radier', 0, inst.t0, out + 0.3, false, false);
+    add(pvc.build(), M.sewer, 'alcantarillado', 0, inst.t0, out + 0.3, false, false);
+    add(hdpe.build(), M.hdpe, 'agua-potable', 0, inst.t0, out + 0.3, false, false);
+    add(cam.build(), M.footing, 'camaras', 0, inst.t0, out + 0.3, false, false);
   }
 
   // --- Losas: radier (0) y losas 2P…Techumbre (1..7) ------------------------------------
@@ -186,11 +245,11 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     layersY.forEach((y, li) => {
       const step = li === 0 ? 0.3 : 0.6;
       for (let z = b.z0 + 0.12; z < b.z1; z += step) {
-        const xs = scanline(sl.outer, 'z', z);
+        const xs = scanlineLoops([sl.outer, ...sl.holes], 'z', z);
         for (let k = 0; k + 1 < xs.length; k += 2) gr.bar(new THREE.Vector3(xs[k] + 0.04, y, z), new THREE.Vector3(xs[k + 1] - 0.04, y, z), 0.018, false);
       }
       for (let x = b.x0 + 0.12; x < b.x1; x += step) {
-        const zs = scanline(sl.outer, 'x', x);
+        const zs = scanlineLoops([sl.outer, ...sl.holes], 'x', x);
         for (let k = 0; k + 1 < zs.length; k += 2) gr.bar(new THREE.Vector3(x, y + 0.018, zs[k] + 0.04), new THREE.Vector3(x, y + 0.018, zs[k + 1] - 0.04), 0.018, false);
       }
     });
@@ -199,7 +258,8 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     if (S === 0) return; // el radier va sobre el terreno, sin moldaje
 
     const below = levels[S - 1];
-    const floorY = below.slab.y1;
+    // la primera losa se apuntala sobre el relleno: el radier se hace mucho después
+    const floorY = S === 1 ? SITE.groundY + 0.013 : below.slab.y1;
     const wallsBelow = haWalls(below).map((w) => offsetPolygon(w.poly, -0.35));
     const blocked = (x: number, z: number) => wallsBelow.some((p) => pointInPolygon(x, z, p));
     const wallsTight = haWalls(below).map((w) => offsetPolygon(w.poly, -0.05));
@@ -223,7 +283,7 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
       const k = fx(x, b.x0, b.x1);
       const tIn = p0 + k * (p1 - p0 - 0.4);
       const tOut = o0 + k * (o1 - o0 - 0.3);
-      const zs = scanline(sl.outer, 'x', x);
+      const zs = scanlineLoops([sl.outer, ...sl.holes], 'x', x);
       for (let s = 0; s + 1 < zs.length; s += 2) {
         // viga primaria a lo largo de z, interrumpida donde hay muros
         gb.timing(Math.min(tIn + 0.25, st.deck[1] - 0.3), Math.min(tIn + 0.55, st.deck[1]), tOut, tOut + 0.3);
@@ -238,7 +298,7 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
           }
         }
         for (let z = zs[s] + 0.5; z < zs[s + 1] - 0.3; z += span) {
-          if (!pointInPolygon(x, z, below.slab.outer) || blocked(x, z)) continue;
+          if (!pointInPolygon(x, z, below.slab.outer) || blocked(x, z) || sl.holes.some((hl) => pointInPolygon(x, z, hl))) continue;
           gp.timing(tIn, tIn + 0.35, tOut, tOut + 0.3);
           gp.cylinder(x, z, floorY, propTop, 0.032, 6);
           gp.aabb(x - 0.07, floorY, z - 0.07, x + 0.07, floorY + 0.012, z + 0.07);
@@ -264,7 +324,14 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
       const tR = st.pour[1] + 2.5 + k * 2.5;
       ge.timing(tE, tE + 0.4, tR, tR + 0.4);
       // contorno antihorario → offset negativo hacia afuera
-      ge.wallPanel(a, c, sl.y0 - 0.06, sl.y1 + 0.06, 0.035, outward(outer));
+      ge.wallPanel(a, c, sl.y0 - 0.06, sl.y1 + 0.06, 0.035, voidSide(outer, false, 0.035));
+    }
+    for (const hl of sl.holes) {
+      const k = fx(polyBounds(hl).cx, b.x0, b.x1);
+      const tE = st.deck[0] + k * (st.deck[1] - st.deck[0] - 0.4);
+      const tR = st.pour[1] + 2.5 + k * 2.5;
+      ge.timing(tE, tE + 0.4, tR, tR + 0.4);
+      for (let i = 0; i < hl.length; i++) ge.wallPanel(hl[i], hl[(i + 1) % hl.length], sl.y0 - 0.06, sl.y1 + 0.06, 0.035, voidSide(hl, true, 0.035));
     }
     const rail = offsetPolygon(outer, 0.12);
     gg.timing(guardIn, guardIn + 0.5, guardOut, guardOut + 0.6);
@@ -293,7 +360,7 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
       const tm = timing[i];
       const h = w.y1 - w.y0;
       conc.timing(tm.pour[0], tm.pour[1], fin[0] + (i / walls.length) * (fin[1] - fin[0]) * 0.4, fin[0] + (fin[1] - fin[0]) * 0.75, w.y0, h);
-      conc.extrude(w.poly, [], w.y0, w.y1);
+      conc.extrude(w.poly, wallHoles(w), w.y0, w.y1);
       wallRebar(reb, w, tm.rebar, L < nWall - 1);
       wallForm(form, w, tm.form, tm.strip);
     });
@@ -312,7 +379,7 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
       const k = fx(c.cx, X0, X1);
       const s = f0 + k * (f1 - f0) * 0.45;
       fw.timing(s, s + (f1 - f0) * 0.25, NEVER, NEVER, w.y0, w.y1 - w.y0);
-      fw.extrude(w.poly, [], w.y0, w.y1);
+      fw.extrude(w.poly, wallHoles(w), w.y0, w.y1);
     });
     add(fw.build(), M.finishWall, 'tabiques', L, f0, NEVER, true);
     const mats = { window: M.pvc, plate: M.glass, railing: M.railing, door: M.door } as const;
@@ -320,6 +387,54 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
       const geo = detailGeometry(detail, grp.offset, grp.count, f0 + (f1 - f0) * 0.4, f1, X0, X1);
       add(geo, mats[grp.kind], grp.kind, L, f0, NEVER, false, grp.kind !== 'plate');
     }
+  }
+
+  // --- Andamio perimetral: se arma al comenzar cada piso y "trepa" al siguiente ------------
+  for (let L = 1; L < nWall; L++) {
+    const start = (lvl: number) => sched.activities.find((a) => a.kind === 'muroFierro' && a.level === lvl)!.t0;
+    const in0 = start(L) - 0.2;
+    const in1 = in0 + 2.6;
+    const out0 = L + 1 < nWall ? start(L + 1) - 0.3 : sched.slab[L + 1].pour[1] + 2.5;
+    const out1 = out0 + 1.0;
+    const y = levels[L].slab.y1;
+    const H = 3.6;
+    const outer = levels[L].slab.outer;
+    const sign = signedArea(outer) > 0 ? 1 : -1;
+    const inner = offsetPolygon(outer, -0.25);
+    const outerL = offsetPolygon(outer, -1.1);
+    const frame = new GeoBuilder(), rails = new GeoBuilder(), deck = new GeoBuilder(), mesh = new GeoBuilder();
+    for (const gb of [frame, rails, deck, mesh]) gb.timing(in0, in1, out0, out1, y - 0.25, H + 0.3);
+    // parantes en ambas líneas y travesaños en cada plataforma
+    for (const { p, t } of samplePerimeter(inner, 1.9)) {
+      const nx = sign * t[1], nz = -sign * t[0];
+      const q: V2 = [p[0] + nx * 0.85, p[1] + nz * 0.85];
+      frame.barN(p[0], y - 0.25, p[1], p[0], y + H, p[1], 0.045);
+      frame.barN(q[0], y - 0.25, q[1], q[0], y + H, q[1], 0.045);
+      for (const h of [0, 2.0]) frame.barN(p[0], y + h, p[1], q[0], y + h, q[1], 0.04);
+      // diagonal de arriostramiento cada dos vanos
+      frame.barN(q[0], y, q[1], q[0] + t[0] * 1.9, y + 2.0, q[1] + t[1] * 1.9, 0.03);
+    }
+    for (const loop of [inner, outerL]) {
+      for (let i = 0; i < loop.length; i++) {
+        const a = loop[i], c = loop[(i + 1) % loop.length];
+        if (Math.hypot(c[0] - a[0], c[1] - a[1]) < 0.1) continue;
+        for (const h of [0, 2.0]) frame.barN(a[0], y + h, a[1], c[0], y + h, c[1], 0.04);
+      }
+    }
+    // barandas rojas y rodapié por el lado exterior
+    for (let i = 0; i < outerL.length; i++) {
+      const a = outerL[i], c = outerL[(i + 1) % outerL.length];
+      if (Math.hypot(c[0] - a[0], c[1] - a[1]) < 0.1) continue;
+      for (const h of [1.0, 2.5, 3.0, 3.55]) rails.barN(a[0], y + h, a[1], c[0], y + h, c[1], 0.05);
+      mesh.wallPanel(a, c, y - 0.2, y + H, 0.012, voidSide(outerL, false, 0.012) + (voidSide(outerL, false, 0.012) === 0 ? 0.06 : -0.06));
+    }
+    // plataformas de tablones
+    deck.extrude(outerL, [inner], y - 0.02, y + 0.03, true, true);
+    deck.extrude(outerL, [inner], y + 1.98, y + 2.03, true, true);
+    add(frame.build(), M.scaffold, 'andamio', L, in0, out1 + 0.1);
+    add(rails.build(), M.scaffoldRail, 'andamio-barandas', L, in0, out1 + 0.1, false, false);
+    add(deck.build(), M.scaffoldDeck, 'andamio-plataformas', L, in0, out1 + 0.1);
+    add(mesh.build(), M.scaffoldMesh, 'andamio-malla', L, in0, out1 + 0.1, false, false);
   }
 
   const struct: Structure = {
@@ -352,58 +467,74 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
   return struct;
 }
 
-/** Signo para desplazar paneles hacia afuera de un contorno según su orientación. */
-function outward(poly: V2[]) {
-  // wallPanel desplaza hacia la normal derecha del avance (dz, -dx); para contornos
-  // antihorarios en (x, z) esa normal apunta hacia afuera.
-  let a = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const [x0, z0] = poly[i], [x1, z1] = poly[(i + 1) % poly.length];
-    a += x0 * z1 - x1 * z0;
-  }
-  return a > 0 ? 0 : -0.035;
+/**
+ * Desplazamiento para que una pieza de espesor `t` construida con wallPanel quede del lado
+ * vacío del contorno (afuera del hormigón). wallPanel avanza hacia la normal derecha (dz, -dx),
+ * que en un contorno antihorario apunta hacia afuera de él. En un vano el hormigón está afuera
+ * del contorno, así que el lado vacío es el contrario.
+ */
+function voidSide(loop: V2[], hole: boolean, t: number) {
+  const rightIsOutside = signedArea(loop) > 0;
+  return (hole ? !rightIsOutside : rightIsOutside) ? 0 : -t;
+}
+
+/** Contornos de un muro: el exterior y sus vanos grandes (shafts), sin las astillas del dibujo. */
+function wallLoops(w: WallData, minHole = 0.3) {
+  return [
+    { loop: w.poly, hole: false },
+    ...w.holes.filter((h) => Math.abs(signedArea(h)) >= minHole).map((loop) => ({ loop, hole: true })),
+  ];
+}
+
+/** Vanos que se descuentan del hormigón (se ignoran los de área despreciable). */
+function wallHoles(w: WallData) {
+  return w.holes.filter((h) => Math.abs(signedArea(h)) >= 0.02);
 }
 
 /** Fierro de muro: barras verticales (con arranques sobre la losa) y horizontales a ambas caras. */
 function wallRebar(g: GeoBuilder, w: WallData, [t0, t1]: [number, number], starters: boolean) {
   const top = starters ? w.y1 + 0.55 : w.y1 - 0.03;
   g.timing(t0, t1, NEVER, NEVER, w.y0, top - w.y0);
-  const loop = offsetPolygon(w.poly, Math.min(0.05, w.t * 0.3));
-  for (const { p } of samplePerimeter(loop, 0.32)) {
-    g.bar(new THREE.Vector3(p[0], w.y0, p[1]), new THREE.Vector3(p[0], top, p[1]), 0.022, true);
-  }
-  for (let y = w.y0 + 0.2; y < w.y1 - 0.05; y += 0.45) {
-    for (let i = 0; i < loop.length; i++) {
-      const a = loop[i], b = loop[(i + 1) % loop.length];
-      if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.06) continue;
-      g.bar(new THREE.Vector3(a[0], y, a[1]), new THREE.Vector3(b[0], y, b[1]), 0.02, false);
+  const cover = Math.min(0.05, w.t * 0.3);
+  for (const { loop: l, hole } of wallLoops(w)) {
+    const loop = offsetPolygon(l, hole ? -cover : cover);
+    for (const { p } of samplePerimeter(loop, 0.32)) {
+      g.bar(new THREE.Vector3(p[0], w.y0, p[1]), new THREE.Vector3(p[0], top, p[1]), 0.022, true);
+    }
+    for (let y = w.y0 + 0.2; y < w.y1 - 0.05; y += 0.45) {
+      for (let i = 0; i < loop.length; i++) {
+        const a = loop[i], b = loop[(i + 1) % loop.length];
+        if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.06) continue;
+        g.bar(new THREE.Vector3(a[0], y, a[1]), new THREE.Vector3(b[0], y, b[1]), 0.02, false);
+      }
     }
   }
 }
 
-/** Moldaje de muro: paneles de ≤1,2 m pegados a cada cara, con dos alineadores horizontales. */
+/** Moldaje de muro: paneles de ≤1,2 m pegados a cada cara (también dentro de los shafts), con alineadores. */
 function wallForm(g: GeoBuilder, w: WallData, [in0, in1]: [number, number], [out0, out1]: [number, number]) {
-  const poly = w.poly;
-  const off = outward(poly) === 0 ? 0 : -0.07;
   const y0 = w.y0 - 0.02, y1 = w.y1 + 0.1;
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i], b = poly[(i + 1) % poly.length];
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (len < 0.05) continue;
-    const n = Math.max(1, Math.ceil(len / 1.2));
-    for (let k = 0; k < n; k++) {
-      const s0 = k / n + (n > 1 ? 0.004 : 0), s1 = (k + 1) / n - (n > 1 ? 0.004 : 0);
-      const pa: V2 = [a[0] + (b[0] - a[0]) * s0, a[1] + (b[1] - a[1]) * s0];
-      const pb: V2 = [a[0] + (b[0] - a[0]) * s1, a[1] + (b[1] - a[1]) * s1];
-      const d = (k + i * 0.37) % 1;
-      g.timing(in0 + d * 0.25, in1 + d * 0.25, out0 + d * 0.2, out1 + d * 0.2);
-      g.wallPanel(pa, pb, y0, y1, 0.07, off);
-    }
-    if (len > 1.0) {
-      // alineadores (tubos horizontales) por fuera del panel
-      const off2 = off === 0 ? 0.07 : -0.14;
-      g.timing(in0 + 0.3, in1 + 0.3, out0, out1);
-      for (const h of [0.45, 1.85]) g.wallPanel(a, b, w.y0 + h, w.y0 + h + 0.08, 0.07, off2);
+  for (const { loop: poly, hole } of wallLoops(w)) {
+    const off = voidSide(poly, hole, 0.07);
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < 0.05) continue;
+      const n = Math.max(1, Math.ceil(len / 1.2));
+      for (let k = 0; k < n; k++) {
+        const s0 = k / n + (n > 1 ? 0.004 : 0), s1 = (k + 1) / n - (n > 1 ? 0.004 : 0);
+        const pa: V2 = [a[0] + (b[0] - a[0]) * s0, a[1] + (b[1] - a[1]) * s0];
+        const pb: V2 = [a[0] + (b[0] - a[0]) * s1, a[1] + (b[1] - a[1]) * s1];
+        const d = (k + i * 0.37) % 1;
+        g.timing(in0 + d * 0.25, in1 + d * 0.25, out0 + d * 0.2, out1 + d * 0.2);
+        g.wallPanel(pa, pb, y0, y1, 0.07, off);
+      }
+      if (len > 1.0) {
+        // alineadores (tubos horizontales) por fuera del panel
+        const off2 = off === 0 ? 0.07 : -0.14;
+        g.timing(in0 + 0.3, in1 + 0.3, out0, out1);
+        for (const h of [0.45, 1.85]) g.wallPanel(a, b, w.y0 + h, w.y0 + h + 0.08, 0.07, off2);
+      }
     }
   }
 }

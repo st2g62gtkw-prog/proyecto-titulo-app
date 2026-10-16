@@ -22,13 +22,13 @@ export interface Progress {
 }
 
 export const FLOOR_STEPS: { kind: ActivityKind; label: string }[] = [
-  { kind: 'muroFierro', label: 'Enfierradura de muros' },
+  { kind: 'muroFierro', label: 'Andamio y enfierradura de muros' },
   { kind: 'muroMoldaje', label: 'Moldaje de muros' },
   { kind: 'muroHormigon', label: 'Hormigonado con capacho' },
   { kind: 'muroDesmolde', label: 'Desmolde' },
   { kind: 'losaMoldaje', label: 'Moldaje de losa' },
   { kind: 'losaFierro', label: 'Enfierradura de losa' },
-  { kind: 'losaHormigon', label: 'Hormigonado con bomba' },
+  { kind: 'losaHormigon', label: 'Hormigonado con bomba estacionaria' },
 ];
 
 export function computeProgress(sched: Schedule, t: number): Progress {
@@ -85,7 +85,7 @@ export function computeProgress(sched: Schedule, t: number): Progress {
   const capachos = Math.floor(hormigonMuros / EQUIPMENT.capachoM3 + 1e-6);
 
   const floors = names.map((name, L) => {
-    const own = acts.filter((a) => a.kind !== 'terminaciones' && ((a.kind.startsWith('muro') && a.level === L) || (a.kind.startsWith('losa') && a.level === L) || (L === 0 && (a.kind === 'fundaciones' || a.kind === 'radier'))));
+    const own = [...acts, ...sched.parallel].filter((a) => a.kind !== 'terminaciones' && ((a.kind.startsWith('muro') && a.level === L) || (a.kind.startsWith('losa') && a.level === L) || (L === 0 && (a.kind === 'fundaciones' || a.kind === 'radier'))));
     const tot = own.reduce((s, a) => s + (a.t1 - a.t0), 0);
     const done = own.reduce((s, a) => s + (a.t1 - a.t0) * k01(t, a.t0, a.t1), 0);
     const p = tot > 0 ? done / tot : 0;

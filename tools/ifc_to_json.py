@@ -23,9 +23,10 @@ import ifcopenshell.geom
 import ifcopenshell.util.placement as uplace
 import numpy as np
 
-# Muros con espesor medio sobre este valor se tratan como hormigón armado e=20.
+# Muros con espesor medio (descontando vanos) sobre este valor se tratan como hormigón armado e=20.
+# Con 0,14 m la huella de muros H.A. por piso (~45–49 m²) queda cerca de la cubicación (42,2–42,6 m²).
 # Bajo este valor son tabiquería / fachada liviana (se instalan en terminaciones).
-ESPESOR_HA = 0.15
+ESPESOR_HA = 0.14
 
 
 def profile_loops(solid):
@@ -125,8 +126,13 @@ def main(ifc_path, out_dir):
                     poly = loops[0]
                     if area(poly) < 0:
                         poly = poly[::-1]
-                    a = abs(area(poly))
-                    t = 2 * a / perim(poly)
+                    holes = []
+                    for hl in loops[1:]:
+                        if area(hl) > 0:
+                            hl = hl[::-1]
+                        holes.append(hl)
+                    a = abs(area(poly)) - sum(abs(area(hl)) for hl in holes)
+                    t = 2 * a / (perim(poly) + sum(perim(hl) for hl in holes))
                     cat = e.Name.split(" ")[0].lower()  # fachada | tabique | fondo
                     lv["walls"].append({
                         "id": e.GlobalId,
@@ -137,8 +143,26 @@ def main(ifc_path, out_dir):
                         "y0": round(z0 - z_ref, 3),
                         "y1": round(z1 - z_ref, 3),
                         "poly": [P(*p) for p in poly],
+                        "holes": [[P(*p) for p in hl] for hl in holes],
                     })
         levels.append(lv)
+
+    # Shaft del ascensor: hueco grande dentro de un muro H.A. (foso 1,82 × 3,55 m en la cubicación).
+    # Las losas del IFC no traen sus vanos, así que se agrega el del shaft a todas las losas sobre el 1P.
+    shaft = None
+    for lv in levels:
+        for w in lv["walls"]:
+            for hl in w.get("holes", []):
+                if w["ha"] and abs(area(hl)) > 3.0:
+                    shaft = hl
+        if shaft:
+            break
+    if shaft:
+        xs = [p[0] for p in shaft]
+        zs = [p[1] for p in shaft]
+        for lv in levels[1:]:
+            lv["slab"]["holes"].append(shaft)
+            lv["slab"]["area"] = round(lv["slab"]["area"] - abs(area(shaft)), 2)
 
     # Mallas de detalle (ventanas, vidrios, barandas, puertas) trianguladas por IfcOpenShell.
     st = ifcopenshell.geom.settings()
@@ -180,6 +204,7 @@ def main(ifc_path, out_dir):
         "espesorHA": ESPESOR_HA,
         "levels": levels,
         "terrain": {"y": round(tz1 - z_ref, 3), "outer": [P(*p) for p in clean(tl[0])]},
+        "shaft": {"x0": min(xs), "x1": max(xs), "z0": min(zs), "z1": max(zs)} if shaft else None,
         "detail": {"file": "edificio-e-detalle.bin", "groups": index},
     }
     (out_dir / "edificio-e.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")))

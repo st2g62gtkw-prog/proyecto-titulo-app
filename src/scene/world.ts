@@ -15,7 +15,8 @@ import { createCrane, type CraneRig } from './equipment/crane';
 import { createMixer, type MixerRig } from './equipment/mixer';
 import { createPanelPack, createDeckPack, createPropBundle, createRebarBundle } from './equipment/payloads';
 import { createConcreteStream, type ConcreteStream } from './equipment/pour';
-import { createPump, type PumpRig } from './equipment/pump';
+import { createStationaryPump, type StationaryPumpRig } from './equipment/stationaryPump';
+import { createPipeline, type Pipeline } from './pipeline';
 import type { Crowd } from './equipment/workers';
 import { uTime } from './reveal';
 import type { SiteRig } from './site';
@@ -50,7 +51,8 @@ export class World {
   crews: Crews;
   crowd: Crowd;
   capacho: CapachoRig;
-  pump: PumpRig;
+  pump: StationaryPumpRig;
+  pipeline: Pipeline;
   mixers: MixerRig[] = [];
   streams: ConcreteStream[] = [];
   payloads: Record<Exclude<PayloadKind, 'capacho'>, THREE.Group>;
@@ -125,10 +127,17 @@ export class World {
     };
     this.capachoRest.set(chuteWorld.x - 1.5, SITE.groundY, chuteWorld.z + 3.2);
 
-    this.pump = createPump();
-    this.pump.group.visible = false;
+    // bomba estacionaria en su caseta y la tubería que sube por el shaft del ascensor
+    this.pump = createStationaryPump();
+    this.pump.group.position.set(SITE.pump.x, SITE.groundY, SITE.pump.z);
+    this.pump.group.rotation.y = SITE.pump.heading;
     scene.add(this.pump.group);
+    this.pump.group.updateMatrixWorld(true);
     this.pickables.push(...this.pump.pickables);
+    const outlet = this.pump.outlet.getWorldPosition(new THREE.Vector3());
+    this.pipeline = createPipeline(data, this.sched, outlet);
+    scene.add(this.pipeline.group);
+    this.pickables.push(...this.pipeline.pickables);
 
     for (let i = 0; i < 4; i++) {
       const s = createConcreteStream();
@@ -200,7 +209,7 @@ export class World {
     this.addLabel('al', 'Acopio moldaje de losa', 'acopio', root, a.acopioMoldajeLosa.clone().add(new THREE.Vector3(0, 2.2, 0)));
     this.addLabel('af', 'Acopio de fierro', 'acopio', root, a.acopioFierro.clone().add(new THREE.Vector3(0, 2.2, 0)));
     this.addLabel('faena', 'Instalación de faena', 'info', root, new THREE.Vector3(SITE.faena.x, 5, SITE.faena.z));
-    this.addLabel('pump', 'Camión bomba', 'pump', this.pump.group, new THREE.Vector3(0, 5.5, 0));
+    this.addLabel('pump', 'Bomba estacionaria', 'pump', this.pump.group, new THREE.Vector3(0, 4.2, 0));
     this.mixers.forEach((m, i) => this.addLabel(`mixer${i}`, 'Mixer 7 m³', 'mixer', m.group, new THREE.Vector3(0, 4.6, 0)));
     this.addLabel('front', 'Frente de trabajo', 'work', root, new THREE.Vector3());
   }
@@ -316,35 +325,23 @@ export class World {
       sCap.set(this.tmp, this.tmp2, cs.open, clock);
     } else sCap.set(this.tmp, this.tmp, 0, clock);
 
-    // --- camión bomba ---
+    // --- bomba estacionaria y tubería ---
     const ps = this.log.pumpState(T);
     const sHose = this.streams[2];
     const sHop = this.streams[3];
-    this.state.pumpBusy = !!ps;
-    if (ps) {
-      const pump = this.pump;
-      pump.group.visible = true;
-      pump.group.position.set(ps.pose.x, gy, ps.pose.z);
-      pump.group.rotation.set(0, -ps.pose.heading, 0);
-      pump.setOutriggers(ps.outriggers);
-      pump.group.updateMatrixWorld(true);
-      const sw = this.structure.sweeps[ps.slab];
-      const target = this.sweepPoint(sw, ps.progress);
-      pump.setBoom(ps.boom, target);
-      if (ps.pouring) {
-        pump.hoseTip.getWorldPosition(this.tmp);
-        sHose.set(this.tmp, new THREE.Vector3(this.tmp.x, sw.y, this.tmp.z), 1, clock);
-        this.state.focus.set(target.x, sw.y, target.z);
-      } else sHose.set(this.tmp, this.tmp, 0, clock);
-      if (pumpHopperFeed && ps.pouring) {
-        pump.hopper.getWorldPosition(this.tmp2);
-        sHop.set(pumpHopperFeed, this.tmp2, 0.8, clock);
-      } else sHop.set(this.tmp2, this.tmp2, 0, clock);
-    } else {
-      this.pump.group.visible = false;
-      sHose.set(this.tmp, this.tmp, 0, clock);
-      sHop.set(this.tmp, this.tmp, 0, clock);
-    }
+    this.state.pumpBusy = ps.pumping;
+    this.pump.setPumping(ps.pumping, clock);
+    const sw = this.structure.sweeps[ps.slab];
+    const target = ps.pumping && sw ? this.sweepPoint(sw, ps.progress) : null;
+    const tip = this.pipeline.update(ps.slab, ps.pumping, target);
+    if (tip && target && sw) {
+      sHose.set(tip, new THREE.Vector3(target.x, sw.y, target.z), 1, clock);
+      this.state.focus.set(target.x, sw.y, target.z);
+    } else sHose.set(this.tmp, this.tmp, 0, clock);
+    if (pumpHopperFeed && ps.pumping) {
+      this.pump.hopper.getWorldPosition(this.tmp2);
+      sHop.set(pumpHopperFeed, this.tmp2, 0.8, clock);
+    } else sHop.set(this.tmp2, this.tmp2, 0, clock);
 
     // --- cuadrillas ---
     const act = this.sched.at(T);
@@ -360,10 +357,20 @@ export class World {
       { x: SITE.faena.x + 7, z: SITE.faena.z + 5, r: 1.5, action: 'idle' },
       { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },
     ];
+    // trabajos en paralelo en el 1er piso: redes bajo radier y hormigonado del radier
+    for (const par of this.sched.parallel) {
+      if (T < par.t0 || T > par.t1) continue;
+      const b0 = this.structure.sweeps[0];
+      const k = (T - par.t0) / (par.t1 - par.t0);
+      const at = par.kind === 'radier' && ps.pumping && ps.slab === 0 && target
+        ? { x: target.x, z: target.z }
+        : { x: b0.xmin + k * (b0.xmax - b0.xmin), z: (b0.zmin + b0.zmax) / 2 + 0.6 };
+      for (let i = 0; i < 4; i++) ground.push({ x: at.x + (i - 1.5) * 1.2, z: at.z + (i % 2 ? 1 : -1), r: 0.5, action: 'work' });
+    }
     this.crews.update(T, act, ground);
     this.crews.members.forEach((m, i) => this.crowd.set(i, { ...m, t: clock + i * 0.37 }));
     this.crowd.commit();
-    if (!ps?.pouring) {
+    if (!ps.pumping) {
       const f = this.crews.focus(act, T);
       this.state.focus.set(f.x, f.y + 1, f.z);
     }
@@ -375,7 +382,6 @@ export class World {
       front.obj.visible = this.labelsOn && act.kind !== 'terminaciones';
     }
     for (const l of this.labels) {
-      if (l.key === 'pump') l.obj.visible = this.labelsOn && this.pump.group.visible;
       if (l.key.startsWith('mixer')) l.obj.visible = this.labelsOn && this.mixers[+l.key.slice(5)].group.visible;
     }
   }

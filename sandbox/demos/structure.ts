@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { loadBuilding } from '../../src/data/building';
 import { buildSchedule } from '../../src/core/schedule';
 import { buildStructure } from '../../src/scene/structure';
@@ -13,6 +14,10 @@ export default function demo(stage: Stage) {
     const st = buildStructure(data, sched, detail);
     console.log('structure built ms', Math.round(performance.now() - t0), 'layers', st.layers.length, 'duration', sched.duration.toFixed(1));
     stage.scene.add(st.group);
+    if (q.get('cut') === '1') {
+      // corte longitudinal para ver el interior (como el botón "Corte" de la app)
+      st.clipping.push(new THREE.Plane(new THREE.Vector3(0, 0, -1), 1.2));
+    }
     const act = q.get('act');
     const actT = act ? sched.activities.find((a) => a.id === act) : null;
     ready = (t) => {

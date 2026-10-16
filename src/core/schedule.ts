@@ -22,7 +22,8 @@ export type ActivityKind =
   | 'losaMoldaje'
   | 'losaFierro'
   | 'losaHormigon'
-  | 'terminaciones';
+  | 'terminaciones'
+  | 'instalaciones';
 
 export interface Trip {
   /** Ventana total del viaje de grúa. */
@@ -61,6 +62,8 @@ export interface WallTiming {
 
 export interface Schedule {
   activities: Activity[];
+  /** Actividades fuera de la ruta crítica que corren en paralelo (instalaciones bajo radier, radier). */
+  parallel: Activity[];
   duration: number;
   totalDays: number;
   /** Tiempos por muro HA: wall[level][i] (índice dentro de haWalls(level)). */
@@ -153,12 +156,6 @@ export function buildSchedule(data: BuildingData): Schedule {
     g.forEach((wi) => (footing[wi] = [t0 + tripF * 0.55, t0 + tripF * 0.86]));
     return { t0, t1: t0 + tripF, walls: g, x: c.x, z: c.z, y: 0.9 };
   });
-  const radier = push('radier', 0, PACE.radier, DAYS.radier, 'Radier 1er piso', 'Radier e=10 cm sobre relleno compactado');
-  slab[0] = {
-    props: [radier.t0, radier.t0], deck: [radier.t0, radier.t0], rebar: [radier.t0, radier.t0 + PACE.radier * 0.3],
-    pour: [radier.t0 + PACE.radier * 0.35, radier.t1 - 1], propsOut: [1e7, 1e7], deckOut: [1e7, 1e7],
-  };
-
   for (let L = 0; L < nWallLevels; L++) {
     const lv = levels[L];
     const walls = haWalls(lv);
@@ -168,7 +165,8 @@ export function buildSchedule(data: BuildingData): Schedule {
     const piso = `Piso ${L + 1}`;
 
     // 1) Enfierradura de muros: avanza por sectores; la grúa sube paquetes de fierro.
-    const aF = push('muroFierro', L, PACE.muroFierro, DAYS.muroFierro, `${piso} · Enfierradura de muros`, 'Mallas Ø8–Ø12 A630-420H amarradas sobre los arranques');
+    const aF = push('muroFierro', L, PACE.muroFierro, DAYS.muroFierro, `${piso} · Enfierradura de muros`,
+      L > 0 ? 'Se arma el andamio perimetral con malla; mallas Ø8–Ø12 A630-420H sobre los arranques' : 'Mallas Ø8–Ø12 A630-420H amarradas sobre los arranques de las zapatas');
     order.forEach((wi, k) => {
       const s = aF.t0 + 0.5 + (k / order.length) * (PACE.muroFierro - 2.6);
       timing[wi].rebar = [s, s + 1.8];
@@ -222,7 +220,7 @@ export function buildSchedule(data: BuildingData): Schedule {
     const losaTxt = S === levels.length - 1 ? 'losa de techumbre' : `losa cielo ${lv.name}`;
     const aLM = push('losaMoldaje', S, PACE.losaMoldaje, DAYS.losaMoldaje, `${piso} · Moldaje de ${losaTxt}`, 'Puntales, vigas H20 y placas fenólicas; frontales de borde');
     const aLF = push('losaFierro', S, PACE.losaFierro, DAYS.losaFierro, `${piso} · Enfierradura de ${losaTxt}`, 'Malla inferior y superior Ø8–Ø10, suples y separadores');
-    const aLH = push('losaHormigon', S, PACE.losaHormigon, DAYS.losaHormigon, `${piso} · Hormigonado de ${losaTxt}`, 'Camión bomba pluma, vibrado y platachado');
+    const aLH = push('losaHormigon', S, PACE.losaHormigon, DAYS.losaHormigon, `${piso} · Hormigonado de ${losaTxt}`, 'Bomba estacionaria: la tubería sube por el shaft del ascensor; vibrado y platachado');
     const bx = polyBounds(levels[S].slab.outer);
     aLM.trips = [0, 1, 2].map((k) => {
       const t0 = aLM.t0 + 0.4 + k * ((PACE.losaMoldaje - 0.8) / 3);
@@ -251,6 +249,33 @@ export function buildSchedule(data: BuildingData): Schedule {
     }
   }
 
+  // --- Radier del 1er piso: fuera de la ruta crítica ------------------------------------
+  // No se hormigona después de las fundaciones: el 1er piso queda con relleno compactado
+  // mientras se colocan y prueban las redes que van bajo el radier (alcantarillado, agua
+  // potable) y mientras está ocupado por puntales y acopios. En la visita (09-10-2026) la
+  // obra tenía el 5° piso terminado y aún sin radier. Aquí las instalaciones se hacen en
+  // paralelo con los pisos 5 y 6, y el radier con los muros del 7° piso.
+  const dayOf = (time: number) => {
+    const a = acts.find((x) => time >= x.t0 && time < x.t1) ?? acts[acts.length - 1];
+    return a.d0 + ((time - a.t0) / (a.t1 - a.t0)) * (a.d1 - a.d0);
+  };
+  const find = (kind: ActivityKind, level: number) => acts.find((a) => a.kind === kind && a.level === level)!;
+  const par = (kind: ActivityKind, t0: number, t1: number, title: string, detail: string): Activity => ({
+    id: `${kind}-par`, kind, level: 0, levelName: levels[0].name, t0, t1, d0: dayOf(t0), d1: dayOf(t1), title, detail, trips: [],
+  });
+  const lastWalls = nWallLevels - 1;
+  const inst = par('instalaciones', find('muroFierro', lastWalls - 2).t0, find('losaHormigon', lastWalls).t1,
+    'Instalaciones bajo radier', 'Alcantarillado PVC y agua potable HDPE en zanjas bajo el 1er piso, con pruebas de presión');
+  const rStart = find('muroFierro', lastWalls).t0 + 0.6;
+  const rEnd = find('muroMoldaje', lastWalls).t1 - 0.6;
+  const radier = par('radier', rStart, rEnd, 'Radier 1er piso', 'Radier e=10 cm sobre relleno compactado, con bomba estacionaria');
+  const rDur = rEnd - rStart;
+  slab[0] = {
+    props: [rStart, rStart], deck: [rStart, rStart], rebar: [rStart, rStart + rDur * 0.32],
+    pour: [rStart + rDur * 0.4, rEnd - 0.4], propsOut: [1e7, 1e7], deckOut: [1e7, 1e7],
+  };
+  const parallel = [inst, radier];
+
   // --- Terminaciones: tabiquería, ventanas, barandas, pintura de fachada, piso a piso ---
   const aT0 = t;
   for (let L = 0; L < nWallLevels; L++) {
@@ -268,6 +293,7 @@ export function buildSchedule(data: BuildingData): Schedule {
   const duration = t + 4;
   const sched: Schedule = {
     activities: acts,
+    parallel,
     duration,
     totalDays: d,
     wall,

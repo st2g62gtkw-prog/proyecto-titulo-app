@@ -1,5 +1,6 @@
 /**
- * Logística de hormigón: llegada de mixers y del camión bomba, colas y salidas.
+ * Logística de hormigón: llegada de mixers, colas y salidas. Los muros se hormigonan con
+ * capacho; las losas y el radier con la bomba estacionaria que queda fija en su caseta.
  * Igual que la grúa, todo es función del tiempo de simulación.
  */
 import { SITE } from '../config';
@@ -28,26 +29,19 @@ export interface MixerState {
   dist: number;
 }
 
-export interface PumpVisit {
+/** Hormigonado con la bomba estacionaria (una losa o el radier). */
+export interface PumpPour {
+  /** Índice de la losa (0 = radier del 1er piso). */
   slab: number;
-  arrive: [number, number];
-  outriggers: [number, number];
-  unfold: [number, number];
   pour: [number, number];
-  fold: [number, number];
-  stow: [number, number];
-  leave: [number, number];
 }
 
 export interface PumpState {
-  pose: Pose;
-  outriggers: number;
-  boom: number;
-  pouring: boolean;
+  pumping: boolean;
+  /** Losa que se está hormigonando (o la próxima, si la bomba está detenida). */
   slab: number;
   /** Fracción del hormigonado de la losa (0..1). */
   progress: number;
-  dist: number;
 }
 
 const R = SITE.roadZ, LZ = SITE.loopZ, X0 = SITE.loopX0, X1 = SITE.loopX1;
@@ -76,19 +70,9 @@ function travel(route: Route, t: number, [t0, t1]: [number, number]) {
 
 export class Logistics {
   mixers: MixerVisit[] = [];
-  pumps: PumpVisit[] = [];
-  private pumpIn: Route;
-  private pumpOut: Route;
+  pours: PumpPour[] = [];
 
   constructor(sched: Schedule) {
-    const P = SITE.pump;
-    this.pumpIn = new Route().add([
-      [G.x - 8, IN], [G.x, IN], [X0 - 10, IN], [X0 - 2, IN - 1.2], [X0, IN - 4], [X0, LZ + 3.5], [X0 + 3, LZ], [P.x - 6, LZ], [P.x - 2.2, LZ - 0.6], [P.x - 0.2, LZ - 2.6], [P.x, P.z],
-    ]);
-    this.pumpOut = new Route()
-      .add([[P.x, P.z], [P.x, LZ - 1.2], [P.x + 1.6, LZ + 1.4], [P.x + 4.5, LZ + 2]], true)
-      .add([[P.x + 4.5, LZ + 2], [P.x + 1, LZ + 1.2], [P.x - 4, LZ], [X0 + 3, LZ], [X0, LZ + 3.5], [X0, OUT - 3], [X0 - 3, OUT], [G.x, OUT], [G.x - 10, OUT]]);
-
     let id = 1;
     const cap = SITE.mixerCapacho, pmp = SITE.mixerPump;
     for (const a of sched.activities) {
@@ -113,42 +97,38 @@ export class Logistics {
           discharge: [fill(half) - 0.2, fillEnd(tr.length - 1) + 0.1], leave: [fillEnd(tr.length - 1) + 0.3, fillEnd(tr.length - 1) + 5.3],
         });
       }
-      if (a.kind === 'losaHormigon' || a.kind === 'radier') {
-        const S = a.kind === 'radier' ? 0 : a.level;
-        const pour = sched.slab[S].pour;
-        const v: PumpVisit = {
-          slab: S,
-          arrive: [a.t0 - 4.5, a.t0 + 1.2],
-          outriggers: [a.t0 + 1.3, a.t0 + 2.3],
-          unfold: [a.t0 + 2.3, pour[0] - 0.1],
-          pour,
-          fold: [pour[1] + 0.2, pour[1] + 1.7],
-          stow: [pour[1] + 1.7, pour[1] + 2.4],
-          leave: [pour[1] + 2.5, pour[1] + 8.5],
-        };
-        this.pumps.push(v);
-        // tres mixers alimentan la bomba durante el hormigonado; el siguiente espera en cola
-        const n = 3;
-        const qx = pmp.x - 13;
-        for (let k = 0; k < n; k++) {
-          const d0 = pour[0] + ((pour[1] - pour[0]) * k) / n;
-          const d1 = pour[0] + ((pour[1] - pour[0]) * (k + 1)) / n;
-          if (k === 0) {
-            this.mixers.push({
-              id: id++, spot: 'bomba', inRoute: entry(pmp.x), outRoute: exitFrom(pmp.x),
-              arrive: [d0 - 5.2, d0 - 0.6], discharge: [d0 - 0.4, d1 - 0.05], leave: [d1, d1 + 5],
-            });
-          } else {
-            this.mixers.push({
-              id: id++, spot: 'bomba', inRoute: entry(qx), outRoute: exitFrom(pmp.x),
-              arrive: [d0 - 6, d0 - 1.2],
-              queue: { wait: new Route().add([[qx, LZ], [pmp.x, LZ]]), move: [d0 + 0.45, d0 + 1.6] },
-              discharge: [d0 + 1.7, d1 - 0.05], leave: [d1, d1 + 5],
-            });
-          }
+    }
+    // losas y radier: los mixers alimentan la tolva de la bomba estacionaria
+    for (const a of [...sched.activities, ...sched.parallel]) {
+      if (a.kind !== 'losaHormigon' && a.kind !== 'radier') continue;
+      const S = a.kind === 'radier' ? 0 : a.level;
+      const pour = sched.slab[S].pour;
+      this.pours.push({ slab: S, pour });
+      // tres mixers por hormigonado; el siguiente espera en cola detrás del que descarga
+      const n = 3;
+      const qx = pmp.x - 13;
+      for (let k = 0; k < n; k++) {
+        const d0 = pour[0] + ((pour[1] - pour[0]) * k) / n;
+        const d1 = pour[0] + ((pour[1] - pour[0]) * (k + 1)) / n;
+        if (k === 0) {
+          this.mixers.push({
+            id: id++, spot: 'bomba', inRoute: entry(pmp.x), outRoute: exitFrom(pmp.x),
+            arrive: [d0 - 5.2, d0 - 0.6], discharge: [d0 - 0.4, d1 - 0.05], leave: [d1, d1 + 5],
+          });
+        } else {
+          this.mixers.push({
+            id: id++, spot: 'bomba', inRoute: entry(qx), outRoute: exitFrom(pmp.x),
+            arrive: [d0 - 6, d0 - 1.2],
+            queue: { wait: new Route().add([[qx, LZ], [pmp.x, LZ]]), move: [d0 + 0.45, d0 + 1.6] },
+            discharge: [d0 + 1.7, d1 - 0.05], leave: [d1, d1 + 5],
+          });
         }
       }
     }
+    this.pours.sort((p, q) => p.pour[0] - q.pour[0]);
+    // numeración correlativa por orden de llegada (también reparte los camiones del pool sin choques)
+    this.mixers.sort((p, q) => p.arrive[0] - q.arrive[0]);
+    this.mixers.forEach((m, i) => (m.id = i + 1));
   }
 
   mixerStates(t: number): MixerState[] {
@@ -176,20 +156,10 @@ export class Logistics {
     return out;
   }
 
-  pumpState(t: number): PumpState | null {
-    const v = this.pumps.find((p) => t >= p.arrive[0] && t <= p.leave[1]);
-    if (!v) return null;
-    const k = (w: [number, number]) => Math.min(Math.max((t - w[0]) / (w[1] - w[0]), 0), 1);
-    let pose: Pose, dist = 0;
-    if (t < v.arrive[1]) ({ pose, dist } = travel(this.pumpIn, t, v.arrive));
-    else if (t < v.leave[0]) { pose = this.pumpIn.at(this.pumpIn.length); dist = this.pumpIn.length; }
-    else { const r = travel(this.pumpOut, t, v.leave); pose = r.pose; dist = this.pumpIn.length + r.dist; }
-    const out = 1 - k(v.stow);
-    const outriggers = t < v.stow[0] ? k(v.outriggers) : out;
-    const boom = t < v.fold[0] ? k(v.unfold) : 1 - k(v.fold);
-    return {
-      pose, outriggers, boom: easeTravel(boom), pouring: t >= v.pour[0] && t <= v.pour[1], slab: v.slab,
-      progress: k(v.pour), dist,
-    };
+  /** Estado de la bomba estacionaria: bombeando durante cada hormigonado de losa o radier. */
+  pumpState(t: number): PumpState {
+    const p = this.pours.find((x) => t <= x.pour[1] + 0.5) ?? this.pours[this.pours.length - 1];
+    const k = Math.min(Math.max((t - p.pour[0]) / (p.pour[1] - p.pour[0]), 0), 1);
+    return { pumping: t >= p.pour[0] && t <= p.pour[1], slab: p.slab, progress: k };
   }
 }

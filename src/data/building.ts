@@ -11,6 +11,8 @@ export interface WallData {
   y0: number;
   y1: number;
   poly: V2[];
+  /** Vanos dentro del contorno (shafts, astillas del dibujo). */
+  holes: V2[][];
 }
 
 export interface SlabData {
@@ -41,6 +43,8 @@ export interface BuildingData {
   edificio: string;
   levels: LevelData[];
   terrain: { y: number; outer: V2[] };
+  /** Interior del shaft del ascensor (por donde sube la tubería de la bomba). */
+  shaft: { x0: number; x1: number; z0: number; z1: number } | null;
   detail: { file: string; groups: DetailGroup[] };
 }
 

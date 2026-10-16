@@ -231,6 +231,11 @@ export function scanline(poly: V2[], axis: 'x' | 'z', value: number): number[] {
   return out.sort((x, y) => x - y);
 }
 
+/** Igual que scanline pero sobre varios contornos (exterior + vanos): pares entrada/salida pares-impares. */
+export function scanlineLoops(loops: V2[][], axis: 'x' | 'z', value: number): number[] {
+  return loops.flatMap((l) => scanline(l, axis, value)).sort((x, y) => x - y);
+}
+
 /** Desplaza un polígono hacia adentro (d > 0) o afuera (d < 0) con uniones en inglete. */
 export function offsetPolygon(poly: V2[], d: number): V2[] {
   const ccw = signedArea(poly) > 0;

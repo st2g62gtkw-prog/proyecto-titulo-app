@@ -57,6 +57,7 @@ const ACTIVE_ON_FLOOR: Record<Activity['kind'], number> = {
   losaFierro: 22,
   losaHormigon: 18,
   terminaciones: 0,
+  instalaciones: 0,
 };
 
 const FLOOR_SLOTS = 26;
@@ -89,6 +90,12 @@ export class Crews {
     }));
   }
 
+  /** Cota del piso donde se trabaja: el 1er piso está en relleno hasta que se hormigona el radier. */
+  private floorTop(L: number, t: number) {
+    if (L === 0 && t < this.s.sched.slab[0].pour[1]) return SITE.groundY + 0.013;
+    return this.s.data.levels[L].slab.y1;
+  }
+
   /** Foco de trabajo: dónde está la cuadrilla en la losa en este instante. */
   focus(a: Activity, t: number): { x: number; z: number; L: number; y: number } {
     const lv = this.s.data.levels;
@@ -101,7 +108,7 @@ export class Crews {
     switch (a.kind) {
       case 'losaMoldaje': {
         const S = a.level;
-        return { x: slabFront(S, this.s.sched.slab[S].props), z: polyBounds(lv[S].slab.outer).cz, L: S - 1, y: lv[S - 1].slab.y1 };
+        return { x: slabFront(S, this.s.sched.slab[S].props), z: polyBounds(lv[S].slab.outer).cz, L: S - 1, y: this.floorTop(S - 1, t) };
       }
       case 'losaFierro':
       case 'losaHormigon': {
@@ -114,7 +121,7 @@ export class Crews {
       case 'fundaciones':
         return { x: trip?.x ?? 0, z: trip?.z ?? 0, L: 0, y: -0.2 };
       default:
-        return { x: trip?.x ?? 0, z: trip?.z ?? 0, L: a.level, y: lv[a.level].slab.y1 };
+        return { x: trip?.x ?? 0, z: trip?.z ?? 0, L: a.level, y: this.floorTop(a.level, t) };
     }
   }
 

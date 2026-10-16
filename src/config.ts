@@ -23,13 +23,19 @@ export const SITE = {
     counterJibLength: 13,
   },
 
-  /** Camión bomba (hormigonado de losas): queda mirando al edificio. */
-  pump: { x: 6.8, z: 15.0, heading: -Math.PI / 2 },
+  /**
+   * Bomba estacionaria de hormigón (losas y radier), dentro de su caseta frente al edificio.
+   * heading = giro de la caseta; con 0 la tolva mira hacia el camino interior (+z).
+   */
+  pump: { x: 6.8, z: 16.3, heading: 0 },
+
+  /** Tendido de la tubería por el suelo: frente al edificio, entrada por el hall y llegada al shaft. */
+  pipeline: { zFront: 11.2, xEntry: 2.9, zHall: 6.2 },
 
   /** Punto donde el mixer descarga al capacho (muros) y donde se detiene. */
   mixerCapacho: { x: -6.0, z: 21.5 },
-  /** Punto donde el mixer alimenta la tolva de la bomba. */
-  mixerPump: { x: 11.3, z: 21.5 },
+  /** Centro del mixer cuando su canaleta descarga en la tolva de la bomba. */
+  mixerPump: { x: 11.5, z: 21.5 },
 
   /** Accesos y caminos. Los camiones entran por el portón poniente. */
   gate: { x: -56, z: 31 },
@@ -53,7 +59,6 @@ export const SITE = {
 /** Duración visual (segundos de simulación a velocidad x1) de cada actividad. */
 export const PACE = {
   fundaciones: 12,
-  radier: 12,
   muroFierro: 9,
   muroMoldaje: 13,
   muroHormigon: 16,
@@ -64,16 +69,22 @@ export const PACE = {
   terminacionesPorPiso: 2.5,
 };
 
-/** Duración real típica (días hábiles) de cada actividad, para el calendario. */
+/**
+ * Duración real (días hábiles) de cada actividad, para el calendario. Calibrada para que la
+ * obra completa dure poco más de un año, como en la programación de la constructora
+ * (~290 días hábiles ≈ 13 meses de 22 días).
+ */
 export const DAYS = {
-  fundaciones: 15,
-  radier: 3,
-  muroFierro: 2,
-  muroMoldaje: 2,
+  fundaciones: 40, // instalación de faena, excavación y zapatas
+  muroFierro: 3,
+  muroMoldaje: 3,
   muroHormigon: 1,
   muroDesmolde: 1,
-  losaMoldaje: 2,
-  losaFierro: 2,
+  losaMoldaje: 3,
+  losaFierro: 3,
   losaHormigon: 1,
-  terminacionesPorPiso: 18,
+  terminacionesPorPiso: 21,
 };
+
+/** Días hábiles por mes, para mostrar el mes de obra. */
+export const DAYS_PER_MONTH = 22;

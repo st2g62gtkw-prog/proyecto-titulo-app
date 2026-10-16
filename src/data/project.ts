@@ -104,6 +104,6 @@ export const EQUIPMENT = {
   mixerM3: 7,
   capachoM3: 1,
   grua: { modelo: 'Grúa torre (Pingon)', alturaGancho: 32, pluma: 45, cargaPunta: '1,3 t', cargaMax: '6 t' },
-  bomba: { tipo: 'Camión bomba pluma', alcance: 42, caudal: '~90 m³/h' },
+  bomba: { tipo: 'Bomba estacionaria sobre remolque', caudal: '~60 m³/h' },
   dotacion: 85,
 };

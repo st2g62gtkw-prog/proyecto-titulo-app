@@ -4,9 +4,12 @@ Simulación 3D isométrica de la construcción del **Edificio E** — Condominio
 
 La app muestra cómo crece el edificio con el **método tradicional de hormigón armado**, piso por piso y con la logística real de la obra:
 
-1. **Muros:** enfierradura → moldaje metálico (lo sube la grúa desde el acopio) → llega el mixer → hormigonado con **capacho** colgado de la grúa → desmolde.
-2. **Losa:** puntales y vigas H20 → placas fenólicas → enfierradura → llega el **camión bomba**, despliega estabilizadores y pluma, y hormigona la losa en franjas mientras los mixers alimentan la tolva.
-3. Al terminar la obra gruesa: tabiquería, ventanas de PVC, barandas y pintura de fachada.
+1. **Muros:** se arma el andamio perimetral del piso → enfierradura → moldaje metálico (lo sube la grúa desde el acopio) → llega el mixer → hormigonado con **capacho** colgado de la grúa → desmolde.
+2. **Losa:** puntales y vigas H20 → placas fenólicas → enfierradura → hormigonado con la **bomba estacionaria**: el mixer descarga en la tolva de la bomba (en su caseta frente al edificio), el hormigón sube por la tubería que va por el suelo y por el **shaft del ascensor**, y la cuadrilla lo reparte con la manguera sobre la losa.
+3. **Radier del 1er piso:** no va en la ruta crítica. El 1er piso queda con relleno compactado mientras se colocan las redes bajo radier (alcantarillado y agua potable) y se hormigona en paralelo con los muros del último piso (en la visita del 09-10-2026 la obra tenía el 5° piso y aún no tenía radier).
+4. Al terminar la obra gruesa: tabiquería, ventanas de PVC, barandas y pintura de fachada.
+
+El calendario está calibrado en ~290 días hábiles (poco más de un año, como la programación de la obra).
 
 ## Cómo se ve y se usa
 

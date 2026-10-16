@@ -7,7 +7,7 @@ import './ui/app.css';
 import { SITE } from './config';
 import { loadBuilding } from './data/building';
 import { BUILDING_FACTS, EQUIPMENT, FLOOR_PROGRAM, PROJECT, RATIOS, SLAB_M3, TOTALS, WALL_M3 } from './data/project';
-import { buildFeed, dayLabel, type FeedEvent } from './core/feed';
+import { buildFeed, dayLabel, dayShort, type FeedEvent } from './core/feed';
 import { computeProgress, floorSteps } from './core/progress';
 import { CREW_ROLES } from './core/crews';
 import { createStage } from './scene/stage';
@@ -167,13 +167,28 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
         ],
         note: 'Para muros descarga al capacho de la grúa; para losas alimenta la tolva del camión bomba.',
       };
-    case 'pump':
+    case 'pump': {
+      const ps = w.log.pumpState(T);
       return {
-        title: 'Camión bomba pluma',
+        title: 'Bomba estacionaria de hormigón',
         subtitle: EQUIPMENT.bomba.tipo,
         badge: 'BOMBA',
-        rows: [['Alcance de pluma', `${EQUIPMENT.bomba.alcance} m`], ['Rendimiento', EQUIPMENT.bomba.caudal], ['Losas hormigonadas', `${prog.losas} de 7`]],
-        note: 'Se usa para hormigonar las losas: la pluma recorre la losa en franjas mientras la cuadrilla vibra y platacha.',
+        rows: [
+          ['Estado', ps.pumping ? `Bombeando · ${fmt(ps.progress * 100)} %` : 'Detenida'],
+          ['Tubería', 'Ø125 mm por el suelo y el shaft del ascensor'],
+          ['Rendimiento', EQUIPMENT.bomba.caudal],
+          ['Losas hormigonadas', `${prog.losas} de 7`],
+        ],
+        note: 'Queda fija en su caseta toda la obra. El mixer se estaciona al lado y descarga en la tolva; el hormigón sube por la tubería hasta la losa y la cuadrilla lo reparte con la manguera.',
+      };
+    }
+    case 'pipe':
+      return {
+        title: 'Tubería de bombeo',
+        subtitle: 'Acero Ø125 mm con uniones cada 3 m',
+        badge: 'BOMBA',
+        rows: [['Recorrido', 'Caseta → hall → shaft del ascensor → losa'], ['Altura máxima', '≈ 18 m (losa de techumbre)']],
+        note: 'Se agrega un tramo vertical por piso antes de cada hormigonado de losa.',
       };
     case 'worker':
       return {
@@ -229,8 +244,10 @@ function hudState(): HudState {
   const k = Math.min(Math.max((T - a.t0) / (a.t1 - a.t0), 0), 1);
   let detail = a.detail;
   if (a.kind === 'muroHormigon' || a.kind === 'fundaciones') detail = `${w.state.craneTask} · ${w.state.mixersOnSite} mixer${w.state.mixersOnSite === 1 ? '' : 's'} en faena`;
-  else if (a.kind === 'losaHormigon' || a.kind === 'radier') detail = `${a.detail} · ${fmt(k * 100)} %`;
+  else if (a.kind === 'losaHormigon') detail = `${a.detail} · ${fmt(k * 100)} %`;
   else if (a.kind !== 'terminaciones') detail = `${a.detail} · Grúa: ${w.state.craneTask}`;
+  const par = s.parallel.find((p) => T >= p.t0 && T <= p.t1);
+  if (par) detail += ` · En paralelo: ${par.title.toLowerCase()}`;
   const lastIdx = feed.findIndex((e) => e.t > T);
   const recent = (lastIdx === -1 ? feed : feed.slice(0, lastIdx)).slice(-5).reverse();
   // el ciclo de piso se identifica por sus muros: la losa que se hormigona es la "losa cielo" de ese piso
@@ -251,7 +268,7 @@ function hudState(): HudState {
     overall: prog.obraGruesa,
     floors: prog.floors.map((f) => ({ ...f, name: f.name === 'Techumbre' ? 'Techo' : f.name })),
     kpis,
-    feed: recent.map((e) => ({ t: dayLabel(s.dayAt(e.t)).replace('Día ', 'D'), text: e.text, kind: e.kind })),
+    feed: recent.map((e) => ({ t: dayShort(s.dayAt(e.t)), text: e.text, kind: e.kind })),
     crew: CREW_ROLES.map((r) => ({ label: r.short, count: r.n })),
   };
 }
