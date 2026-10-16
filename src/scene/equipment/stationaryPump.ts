@@ -180,9 +180,9 @@ function makeSurfaces() {
     timberDark: paint('#94704a'),
     pad: paint('#a17d4f'),
     floor: paint('#aba597'),
-    spill: paint('#8f8c84'),
-    crust: paint('#9d9b95'),
-    sand: paint('#d9cfb3'),
+    spill: paint('#a09b90'),
+    crust: paint('#8e8b84'),
+    sand: paint('#d3c7a6'),
     barrow: paint('#c5432b'),
     tube: paint('#c9cbc6'),
     steel: metal('#8f969c'),
@@ -356,12 +356,26 @@ function buildPumpStatic(kit: PartKit) {
   box(kit, M.steel, -tx, HOP.y1, zb - 0.022, tx, HOP.y1 + 0.58, zb);
   box(kit, M.crust, -tx + 0.03, HOP.y1 + 0.02, zb + 0.0, tx - 0.05, HOP.y1 + 0.22, zb + 0.006);
   for (const s of [-1, 1]) kit.boxAt(M.steelDark, 0.02, 0.4, 0.2, [s * (tx - 0.02), HOP.y1 + 0.22, zb - 0.11], [-0.5, 0, 0]);
-  // costras y salpicaduras
-  const blobs: [number, number, number, number][] = [
-    [0.55, 1.22, HOP.z + 0.22, 0.09], [-0.42, 1.225, HOP.z - 0.25, 0.07], [0.1, 1.23, HOP.z + 0.3, 0.06],
-    [-0.68, 1.0, HOP.z + 0.2, 0.06], [0.25, 0.85, HOP.z + 0.27, 0.05], [0.62, 1.1, HOP.z - 0.1, 0.05],
-  ];
-  for (const [x, y, z, r] of blobs) kit.add(M.crust, new THREE.SphereGeometry(1, 8, 5), [x, y, z], [0, x * 3, 0], [r * 1.4, r * 0.35, r]);
+  // costras de hormigón seco: manchas planas e irregulares sobre el borde y la parrilla, chorreras en las caras
+  const splat = (pos: XYZ, r: number, rot: XYZ, seed: number) => {
+    const g = new THREE.CylinderGeometry(1, 1, 1, 7);
+    const rr = rng(seed);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const k = 0.65 + rr() * 0.5;
+      p.setXYZ(i, p.getX(i) * k, p.getY(i), p.getZ(i) * k);
+    }
+    kit.add(M.crust, g, pos, rot, [r * 1.3, 0.012, r]);
+  };
+  splat([0.6, HOP.y1 + 0.037, HOP.z + tz], 0.07, [0, 0.4, 0], 3);
+  splat([-0.35, HOP.y1 + 0.037, HOP.z + tz], 0.055, [0, -0.3, 0], 5);
+  splat([-tx, HOP.y1 + 0.037, HOP.z + 0.1], 0.06, [0, 1.3, 0], 7);
+  splat([0.32, gy + 0.016, HOP.z - 0.14], 0.045, [0, 0.9, 0], 9);
+  splat([-0.2, gy + 0.016, HOP.z + 0.18], 0.04, [0, 2.1, 0], 11);
+  const lean = Math.atan2(tz - HOP.bot[1], HOP.y1 - HOP.y0); // cara +z de la tolva, inclinada hacia afuera
+  for (const [x, y, r, sd] of [[0.5, 0.74, 0.06, 13], [-0.48, 0.82, 0.05, 15]]) {
+    splat([x, y, HOP.z + hopHalf(y)[1] + 0.003], r, [Math.PI / 2 + lean, sd, 0], sd);
+  }
   // motor hidráulico del agitador (+x) y descanso (−x)
   kit.cyl(M.dark, 0.085, 0.085, 0.13, [0.665, 0.68, HOP.z], 'x', 14);
   box(kit, M.dark, 0.6, 0.6, HOP.z - 0.11, 0.62, 0.76, HOP.z + 0.11);
