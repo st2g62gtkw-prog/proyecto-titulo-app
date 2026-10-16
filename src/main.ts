@@ -44,26 +44,38 @@ const hud = createHud(app, {
 hud.setLoading(0.05, 'Cargando modelo del Edificio E…');
 
 const ISO_TARGET = new THREE.Vector3(2, 5, 6);
+/**
+ * Vistas fijas: la principal mira desde el frente poniente (grúa y acopios adelante); la posterior
+ * gira 180° para ver desde el talud el camino de mixers, el portón, la bomba y la tubería.
+ */
+const VIEWS = {
+  iso: { target: ISO_TARGET, az: 55, el: 33, zoom: 1.05 },
+  back: { target: new THREE.Vector3(-16, 3, -13), az: 55 + 180, el: 33, zoom: 1.3 },
+  top: { target: new THREE.Vector3(0, 0, 4), az: 90, el: 89.5, zoom: 1.1 },
+};
+const MIN_POLAR = THREE.MathUtils.degToRad(12);
 
-function setView(v: ViewMode) {
+function setView(v: ViewMode, animate = true) {
   view = v;
   hud.setView(v);
   const c = stage.controls;
-  if (v === 'top') {
-    c.minPolarAngle = 0;
-    c.target.set(0, 0, 4);
-    stage.setIsoView(90, 89.5);
-    stage.camera.zoom = 1.1;
-    stage.camera.updateProjectionMatrix();
-  } else {
-    c.minPolarAngle = THREE.MathUtils.degToRad(12);
-    if (v === 'iso') {
-      c.target.copy(ISO_TARGET);
-      stage.setIsoView();
-      stage.camera.zoom = 1.05;
-      stage.camera.updateProjectionMatrix();
-    }
+  if (v === 'follow') {
+    c.minPolarAngle = MIN_POLAR;
+    return;
   }
+  const V = VIEWS[v];
+  // durante el giro se libera el tope de inclinación (la planta queda casi vertical)
+  c.minPolarAngle = 0;
+  const done = () => (c.minPolarAngle = v === 'top' ? 0 : MIN_POLAR);
+  if (animate) {
+    stage.orbitTo(V.target, V.az, V.el, V.zoom, v === 'top' ? 1.1 : 1.5, done);
+    return;
+  }
+  c.target.copy(V.target);
+  stage.setIsoView(V.az, V.el);
+  stage.camera.zoom = V.zoom;
+  stage.camera.updateProjectionMatrix();
+  done();
 }
 
 // --- selección de objetos ---------------------------------------------------------------
@@ -147,7 +159,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
           ['Pluma / contrapluma', `${SITE.crane.jibLength} m / ${SITE.crane.counterJibLength} m`],
           ['Altura de giro', `${fmt(SITE.crane.mastHeight, 1)} m`],
           ['Carga máx. / en punta', `${EQUIPMENT.grua.cargaMax} / ${EQUIPMENT.grua.cargaPunta}`],
-          ['Ubicación', 'Al centro del edificio, frente al acceso poniente'],
+          ['Ubicación', 'Al centro del frente poniente, opuesta al camino de mixers'],
           ['Capachos de muro', `${fmt(prog.capachos)} viajes (1 m³)`],
         ],
         note: 'Sube fierro y moldajes desde los acopios y hormigona los muros con capacho.',
@@ -165,7 +177,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
           ['Despachados a la fecha', fmt(prog.mixers)],
           ['Hormigón colocado', `${fmt(prog.hormigon)} m³`],
         ],
-        note: 'Para muros descarga al capacho de la grúa; para losas alimenta la tolva del camión bomba.',
+        note: 'Entra por el portón norponiente y recorre el camino del costado posterior. Para muros se detiene en el carril y descarga al capacho que toma la grúa; para losas retrocede por la bahía hasta la tolva de la bomba. Da la vuelta en la rotonda del otro extremo del camino y sale por el mismo portón.',
       };
     case 'pump': {
       const ps = w.log.pumpState(T);
@@ -175,11 +187,12 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
         badge: 'BOMBA',
         rows: [
           ['Estado', ps.pumping ? `Bombeando · ${fmt(ps.progress * 100)} %` : 'Detenida'],
+          ['Ubicación', 'Costado posterior, frente opuesto a la grúa'],
           ['Tubería', 'Ø125 mm por el suelo y el shaft del ascensor'],
           ['Rendimiento', EQUIPMENT.bomba.caudal],
           ['Losas hormigonadas', `${prog.losas} de 7`],
         ],
-        note: 'Queda fija en su caseta toda la obra. El mixer se estaciona al lado y descarga en la tolva; el hormigón sube por la tubería hasta la losa y la cuadrilla lo reparte con la manguera.',
+        note: 'Queda fija en su caseta toda la obra, junto al camino de mixers. El mixer retrocede hasta la tolva y descarga con su canaleta; la tubería entra por la puerta posterior del hall, sube por el shaft del ascensor hasta la losa y la cuadrilla reparte el hormigón con la manguera.',
       };
     }
     case 'pipe':
@@ -187,7 +200,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
         title: 'Tubería de bombeo',
         subtitle: 'Acero Ø125 mm con uniones cada 3 m',
         badge: 'BOMBA',
-        rows: [['Recorrido', 'Caseta → hall → shaft del ascensor → losa'], ['Altura máxima', '≈ 18 m (losa de techumbre)']],
+        rows: [['Recorrido', 'Caseta (costado posterior) → puerta posterior del hall → pasillo → vestíbulo → shaft del ascensor → losa'], ['Altura máxima', '≈ 18 m (losa de techumbre)']],
         note: 'Se agrega un tramo vertical por piso antes de cada hormigonado de losa.',
       };
     case 'worker':
@@ -292,7 +305,8 @@ async function start() {
   if (act) T = act.t0 + (act.t1 - act.t0) * +(q.get('k') ?? 0.5);
   if (q.has('speed')) speed = +q.get('speed')!;
   if (q.get('play') === '0') playing = false;
-  setView('iso');
+  // ?view=back abre en la vista posterior
+  setView(q.get('view') === 'back' ? 'back' : 'iso', false);
   // cámara por parámetros (?cam=x,y,z&zoom=&az=&el=), útil para revisar un detalle
   if (q.has('cam')) {
     const [cx, cy, cz] = q.get('cam')!.split(',').map(Number);
@@ -344,6 +358,8 @@ function loop(now: number) {
   stage.update(dt);
   const cam = stage.camera.position, tgt = stage.controls.target;
   hud.setCompass(compassAngle(SITE.northAngle, cam.x - tgt.x, cam.z - tgt.z));
+  // mirando desde atrás (cámara del lado del talud) se oculta el bosque que taparía el camino
+  w.site.setBackView?.(cam.z - tgt.z < -40);
   stage.render();
   hudAcc += dt;
   if (hudAcc > 1 / 20) {

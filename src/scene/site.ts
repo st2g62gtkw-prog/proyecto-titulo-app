@@ -1,6 +1,7 @@
 /**
  * Faena de obra alrededor del Edificio E (Condominio Espacio Las Tablas, Curauma):
- * terreno con talud de corte, caminos de ripio, cierros y portón, instalación de faena,
+ * terreno con talud de corte, camino de mixers por el costado posterior (portón norponiente,
+ * dos carriles, bahía de la bomba y rotonda de retorno), cierros, instalación de faena,
  * acopios al alcance de la grúa, taller de fierro y el barrio alrededor.
  *
  * Todo lo estático se fusiona por material (≈ 50 mallas en total). Cada acopio y la faena
@@ -24,6 +25,11 @@ export interface SiteRig {
   update(t: number, dt: number): void;
   /** Cota del terreno en (x, z), para apoyar objetos sobre el talud o el entorno. */
   heightAt?(x: number, z: number): number;
+  /**
+   * Con la cámara mirando desde atrás (desde el talud) oculta el bosque del coronamiento, que
+   * quedaría delante y taparía el camino de mixers y la bomba.
+   */
+  setBackView?(on: boolean): void;
 }
 
 type V2 = [number, number];
@@ -34,6 +40,11 @@ const FENCE = { x0: SITE.gate.x, x1: 72, z0: SITE.talud.zTop - 1, z1: 46 };
 const GATE = { z0: SITE.gate.z - 4.3, z1: SITE.gate.z + 4.3 };
 /** Calle exterior del portón (eje x = cte). */
 const ST_W = SITE.gate.x - 8;
+/** Camino posterior: eje entre los dos carriles y rotonda de retorno (centro y radio del eje). */
+const RD = SITE.road;
+const ROAD_Z = (RD.inZ + RD.outZ) / 2;
+/** Estacionamiento de autos de los trabajadores, junto al portón (lado del edificio). */
+const PARK = { x: SITE.gate.x + 14.8, z: GATE.z1 + 3.1 };
 /** Barrio: calles a lo largo de x (z = cte) y de z (x = cte), y su extensión plana. */
 const TOWN = { xSt: [56, 100, 144, 188], zSt: [-118, ST_W, 82, 160], x0: -170, x1: 230, z1: 205 };
 
@@ -206,7 +217,7 @@ function terrainColor(x: number, z: number, h: number, ny: number, out: THREE.Co
 
 function buildTerrain(mat: THREE.Material) {
   const xs = axis(-130, 170, 3, 900, [FENCE.x0 - 6, FENCE.x1 + 6, 1.5]);
-  const zs = axis(-120, 150, 3, 900, [-28, -11, 0.75]);
+  const zs = axis(-120, 150, 3, 900, [SITE.talud.zTop - 4, SITE.talud.zStart + 4, 0.75]);
   const nx = xs.length, nz = zs.length;
   const pos = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2), col = new Float32Array(nx * nz * 3);
   for (let j = 0; j < nz; j++) {
@@ -1538,16 +1549,20 @@ function buildMisc(k: Kit, M: Mats) {
     roofSheet(k.b(M.sheet), gx, gz, 0, 3.6, 2.8, G + 2.3, 0.25, '#e6eaec');
     osbHut(k, M, -36.5, -4.5, 0, 3.2, 3.0, 2.3);
   }
-  // rollos de tubería HDPE naranja y azul, junto al pie del talud
+  // rollos de tubería HDPE naranja y azul, junto al pie del talud (detrás del camino posterior)
+  const zFoot = SITE.talud.zStart;
   const coils: [number, number, string, number][] = [
-    [-39, -10.5, COL.orange, 3], [-37.4, -10.8, COL.orange, 2], [-38.3, -12.4, COL.blue, 2], [-36, -12.2, COL.orange, 1],
-    [43, -10, COL.orange, 2], [44.6, -10.6, COL.blue, 3],
+    [-35, zFoot + 2.1, COL.orange, 3], [-33.4, zFoot + 1.8, COL.orange, 2], [-34.3, zFoot + 0.7, COL.blue, 2], [-32, zFoot + 1.0, COL.orange, 1],
+    [47, zFoot + 1.7, COL.orange, 2], [48.6, zFoot + 1.3, COL.blue, 3],
   ];
   for (const [cx, cz, c, n] of coils) for (let i = 0; i < n; i++) coil(p, cx + (r() - 0.5) * 0.15, G + i * 0.24, cz + (r() - 0.5) * 0.15, 0.62 - i * 0.02, c);
   // conos de seguridad
+  // (en el portón, en la isla de la rotonda y marcando la bahía de la bomba)
   const cones: V2[] = [
-    [-30.5, 23.4], [-30.4, 25.6], [31.6, 24.6], [31.6, 26.8], [-50, 27.1], [-46, 27.1],
-    [43, 22.9], [45.5, 22.9], [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-28.4, 18.2], [24.6, 17.4],
+    [SITE.gate.x + 2.2, GATE.z1 - 0.6], [SITE.gate.x + 2.2, GATE.z0 + 0.6],
+    [RD.turnX - 1.2, RD.turnZ + 0.6], [RD.turnX + 1.0, RD.turnZ - 0.9], [RD.turnX - 0.3, RD.turnZ - 2.2],
+    [SITE.pump.x + 4.6, RD.bayZ + 2.0], [SITE.pump.x - 5.2, RD.bayZ + 2.0],
+    [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-28.4, 18.2], [24.6, 17.4],
   ];
   for (const [cx, cz] of cones) cone(p, cx, cz);
   // pallets sueltos
@@ -1572,9 +1587,9 @@ function buildMisc(k: Kit, M: Mats) {
     box(p, cx - 3.04, G + 0.06, cz, 0.04, 2.47, 2.32, '#355a73');
     for (const s of [-0.55, -0.15, 0.15, 0.55]) box(k.b(M.metal), cx - 3.08, G + 0.2, cz + s, 0.05, 2.2, 0.05, '#9aa4ad');
   }
-  // cancha de lavado de canoas de mixer (losa con muretes y lechada)
+  // cancha de lavado de canoas de mixer (losa con muretes y lechada), junto al carril de salida
   {
-    const cx = 61, cz = 28.5, b = k.b(M.rough);
+    const cx = SITE.gate.x + 12, cz = RD.outZ - 4.4, b = k.b(M.rough);
     box(b, cx, G, cz, 4.4, 0.12, 3.4, '#a9a59d');
     box(b, cx + 0.2, G + 0.12, cz, 3.6, 0.02, 2.8, '#c9c6c0');
     box(b, cx + 2.1, G, cz, 0.2, 0.5, 3.4, '#9e9a92');
@@ -1593,7 +1608,7 @@ function buildMisc(k: Kit, M: Mats) {
   ];
   mounds.forEach(([mx, mz, sx, sy, sz, c], i) => part(k.b(M.ground), heapGeometry(i + 3), mx, G - 0.05, mz, sx, sy, sz, c, { ry: i, uv: 10 }));
   // postes de iluminación en las esquinas
-  for (const [lx, lz, a] of [[FENCE.x0 + 1.5, FENCE.z1 - 1.5, -0.8], [FENCE.x1 - 1.5, FENCE.z1 - 1.5, -2.4], [FENCE.x1 - 1.5, -13.5, 2.4], [FENCE.x0 + 1.5, -13.5, 0.8]] as const) {
+  for (const [lx, lz, a] of [[FENCE.x0 + 1.5, FENCE.z1 - 1.5, -0.8], [FENCE.x1 - 1.5, FENCE.z1 - 1.5, -2.4], [FENCE.x1 - 1.5, zFoot + 1.2, 2.4], [FENCE.x0 + 1.5, zFoot + 1.2, 0.8]] as const) {
     part(k.b(M.metal), GEO.cyl, lx, G + 4.5, lz, 0.16, 9, 0.16, COL.galv);
     const f = frame(lx, lz, a);
     for (const s of [-0.35, 0.35]) {
@@ -1604,10 +1619,10 @@ function buildMisc(k: Kit, M: Mats) {
   // autos de los trabajadores (estacionamiento junto al portón) y camionetas
   const colors = ['#e9ecef', '#9aa3ab', '#b3261e', '#23344d', '#2b2d30', '#d7dadd', '#5f6b75'];
   for (let i = 0; i < 7; i++) {
-    const cx = SITE.gate.x + 8.5 + i * 2.7;
-    car(k, M, cx, 39.6 + (r() - 0.5) * 0.4, Math.PI / 2 + (i % 3 === 1 ? Math.PI : 0) + (r() - 0.5) * 0.06, colors[i], i === 2 || i === 5);
+    const cx = PARK.x - 7.8 + i * 2.6;
+    car(k, M, cx, PARK.z + (r() - 0.5) * 0.4, Math.PI / 2 + (i % 3 === 1 ? Math.PI : 0) + (r() - 0.5) * 0.06, colors[i], i === 2 || i === 5);
   }
-  car(k, M, -45, 24.6, 0.02, '#f2f3f4', true);
+  car(k, M, PARK.x - 4.8, PARK.z + 7.3, 0.02, '#f2f3f4', true);
   car(k, M, ST_W + 2.9, 14, -Math.PI / 2, '#8d969e');
   car(k, M, ST_W + 2.9, 48, Math.PI / 2, '#c9ccd0');
   car(k, M, ST_W - 2.9, 64, -Math.PI / 2, '#3b4c63');
@@ -1637,7 +1652,7 @@ function buildStreets(asphalt: Batch, k: Kit, M: Mats) {
       s0 = cut + 5;
     }
   };
-  for (const x of TOWN.zSt) walk('z', x, -10, TOWN.z1 + 20, x === ST_W ? [...TOWN.xSt, SITE.roadZ] : TOWN.xSt);
+  for (const x of TOWN.zSt) walk('z', x, -10, TOWN.z1 + 20, x === ST_W ? [...TOWN.xSt, SITE.gate.z] : TOWN.xSt);
   for (const z of TOWN.xSt) walk('x', z, ST_W + 6, TOWN.x1 + 20, TOWN.zSt);
 }
 
@@ -1705,9 +1720,12 @@ function roundTree(b: Batch, x: number, z: number, H: number, r: () => number) {
   }
 }
 
-/** Barrio, bosques y lomas. Lo cercano proyecta sombras; lo lejano no (va en otra malla). */
+/**
+ * Barrio, bosques y lomas. Lo cercano proyecta sombras; lo lejano no (va en otra malla). Devuelve
+ * el bosque del talud detrás de la obra (grupo aparte, para ocultarlo en la vista posterior).
+ */
 function buildSurroundings(M: Mats, group: THREE.Group) {
-  const near = new Kit(), far = new Kit();
+  const near = new Kit(), far = new Kit(), ridge = new Kit();
   const r = rng(31);
   const isNear = (x: number, z: number) => Math.hypot(x - 1, z - 10) < 115;
   const kit = (x: number, z: number) => (isNear(x, z) ? near : far);
@@ -1741,7 +1759,8 @@ function buildSurroundings(M: Mats, group: THREE.Group) {
   for (let i = 0; i < 230; i++) {
     const x = -150 + r() * 330, z = FENCE.z0 - 4 - Math.pow(r(), 1.6) * 120, H = r();
     if (onStreet(x, z)) continue;
-    const b = kit(x, z).b(M.foliage);
+    const onRidge = x > -90 && x < 105 && z > FENCE.z0 - 36;
+    const b = (onRidge ? ridge : kit(x, z)).b(M.foliage);
     if (r() > 0.3) eucalyptus(b, x, z, 15 + H * 12, r, isNear(x, z));
     else pine(b, x, z, 12 + H * 8, r);
   }
@@ -1758,6 +1777,10 @@ function buildSurroundings(M: Mats, group: THREE.Group) {
   for (const [tx, tz] of [[-57.3, -6], [-57.3, 5], [74, -6]] as const) eucalyptus(near.b(M.foliage), tx, tz, 16 + r() * 6, r);
   near.into(group);
   far.into(group, false);
+  const ridgeGroup = ridge.into(new THREE.Group());
+  ridgeGroup.name = 'bosque-talud';
+  group.add(ridgeGroup);
+  return ridgeGroup;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1778,13 +1801,25 @@ export function createSite(): SiteRig {
   const padAt = (x: number, z: number, w: number, d: number, alpha = 1) =>
     ribbon(pads, [[x - w / 2, z], [x + w / 2, z]], { width: d, texLen: 6, uRep: d / 6, fade: 0.8, alpha, lift: 0.02 });
   padAt(F.x, F.z + 1, F.w + 2, F.d + 3);
-  padAt(SITE.gate.x + 14, 39.6, 22, 9.5);
-  padAt(SITE.pump.x, (10.5 + SITE.loopZ + 1.5) / 2, 7, SITE.loopZ + 1.5 - 10.5);
-  padAt(50, SITE.roadZ, 13, 15);
+  padAt(PARK.x, PARK.z + 0.6, 21, 7.5);
+  // caseta de la bomba y franja entre la bahía y la fachada posterior
+  {
+    const z0 = RD.bayZ - 2.2, z1 = -6.4;
+    padAt(SITE.pump.x + 0.8, (z0 + z1) / 2, 9.4, z1 - z0, 0.9);
+  }
+  padAt(RD.turnX, RD.turnZ, 2 * RD.turnR + 7, 2 * RD.turnR + 7, 0.85);
   for (const A of [SITE.acopioMoldajeMuro, SITE.acopioMoldajeLosa, SITE.acopioFierro, SITE.tallerFierro, SITE.acopioPuntales]) padAt(A.x, A.z, A.w + 1.5, A.d + 1.5, 0.75);
-  ribbon(roads, [[SITE.loopX0, SITE.roadZ], [SITE.loopX0, SITE.loopZ], [SITE.loopX1, SITE.loopZ], [SITE.loopX1, SITE.roadZ]], { width: 5, texLen: 12, radius: 6, fade: 0.6, step: 2 });
-  // el acceso parte en el borde de la calzada exterior (no se pinta ripio sobre el asfalto)
-  ribbon(roads, [[ST_W + 4.3, SITE.roadZ], [52, SITE.roadZ]], { width: 7, texLen: 12, uRep: 2, fade: 0.6, step: 4, lift: 0.035 });
+  // camino posterior de dos carriles: parte en el borde de la calzada exterior (no se pinta ripio
+  // sobre el asfalto), entra por el portón y corre detrás del edificio hasta la rotonda
+  ribbon(roads, [[ST_W + 4.3, ROAD_Z], [RD.turnX - 7, ROAD_Z]], { width: 8, texLen: 12, uRep: 2, fade: 0.6, step: 4, lift: 0.035 });
+  // rotonda de retorno (anillo) y bahía de la bomba, que empalma con la parte alta de la rotonda
+  const ring: V2[] = [];
+  for (let i = 0; i <= 48; i++) {
+    const a = (i / 48) * Math.PI * 2;
+    ring.push([RD.turnX + RD.turnR * Math.sin(a), RD.turnZ + RD.turnR * Math.cos(a)]);
+  }
+  ribbon(roads, ring, { width: 5, texLen: 12, fade: 0.6, step: 2, lift: 0.04 });
+  ribbon(roads, [[SITE.mixerPump.x - 5.6, RD.bayZ], [RD.turnX - 8, RD.bayZ], [RD.turnX - 1, RD.turnZ + RD.turnR]], { width: 4.4, texLen: 12, fade: 0.6, step: 2, lift: 0.032 });
   const decals: [Batch, THREE.Material, number][] = [[pads, M.pad, -3], [roads, M.road, -2]];
   for (const [b, m, order] of decals) {
     const mesh = new THREE.Mesh(b.build()!, m);
@@ -1827,7 +1862,7 @@ export function createSite(): SiteRig {
   const muro = buildMoldajeMuro(M), losa = buildMoldajeLosa(M), fierro = buildFierro(M), puntales = buildPuntales(M), taller = buildTaller(M);
   group.add(muro.group, losa.group, fierro.group, puntales.group, taller.group);
 
-  buildSurroundings(M, group);
+  const ridge = buildSurroundings(M, group);
 
   // la selección también funciona sobre cada malla hija
   const pickables = [muro.group, losa.group, fierro.group, puntales.group, taller.group, faena];
@@ -1844,6 +1879,9 @@ export function createSite(): SiteRig {
       acopioPuntales: puntales.anchor,
     },
     heightAt,
+    setBackView(on: boolean) {
+      ridge.visible = !on;
+    },
     update(t: number) {
       // bandera flameando
       for (let i = 0; i < pos.count; i++) {

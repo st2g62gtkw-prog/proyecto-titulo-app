@@ -21,6 +21,11 @@ export interface Stage {
   resize(): void;
   /** Mueve la cámara suavemente hacia un punto de interés. */
   focus(target: THREE.Vector3, zoom?: number, duration?: number): void;
+  /**
+   * Gira la cámara alrededor del objetivo (por el lado corto) hasta el acimut y la elevación dados,
+   * mientras desplaza el objetivo y ajusta el zoom. `onDone` se llama al terminar.
+   */
+  orbitTo(target: THREE.Vector3, azimuthDeg: number, elevationDeg: number, zoom?: number, duration?: number, onDone?: () => void): void;
   setIsoView(azimuthDeg?: number, elevationDeg?: number): void;
   update(dt: number): void;
 }
@@ -104,12 +109,26 @@ export function createStage(container: HTMLElement, opts: { shadows?: boolean } 
       labels.setSize(w, h);
     },
     focus(target, zoom, duration = 1.2) {
+      orbit = null;
       anim = {
         t: 0, d: duration,
         fromT: controls.target.clone(), toT: target.clone(),
         fromP: camera.position.clone(),
         toP: camera.position.clone().add(target.clone().sub(controls.target)),
         fromZ: camera.zoom, toZ: zoom ?? camera.zoom,
+      };
+    },
+    orbitTo(target, az, el, zoom, duration = 1.4, onDone) {
+      const off = camera.position.clone().sub(controls.target);
+      const r = off.length();
+      const az0 = Math.atan2(off.z, off.x), el0 = Math.asin(THREE.MathUtils.clamp(off.y / Math.max(r, 1e-6), -1, 1));
+      const TAU = Math.PI * 2;
+      let az1 = THREE.MathUtils.degToRad(az);
+      az1 = az0 + ((((az1 - az0 + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
+      anim = null;
+      orbit = {
+        t: 0, d: duration, fromT: controls.target.clone(), toT: target.clone(),
+        az0, az1, el0, el1: THREE.MathUtils.degToRad(el), fromZ: camera.zoom, toZ: zoom ?? camera.zoom, onDone,
       };
     },
     setIsoView(az = 55, el = 33) {
@@ -121,6 +140,22 @@ export function createStage(container: HTMLElement, opts: { shadows?: boolean } 
       controls.update();
     },
     update(dt) {
+      if (orbit) {
+        const o = orbit;
+        o.t += dt;
+        const k = Math.min(o.t / o.d, 1);
+        const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+        const a = THREE.MathUtils.lerp(o.az0, o.az1, e), el = THREE.MathUtils.lerp(o.el0, o.el1, e);
+        controls.target.lerpVectors(o.fromT, o.toT, e);
+        camera.position.copy(controls.target).add(new THREE.Vector3(Math.cos(el) * Math.cos(a), Math.sin(el), Math.cos(el) * Math.sin(a)).multiplyScalar(220));
+        camera.lookAt(controls.target);
+        camera.zoom = THREE.MathUtils.lerp(o.fromZ, o.toZ, e);
+        camera.updateProjectionMatrix();
+        if (k >= 1) {
+          orbit = null;
+          o.onDone?.();
+        }
+      }
       if (anim) {
         anim.t += dt;
         const k = Math.min(anim.t / anim.d, 1);
@@ -137,10 +172,22 @@ export function createStage(container: HTMLElement, opts: { shadows?: boolean } 
   let anim: null | {
     t: number; d: number; fromT: THREE.Vector3; toT: THREE.Vector3; fromP: THREE.Vector3; toP: THREE.Vector3; fromZ: number; toZ: number;
   } = null;
+  let orbit: null | {
+    t: number; d: number; fromT: THREE.Vector3; toT: THREE.Vector3; az0: number; az1: number; el0: number; el1: number;
+    fromZ: number; toZ: number; onDone?: () => void;
+  } = null;
 
-  // cancelar el foco animado si el usuario toma el control
-  renderer.domElement.addEventListener('pointerdown', () => (anim = null));
-  renderer.domElement.addEventListener('wheel', () => (anim = null), { passive: true });
+  // cancelar el foco o el giro animado si el usuario toma el control (el giro deja la cámara donde va)
+  const cancel = () => {
+    anim = null;
+    if (orbit) {
+      const done = orbit.onDone;
+      orbit = null;
+      done?.();
+    }
+  };
+  renderer.domElement.addEventListener('pointerdown', cancel);
+  renderer.domElement.addEventListener('wheel', cancel, { passive: true });
 
   stage.setIsoView();
   stage.resize();

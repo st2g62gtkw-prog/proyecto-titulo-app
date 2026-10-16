@@ -32,7 +32,7 @@ export function buildFeed(sched: Schedule, log: Logistics): FeedEvent[] {
   const rad = sched.slab[0].pour;
   ev.push({ t: rad[1], text: 'Radier del 1er piso hormigonado · 665,7 m²', kind: 'ok' });
   for (const m of log.mixers) {
-    ev.push({ t: m.arrive[0] + 1, text: `Mixer N° ${m.id} ingresa por portón poniente · 7 m³ G25`, kind: 'mixer' });
+    ev.push({ t: m.arrive[0] + 1, text: `Mixer N° ${m.id} ingresa por el portón norponiente · 7 m³ G25`, kind: 'mixer' });
     ev.push({ t: m.discharge[0], text: m.spot === 'bomba' ? `Mixer N° ${m.id} descarga en tolva de la bomba` : `Mixer N° ${m.id} carga el capacho`, kind: 'mixer' });
   }
   for (const p of log.pours) {

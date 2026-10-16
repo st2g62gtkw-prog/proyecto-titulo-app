@@ -142,7 +142,11 @@ export class Crews {
     return v;
   }
 
-  update(t: number, a: Activity, groundTargets: { x: number; z: number; r?: number; action: Action }[]) {
+  /**
+   * `groundTargets`: puntos de trabajo en terreno; cada trabajador se ubica a r + (0..spread) m
+   * del punto (spread = 1,6 m si no se indica; menor en lugares estrechos, como junto a la bomba).
+   */
+  update(t: number, a: Activity, groundTargets: { x: number; z: number; r?: number; spread?: number; action: Action }[]) {
     const seg = 3.2; // cada cuánto un trabajador cambia de puesto (s de simulación)
     const speed = 1.4; // m/s al caminar
     const nFloor = Math.min(ACTIVE_ON_FLOOR[a.kind], FLOOR_SLOTS);
@@ -186,8 +190,9 @@ export class Crews {
       m.visible = !!g;
       if (!g) continue;
       const ang = hash(j, 5) * Math.PI * 2;
-      const rad = (g.r ?? 1.2) + hash(j, 6) * 1.6;
-      const sway = Math.sin(t * 0.7 + j) * 0.35;
+      const spread = g.spread ?? 1.6;
+      const rad = (g.r ?? 1.2) + hash(j, 6) * spread;
+      const sway = Math.sin(t * 0.7 + j) * Math.min(0.35, spread * 0.4);
       m.x = g.x + Math.cos(ang) * rad + sway;
       m.z = g.z + Math.sin(ang) * rad;
       m.y = SITE.groundY;

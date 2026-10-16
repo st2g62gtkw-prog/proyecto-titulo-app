@@ -20,7 +20,8 @@ export interface HudState {
   kpis: KPI[]; feed: FeedItem[]; crew: { label: string; count: number }[];
 }
 export interface Selection { title: string; subtitle?: string; badge?: string; rows: [string, string][]; note?: string }
-export type ViewMode = 'iso' | 'follow' | 'top';
+/** iso = vista principal (desde el frente poniente); back = vista posterior (desde el camino de mixers). */
+export type ViewMode = 'iso' | 'back' | 'follow' | 'top';
 export interface HudCallbacks {
   onPlayPause(): void;
   onSeek(t: number): void;
@@ -76,6 +77,7 @@ const ICONS = {
   play: '<path d="M8 5.6v12.8a.9.9 0 0 0 1.4.75l9.7-6.4a.9.9 0 0 0 0-1.5L9.4 4.85A.9.9 0 0 0 8 5.6z" fill="currentColor" stroke="none"/>',
   pause: '<rect x="6.5" y="5" width="4" height="14" rx="1.3" fill="currentColor" stroke="none"/><rect x="13.5" y="5" width="4" height="14" rx="1.3" fill="currentColor" stroke="none"/>',
   iso: '<path d="M12 3.2l7.8 4.4v8.8L12 20.8l-7.8-4.4V7.6z"/><path d="M4.2 7.6L12 12l7.8-4.4M12 12v8.8"/>',
+  back: '<path d="M12 8.4l3.2 1.8v3.6L12 15.6l-3.2-1.8v-3.6z"/><path d="M4.6 10.2a7.6 7.6 0 0 1 13-3.8M19.4 13.8a7.6 7.6 0 0 1-13 3.8"/><path d="M17.9 3.4v3.3h-3.3M6.1 20.6v-3.3h3.3"/>',
   follow: '<circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/>',
   top: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M4 11h9v9M13 4v7"/>',
   tag: '<path d="M3.8 12.6V4.8a1 1 0 0 1 1-1h7.8l7.9 7.9a1.3 1.3 0 0 1 0 1.8l-7 7a1.3 1.3 0 0 1-1.8 0z"/><circle cx="8.3" cy="8.3" r="1.4"/>',
@@ -557,7 +559,8 @@ export function createHud(root: HTMLElement, cb: HudCallbacks): Hud {
     'div',
     'hud-toolbar',
     `<div class="hud-glass seg" role="group" aria-label="Vista">
-      <button type="button" data-v="iso" title="Vista isométrica">${icon('iso')}<span class="lbl">Vista iso</span></button>
+      <button type="button" data-v="iso" title="Vista isométrica principal (desde el frente)">${icon('iso')}<span class="lbl">Vista iso</span></button>
+      <button type="button" data-v="back" title="Vista posterior: camino de mixers, portón y bomba">${icon('back')}<span class="lbl">Vista posterior</span></button>
       <button type="button" data-v="follow" title="Seguir la obra">${icon('follow')}<span class="lbl">Seguir la obra</span></button>
       <button type="button" data-v="top" title="Vista en planta">${icon('top')}<span class="lbl">Planta</span></button>
     </div>

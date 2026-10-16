@@ -49,8 +49,11 @@ export interface CraneSetup {
   jibY: number;
   jibLength: number;
   anchors: Record<'acopioMoldajeMuro' | 'acopioMoldajeLosa' | 'acopioFierro' | 'acopioPuntales', P3>;
-  /** Punto (mundo) bajo la canaleta del mixer estacionado para capacho. */
-  mixerChute: P3;
+  /**
+   * Punto (mundo) del suelo donde se apoya el capacho para llenarlo: bajo la punta de la canaleta
+   * del mixer detenido en el carril posterior (la grúa lo toma ahí, pasando sobre el edificio).
+   */
+  capachoFill: P3;
   /** Distancia del gancho al fondo de cada tipo de carga. */
   hang: Record<PayloadKind, number>;
   /** Cota superior del edificio construido en el tiempo t (para izar con holgura). */
@@ -128,10 +131,11 @@ export class CranePlan {
   private capacho(t0: number, D: number, to: P3, task: string) {
     const s = this.s;
     const h = s.hang.capacho;
-    const chute = s.mixerChute;
+    const fill = s.capachoFill;
     const T = (x: number) => t0 + x * D;
-    const safe = this.safeY(t0 + D, 'capacho', to, chute);
-    const atMixer = { x: chute.x, y: chute.y + 0.15, z: chute.z };
+    const safe = this.safeY(t0 + D, 'capacho', to, fill);
+    // el capacho baja hasta apoyar sus patas en el suelo, con la boca bajo la canaleta
+    const atMixer = { x: fill.x, y: fill.y + 0.01, z: fill.z };
     const over = { x: to.x, y: to.y + 0.35, z: to.z };
     this.key(T(0.04), null, safe);
     this.key(T(0.16), atMixer, safe);

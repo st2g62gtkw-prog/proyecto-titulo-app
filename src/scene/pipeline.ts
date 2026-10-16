@@ -1,6 +1,8 @@
 /**
- * Tubería de la bomba estacionaria: sale de la caseta, corre por el suelo hasta el núcleo,
- * sube por el shaft del ascensor piso a piso y, durante cada hormigonado, sigue por la losa
+ * Tubería de la bomba estacionaria: sale de la caseta (costado posterior), corre por el suelo
+ * con tramos ortogonales y codos, entra al 1er piso por la puerta posterior del hall, cruza el
+ * pasillo y el vestíbulo del ascensor y entra al shaft por el vano de su puerta (sin atravesar
+ * muros de H.A.); sube por el shaft piso a piso y, durante cada hormigonado, sigue por la losa
  * con tramos rígidos hasta una manguera que la cuadrilla mueve sobre el frente de vaciado.
  */
 import * as THREE from 'three';
@@ -25,7 +27,10 @@ export interface Pipeline {
 const R = 0.07; // radio exterior de la tubería Ø125
 const STEEL = '#8d9399';
 
-export function createPipeline(data: BuildingData, sched: Schedule, outlet: THREE.Vector3): Pipeline {
+/**
+ * `outlet` es la salida de la bomba (mundo) y `dir` la dirección horizontal en que sale la tubería.
+ */
+export function createPipeline(data: BuildingData, sched: Schedule, outlet: THREE.Vector3, dir = new THREE.Vector3(0, 0, -1)): Pipeline {
   const group = new THREE.Group();
   group.name = 'tuberia-bomba';
   const levels = data.levels;
@@ -38,24 +43,32 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
   const mat = revealMaterial({ color: STEEL, roughness: 0.45, metalness: 0.6 }, { mode: 'drop', dropHeight: 0.5 });
   const g = new GeoBuilder();
 
-  // tendido en el suelo: caseta → frente al edificio → núcleo → base del shaft
-  const route: [number, number][] = [
-    [outlet.x, outlet.z],
-    [outlet.x, SITE.pipeline.zFront],
-    [SITE.pipeline.xEntry, SITE.pipeline.zFront],
-    [SITE.pipeline.xEntry, SITE.pipeline.zHall],
-    [vx, SITE.pipeline.zHall],
+  // tendido en el suelo: caseta → puerta posterior del hall → pasillo → vestíbulo → base del shaft
+  const P = SITE.pipeline;
+  const d = new THREE.Vector2(dir.x, dir.z).normalize();
+  const drop = { x: outlet.x + d.x * 0.5, z: outlet.z + d.y * 0.5 };
+  const route = ([
+    [drop.x, drop.z],
+    [P.xDoor, drop.z],
+    [P.xDoor, P.zHall],
+    [P.xLobby, P.zHall],
+    [P.xLobby, P.zShaftDoor],
+    [vx, P.zShaftDoor],
     [vx, vz],
-  ];
+  ] as [number, number][]).filter((p, i, a) => i === 0 || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 0.01);
   const tLay = firstUse - 6;
   g.timing(tLay, tLay + 0.6, removeAt, removeAt + 0.3);
-  g.barN(outlet.x, outlet.y, outlet.z, outlet.x, yG, outlet.z - 0.6, R * 2);
+  // codo de salida: de la brida de la bomba baja al suelo
+  g.barN(outlet.x, outlet.y, outlet.z, drop.x, yG, drop.z, R * 2);
+  const joint = (x: number, z: number) => g.aabb(x - R * 1.35, yG - R * 1.35, z - R * 1.35, x + R * 1.35, yG + R * 1.35, z + R * 1.35);
+  joint(drop.x, drop.z);
   let along = 0;
   for (let i = 0; i < route.length - 1; i++) {
     const [ax, az] = route[i], [bx, bz] = route[i + 1];
     g.barN(ax, yG, az, bx, yG, bz, R * 2);
+    if (i > 0) joint(ax, az); // codo de 90° en cada cambio de dirección
     const len = Math.hypot(bx - ax, bz - az);
-    // uniones cada 3 m y tacos de madera bajo la tubería
+    // uniones (abrazaderas) cada 3 m
     for (let s = 3 - (along % 3); s < len; s += 3) {
       const k = s / len;
       const px = ax + (bx - ax) * k, pz = az + (bz - az) * k;
@@ -64,6 +77,8 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
     }
     along += len;
   }
+  /** Derivación en el pasillo desde donde se arma la tubería del radier. */
+  const radierTap = new THREE.Vector3(P.xLobby, yG, P.zHall);
 
   // tramos verticales por el shaft: se agregan antes de hormigonar cada losa
   for (let S = 1; S < levels.length; S++) {
@@ -120,7 +135,7 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
       }
       const y = slab === 0 ? yG : levels[slab].slab.y1 + 0.12;
       // en la losa la tubería sale del shaft; para el radier, desde el tendido del suelo
-      const A = slab === 0 ? new THREE.Vector3(vx, y, SITE.pipeline.zHall) : new THREE.Vector3(vx, y, vz);
+      const A = slab === 0 ? radierTap.clone().setY(y) : new THREE.Vector3(vx, y, vz);
       const P = pourPoint;
       const dx = P.x - A.x, dz = P.z - A.z;
       const dist = Math.hypot(dx, dz);

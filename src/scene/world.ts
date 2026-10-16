@@ -31,7 +31,7 @@ export interface WorldDeps {
   createTag: typeof createTag;
 }
 
-const MIXER_POOL = 4;
+const MIXER_POOL = 5;
 
 export interface WorldState {
   /** Punto de trabajo actual (para seguir la obra con la cámara). */
@@ -120,12 +120,14 @@ export class World {
       m.chuteTip.getWorldPosition(this.mixerChuteLocal);
       m.setChute(0);
     }
-    const chuteWorld = {
-      x: SITE.mixerCapacho.x + this.mixerChuteLocal.x,
-      y: SITE.groundY + this.mixerChuteLocal.y,
+    // el capacho se llena apoyado en el suelo, con la punta de la canaleta sobre su boca (un poco
+    // hacia el camión); en reposo queda a un costado del carril, entre la bomba y el edificio
+    const capachoFill = {
+      x: SITE.mixerCapacho.x + this.mixerChuteLocal.x + 0.25,
+      y: SITE.groundY,
       z: SITE.mixerCapacho.z + this.mixerChuteLocal.z,
     };
-    this.capachoRest.set(chuteWorld.x - 1.5, SITE.groundY, chuteWorld.z + 3.2);
+    this.capachoRest.set(capachoFill.x, SITE.groundY, SITE.road.bayZ);
 
     // bomba estacionaria en su caseta y la tubería que sube por el shaft del ascensor
     this.pump = createStationaryPump();
@@ -135,7 +137,9 @@ export class World {
     this.pump.group.updateMatrixWorld(true);
     this.pickables.push(...this.pump.pickables);
     const outlet = this.pump.outlet.getWorldPosition(new THREE.Vector3());
-    this.pipeline = createPipeline(data, this.sched, outlet);
+    // la tubería sale de la caseta por su muro trasero (−z local de la bomba)
+    const outletDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.pump.group.quaternion);
+    this.pipeline = createPipeline(data, this.sched, outlet, outletDir);
     scene.add(this.pipeline.group);
     this.pickables.push(...this.pipeline.pickables);
 
@@ -159,7 +163,7 @@ export class World {
         acopioFierro: P(anchors.acopioFierro),
         acopioPuntales: P(anchors.acopioPuntales),
       },
-      mixerChute: chuteWorld,
+      capachoFill,
       hang,
       topAt: (t) => {
         const a = this.sched.at(t);
@@ -210,6 +214,7 @@ export class World {
     this.addLabel('af', 'Acopio de fierro', 'acopio', root, a.acopioFierro.clone().add(new THREE.Vector3(0, 2.2, 0)));
     this.addLabel('faena', 'Instalación de faena', 'info', root, new THREE.Vector3(SITE.faena.x, 5, SITE.faena.z));
     this.addLabel('pump', 'Bomba estacionaria', 'pump', this.pump.group, new THREE.Vector3(0, 4.2, 0));
+    this.addLabel('gate', 'Portón de camiones', 'info', root, new THREE.Vector3(SITE.gate.x + 1, 4.2, SITE.gate.z));
     this.mixers.forEach((m, i) => this.addLabel(`mixer${i}`, 'Mixer 7 m³', 'mixer', m.group, new THREE.Vector3(0, 4.6, 0)));
     this.addLabel('front', 'Frente de trabajo', 'work', root, new THREE.Vector3());
   }
@@ -310,11 +315,11 @@ export class World {
     }
     this.state.mixersOnSite = mstates.length;
 
-    // chorro mixer → capacho (solo mientras se llena)
+    // chorro mixer → capacho (solo mientras se llena): de la canaleta al hormigón dentro del capacho
     const sMix = this.streams[0];
     if (chuteActive && cs.payload === 'capacho' && cs.cycle && T >= cs.cycle.fill[0] && T <= cs.cycle.fill[1]) {
       this.capacho.group.getWorldPosition(this.tmp);
-      sMix.set(chuteActive, this.tmp.clone().add(new THREE.Vector3(0, -0.5, 0)), 1, clock);
+      sMix.set(chuteActive, this.tmp.clone().add(new THREE.Vector3(0, -1.25, 0)), 1, clock);
     } else sMix.set(this.tmp, this.tmp, 0, clock);
 
     // chorro capacho → muro
@@ -346,17 +351,23 @@ export class World {
     // --- cuadrillas ---
     const act = this.sched.at(T);
     const a = this.site.anchors;
-    // en terreno: alrededor de los acopios (no encima), taller de fierro, mixer y faena
-    const ground: { x: number; z: number; r?: number; action: 'idle' | 'walk' | 'work' | 'carry' }[] = [
+    // en terreno: alrededor de los acopios (no encima), taller de fierro, capacho y faena
+    const ground: { x: number; z: number; r?: number; spread?: number; action: 'idle' | 'walk' | 'work' | 'carry' }[] = [
       { x: a.acopioFierro.x - 4.5, z: a.acopioFierro.z + 1, r: 0.8, action: 'work' },
       { x: SITE.tallerFierro.x, z: SITE.tallerFierro.z, r: 1.6, action: 'work' },
       { x: SITE.tallerFierro.x - 2, z: SITE.tallerFierro.z + 2, r: 1.2, action: 'work' },
       { x: a.acopioMoldajeMuro.x + 6.5, z: a.acopioMoldajeMuro.z - 1.5, r: 0.8, action: 'work' },
-      { x: SITE.mixerCapacho.x - 4, z: SITE.mixerCapacho.z + 3.2, r: 0.6, action: 'idle' },
+      // rigger del capacho: entre el carril y la bahía, junto al punto de llenado
+      { x: this.capachoRest.x - 1.6, z: SITE.road.inZ + 1.8, r: 0.3, spread: 0.5, action: act.kind === 'muroHormigon' || act.kind === 'fundaciones' ? 'work' : 'idle' },
       { x: a.acopioMoldajeLosa.x - 5.5, z: a.acopioMoldajeLosa.z + 1.5, r: 0.8, action: 'work' },
       { x: SITE.faena.x + 7, z: SITE.faena.z + 5, r: 1.5, action: 'idle' },
       { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },
     ];
+    // concreteros en la bomba: el operador junto a la caseta (lado del edificio) y uno en la tolva
+    if (ps.pumping) {
+      const P = SITE.pump;
+      ground.push({ x: P.x - 0.4, z: P.z + 2.6, r: 0.15, spread: 0.35, action: 'work' }, { x: P.x + 3.0, z: P.z + 2.25, r: 0.15, spread: 0.3, action: 'work' });
+    }
     // trabajos en paralelo en el 1er piso: redes bajo radier y hormigonado del radier
     for (const par of this.sched.parallel) {
       if (T < par.t0 || T > par.t1) continue;
