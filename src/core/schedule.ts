@@ -3,7 +3,7 @@
  *
  * Secuencia por piso, como se hace en terreno:
  *   Muros:  enfierradura → moldaje (lo sube la grúa) → hormigonado con capacho → desmolde
- *   Losa:   moldaje (puntales, vigas y placas) → enfierradura → hormigonado con camión bomba
+ *   Losa:   moldaje (puntales, vigas y placas) → enfierradura → hormigonado con bomba estacionaria
  *
  * El tiempo de simulación T está en "segundos de animación". Cada actividad tiene además
  * su duración real en días hábiles para mostrar el calendario.
@@ -60,6 +60,39 @@ export interface WallTiming {
   strip: [number, number];
 }
 
+export interface SlabTiming {
+  props: [number, number];
+  deck: [number, number];
+  rebar: [number, number];
+  /** Hormigonado con la bomba (de la primera descarga al fin de la última). */
+  pour: [number, number];
+  /**
+   * Bomba detenida a medio hormigonado: el primer mixer sale por el camino y el portón y el
+   * segundo entra en retroceso hasta la tolva (PACE.cambioMixer). El vaciado no avanza.
+   */
+  pumpStop: [number, number];
+  propsOut: [number, number];
+  deckOut: [number, number];
+}
+
+/**
+ * Fracción hormigonada de una losa en el instante t (0..1): avanza mientras la bomba vacía y se
+ * detiene durante el cambio de mixer. La usan el barrido de la losa, la manguera, la cuadrilla y
+ * los indicadores, para que todos vayan juntos.
+ */
+export function pourFrac(s: Pick<SlabTiming, 'pour' | 'pumpStop'>, t: number) {
+  const [p0, p1] = s.pour, [q0, q1] = s.pumpStop;
+  const tt = Math.min(Math.max(t, p0), p1);
+  const run = p1 - p0 - (q1 - q0);
+  return Math.min(Math.max((tt - p0 - Math.min(Math.max(tt - q0, 0), q1 - q0)) / run, 0), 1);
+}
+
+/** Bomba detenida para el cambio de mixer, centrada en el hormigonado [p0, p1]. */
+const pumpStopIn = (p0: number, p1: number): [number, number] => {
+  const m = (p0 + p1) / 2;
+  return [m - PACE.cambioMixer / 2, m + PACE.cambioMixer / 2];
+};
+
 export interface Schedule {
   activities: Activity[];
   /** Actividades fuera de la ruta crítica que corren en paralelo (instalaciones bajo radier, radier). */
@@ -69,14 +102,7 @@ export interface Schedule {
   /** Tiempos por muro HA: wall[level][i] (índice dentro de haWalls(level)). */
   wall: WallTiming[][];
   /** Tiempos por losa (índice de piso de la losa, 1..7 = 2P..Techumbre; 0 = radier). */
-  slab: {
-    props: [number, number];
-    deck: [number, number];
-    rebar: [number, number];
-    pour: [number, number];
-    propsOut: [number, number];
-    deckOut: [number, number];
-  }[];
+  slab: SlabTiming[];
   foundations: [number, number];
   /** Hormigonado de zapatas bajo cada muro HA del 1P (mismo índice que haWalls(1P)). */
   footing: [number, number][];
@@ -232,11 +258,15 @@ export function buildSchedule(data: BuildingData): Schedule {
       const t0 = aLF.t0 + k * (PACE.losaFierro / 3);
       return { t0, t1: t0 + PACE.losaFierro / 3, walls: [], x: bx.x0 + ((k + 0.5) / 3) * (bx.x1 - bx.x0), z: bx.cz, y: levels[S].slab.y0 + 0.4 };
     });
+    // hormigonado con dos mixers: el primero entra en retroceso al comenzar la actividad y el
+    // segundo después del cambio (la bomba se detiene a medio vaciado, ver pumpStop)
+    const pour: [number, number] = [aLH.t0 + 4.4, aLH.t1 - 1.6];
     slab[S] = {
       props: [aLM.t0 + 0.2, aLM.t0 + PACE.losaMoldaje * 0.55],
       deck: [aLM.t0 + PACE.losaMoldaje * 0.3, aLM.t1 - 0.3],
       rebar: [aLF.t0 + 0.3, aLF.t1 - 0.4],
-      pour: [aLH.t0 + 4.2, aLH.t1 - 3.4],
+      pour,
+      pumpStop: pumpStopIn(...pour),
       propsOut: [1e7, 1e7],
       deckOut: [1e7, 1e7],
     };
@@ -269,12 +299,18 @@ export function buildSchedule(data: BuildingData): Schedule {
   const inst = par('instalaciones', find('muroFierro', lastWalls - 2).t0, find('losaHormigon', lastWalls).t1,
     'Instalaciones bajo radier', 'Alcantarillado PVC y agua potable HDPE en zanjas bajo el 1er piso, con pruebas de presión');
   const rStart = find('muroFierro', lastWalls).t0 + 0.6;
-  const rEnd = find('muroMoldaje', lastWalls).t1 - 0.6;
+  // termina antes que el moldaje de muros: el último mixer del radier debe salir por el camino (que
+  // es uno solo) antes de que entre en retroceso el mixer del hormigonado de muros del 7P
+  const rEnd = find('muroMoldaje', lastWalls).t1 - 3.6;
   const radier = par('radier', rStart, rEnd, 'Radier 1er piso', 'Radier e=10 cm sobre relleno compactado, con bomba estacionaria');
   const rDur = rEnd - rStart;
+  // un solo mixer (no cabe un cambio de camión): entra en retroceso cuando el último de la losa de
+  // techumbre del 6P ya salió por el portón (≈ 7 s después de empezar el radier) y sale antes de
+  // que llegue el del capacho; la bomba no se detiene (pumpStop vacío)
+  const rPour: [number, number] = [rStart + 7.4, rEnd - 0.4];
   slab[0] = {
     props: [rStart, rStart], deck: [rStart, rStart], rebar: [rStart, rStart + rDur * 0.32],
-    pour: [rStart + rDur * 0.4, rEnd - 0.4], propsOut: [1e7, 1e7], deckOut: [1e7, 1e7],
+    pour: rPour, pumpStop: [rPour[1], rPour[1]], propsOut: [1e7, 1e7], deckOut: [1e7, 1e7],
   };
   const parallel = [inst, radier];
 

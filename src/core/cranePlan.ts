@@ -51,7 +51,7 @@ export interface CraneSetup {
   anchors: Record<'acopioMoldajeMuro' | 'acopioMoldajeLosa' | 'acopioFierro' | 'acopioPuntales', P3>;
   /**
    * Punto (mundo) del suelo donde se apoya el capacho para llenarlo: bajo la punta de la canaleta
-   * del mixer detenido en el carril posterior (la grúa lo toma ahí, pasando sobre el edificio).
+   * del mixer detenido en el camino posterior (la grúa lo toma ahí, pasando sobre el edificio).
    */
   capachoFill: P3;
   /**
@@ -61,8 +61,9 @@ export interface CraneSetup {
    */
   capachoSlide: P3;
   /**
-   * Punto (mundo) del suelo donde queda el capacho entre hormigonados: a un costado del carril, fuera
-   * del paso de los mixers. La grúa lo engancha ahí antes del primer viaje y lo deja al terminar.
+   * Punto (mundo) del suelo donde queda el capacho entre hormigonados: a un costado del camino (lado
+   * del talud), fuera del paso de los mixers y al lado del punto de entrada, para llevarlo de uno al
+   * otro sin pasar sobre el camión. La grúa lo engancha ahí antes del primer viaje y lo deja al terminar.
    */
   capachoRest: P3;
   /** Distancia del gancho al fondo de cada tipo de carga. */
@@ -81,14 +82,13 @@ const SLIDE = 0.025;
 
 /**
  * Ventanas de un viaje de capacho (instantes absolutos): entra a ras de suelo bajo la canaleta, se
- * llena y sale. En el viaje del cambio de mixer (`swap`) el llenado parte más tarde y dura menos,
- * para que el segundo camión alcance a avanzar hasta el punto de descarga y desplegar su canaleta.
- * La logística de los mixers usa las mismas ventanas.
+ * llena y sale. La logística del mixer usa las mismas ventanas (llega antes del primer llenado y
+ * repliega la canaleta después de la última salida).
  */
-export function capachoWindows(tr: { t0: number; t1: number }, swap = false) {
+export function capachoWindows(tr: { t0: number; t1: number }) {
   const D = tr.t1 - tr.t0;
   const T = (x: number) => tr.t0 + x * D;
-  const [f0, f1] = swap ? [0.28, 0.35] : [0.22, 0.32];
+  const [f0, f1] = [0.22, 0.32];
   const w: Record<'slideIn' | 'fill' | 'slideOut', [number, number]> = {
     slideIn: [T(f0 - SLIDE), T(f0)],
     fill: [T(f0), T(f1)],
@@ -96,9 +96,6 @@ export function capachoWindows(tr: { t0: number; t1: number }, swap = false) {
   };
   return w;
 }
-
-/** Viaje de la serie en que el segundo mixer reemplaza al primero (cada uno llena la mitad de los capachos). */
-export const capachoSwapTrip = (nTrips: number) => Math.ceil(nTrips / 2);
 
 export class CranePlan {
   keys: Key[] = [];
@@ -166,12 +163,12 @@ export class CranePlan {
    * Viaje de capacho: llenado en el mixer y descarga sobre muros o zapatas. En el primero de la
    * serie (`first`) el capacho ya cuelga frente a la canaleta (lo trae pickCapacho) y solo baja.
    */
-  private capacho(t0: number, D: number, to: P3, task: string, first: boolean, swap: boolean) {
+  private capacho(t0: number, D: number, to: P3, task: string, first: boolean) {
     const s = this.s;
     const h = s.hang.capacho;
     const fill = s.capachoFill, slide = s.capachoSlide;
     const T = (x: number) => t0 + x * D;
-    const w = capachoWindows({ t0, t1: t0 + D }, swap);
+    const w = capachoWindows({ t0, t1: t0 + D });
     const safe = this.safeY(t0 + D, 'capacho', to, fill);
     // baja frente a la punta de la canaleta y entra a ras de suelo (2 cm) hasta apoyar sus patas con
     // la boca bajo la punta; al terminar el llenado sale igual y recién ahí se iza
@@ -197,9 +194,9 @@ export class CranePlan {
 
   /**
    * Antes del primer viaje (entre t0 y t1): la grúa engancha el capacho donde quedó en reposo, lo
-   * levanta lo justo para pasar sobre el carril y lo deja colgando frente a la punta de la canaleta
-   * cuando el mixer ya se detuvo; el primer viaje lo baja y lo entra bajo la canaleta. Devuelve el
-   * instante del enganche.
+   * levanta lo justo para despegarlo del suelo y lo deja colgando frente a la punta de la canaleta
+   * (detrás del mixer, que termina de llegar en retroceso); el primer viaje lo baja y lo entra bajo
+   * la canaleta. Devuelve el instante del enganche.
    */
   private pickCapacho(t0: number, t1: number) {
     const s = this.s, h = s.hang.capacho;
@@ -237,8 +234,7 @@ export class CranePlan {
   private capachoSeries(a: Activity, to: (tr: Activity['trips'][number]) => P3, task: (k: number) => string) {
     const tr = a.trips;
     const attach = this.pickCapacho(a.t0, tr[0].t0);
-    const swap = capachoSwapTrip(tr.length);
-    tr.forEach((x, k) => this.capacho(x.t0, x.t1 - x.t0, to(x), task(k), k === 0, k === swap));
+    tr.forEach((x, k) => this.capacho(x.t0, x.t1 - x.t0, to(x), task(k), k === 0));
     const last = tr[tr.length - 1];
     const release = this.returnCapacho(last.t0 + 0.93 * (last.t1 - last.t0), a.t1 - 0.05);
     // el capacho cuelga del gancho desde que se engancha hasta que vuelve al suelo

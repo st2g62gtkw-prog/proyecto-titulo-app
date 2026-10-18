@@ -1,9 +1,9 @@
 /**
  * Demo de la bomba estacionaria en su caseta: alterna bombeando / detenida cada 4 s. La caseta
- * lleva el mismo giro que en la app (SITE.pump.heading) y un mixer queda como en la obra:
- * retrocedido por la bahía, alineado con el eje largo de la caseta y con la canaleta desplegada
- * sobre la tolva (SITE.mixerPump respecto de SITE.pump), para revisar holguras y la caída del
- * chorro. Esferas en la tolva (roja), la punta de la canaleta (naranja) y la salida de la tubería
+ * lleva el mismo giro que en la app (SITE.pump.heading) y un mixer queda como en la obra: llegado
+ * en retroceso por el camino, alineado con el eje largo de la caseta, con la cabina hacia el portón
+ * (−x) y la canaleta desplegada sobre la tolva (SITE.mixerPump respecto de SITE.pump), para revisar
+ * holguras y la caída del chorro. Esferas en la tolva (roja), la punta de la canaleta (naranja) y la salida de la tubería
  * (azul); la huella de la caseta en amarillo.
  */
 import * as THREE from 'three';
@@ -24,11 +24,12 @@ export default function demo(stage: Stage) {
   const hop = rig.hopper.getWorldPosition(new THREE.Vector3());
   const out = rig.outlet.getWorldPosition(new THREE.Vector3());
 
-  // mixer en la tolva: misma posición relativa a la caseta que en la app (rumbo +x, trasera hacia
-  // la tolva); ?truck=0 lo oculta y ?shed=0 oculta muros y techo (inspección de la bomba)
+  // mixer en la tolva: misma posición relativa a la caseta que en la app (rumbo −x, hacia el
+  // portón, con la trasera hacia la tolva); ?truck=0 lo oculta y ?shed=0 oculta muros y techo
   const q = new URLSearchParams(location.search);
   const mixer = createMixer();
   mixer.group.position.set(SITE.mixerPump.x - SITE.pump.x, G, SITE.mixerPump.z - SITE.pump.z);
+  mixer.group.rotation.y = -Math.PI;
   mixer.setChute(1);
   mixer.setDischarge(true);
   mixer.group.visible = q.get('truck') !== '0';
@@ -68,7 +69,7 @@ export default function demo(stage: Stage) {
   ));
 
   // holgura entre la trasera del camión (sin la canaleta) y la huella de la caseta
-  const rear = rig.group.worldToLocal(mixer.group.position.clone().add(new THREE.Vector3(-mixer.length / 2, 0, 0)));
+  const rear = rig.group.worldToLocal(mixer.group.localToWorld(new THREE.Vector3(-mixer.length / 2, 0, 0)));
   const gap = Math.max(Math.abs(rear.x) - w / 2, Math.abs(rear.z) - d / 2);
   let meshes = 0;
   rig.group.traverse((o) => { if ((o as THREE.Mesh).isMesh) meshes++; });

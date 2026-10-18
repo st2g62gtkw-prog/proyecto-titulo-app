@@ -26,10 +26,12 @@ export const SITE = {
 
   /**
    * Bomba estacionaria de hormigón (losas y radier), dentro de su caseta en el costado posterior,
-   * al frente opuesto de la grúa. heading = giro de la caseta: con π/2 la tolva mira hacia +x
-   * (donde retrocede el mixer) y la salida de la tubería queda hacia el edificio, en su extremo -x.
+   * al frente opuesto de la grúa y al final del camino de mixers. heading = giro de la caseta: con
+   * −π/2 la tolva mira hacia −x (hacia el portón, por donde llega el mixer en retroceso) y la salida
+   * de la tubería queda en el extremo +x, del lado del talud, justo frente a la puerta posterior del
+   * hall (x = pipeline.xDoor), así la tubería va derecho hacia el edificio por el costado de la caseta.
    */
-  pump: { x: 2.6, z: -10.6, heading: Math.PI / 2 },
+  pump: { x: -5.0, z: -12.0, heading: -Math.PI / 2 },
 
   /**
    * Tendido de la tubería por el suelo (planta): de la salida de la bomba entra por la puerta
@@ -42,27 +44,28 @@ export const SITE = {
   pipeline: { xDoor: -1.2, zDoor: -5.8, zHall: 0.45, xLobby: 0.6, zShaftDoor: 4.0, door: { x0: -2.5, x1: -0.85, h: 2.07 } },
 
   /**
-   * Centro del mixer cuando descarga al capacho (muros): detenido en el carril de entrada justo
-   * antes de pasar frente a la caseta de la bomba. El capacho se llena en el suelo bajo la punta de
-   * la canaleta (≈ 6 m detrás del centro) y la grúa lo toma ahí, a ~29 m del mástil.
+   * Centro del mixer cuando descarga al capacho (muros): detenido en el camino, antes de llegar a
+   * la bomba, con la cabina hacia el portón. El capacho se llena en el suelo bajo la punta de la
+   * canaleta (≈ 6,3 m detrás del centro, hacia la bomba) y la grúa lo toma ahí, a ~28 m del mástil.
    */
-  mixerCapacho: { x: -6.5, z: -14.4 },
+  mixerCapacho: { x: -19.5, z: -12.0 },
   /**
-   * Centro del mixer cuando su canaleta descarga en la tolva de la bomba: retrocede por la
-   * bahía hasta que la punta de la canaleta (6,28 m detrás del centro) queda sobre la tolva.
+   * Centro del mixer cuando su canaleta descarga en la tolva de la bomba: llega en retroceso hasta
+   * que la punta de la canaleta (6,28 m detrás del centro) queda sobre la tolva (pump.x − 2,6).
    */
-  mixerPump: { x: 11.48, z: -10.6 },
+  mixerPump: { x: -13.88, z: -12.0 },
 
   /**
-   * Accesos y caminos. Los camiones entran por el portón norponiente (en el cierro -x que da a la
+   * Accesos y caminos. Los camiones entran por el portón norponiente (en el cierro −x que da a la
    * calle, junto al costado posterior; arriba a la izquierda en la vista principal; con northAngle
-   * queda al nor-noroeste del edificio), avanzan por el carril de entrada
-   * (z = inZ, hacia +x), dan la vuelta en la rotonda del extremo +x (centro turnX/turnZ, radio turnR)
-   * y salen por el carril de salida (z = outZ, hacia -x). La bahía (z = bayZ) es donde el
-   * mixer retrocede hasta la bomba y por donde sale hacia la rotonda.
+   * queda ~32° al poniente del norte visto desde el edificio). El camino posterior es uno solo
+   * (eje z = road.z, ancho road.width) y termina en la bomba: el mixer llega por la calle
+   * (street, eje x = cte), pasa el portón, retrocede por el portón y por el camino hasta el punto
+   * de descarga (capacho o tolva) y sale hacia adelante por el mismo camino y el mismo portón.
    */
-  gate: { x: -56, z: -16.2 },
-  road: { inZ: -14.4, outZ: -18.0, bayZ: -10.6, turnX: 36, turnZ: -15.8, turnR: 6.2 },
+  gate: { x: -56, z: -12.0 },
+  road: { z: -12.0, width: 5 },
+  street: { x: -64, width: 8 },
 
   /** Acopios dentro del alcance de la grúa (rectángulos en planta: centro, ancho x, fondo z, giro). */
   acopioMoldajeMuro: { x: -17.5, z: 16.5, w: 10, d: 5.5, rot: 0 },
@@ -74,7 +77,8 @@ export const SITE = {
 
   /**
    * Talud de corte en el costado oriente (fotos: talud con malla naranja). Su pie queda detrás del
-   * camino de mixers y de la rotonda, con una franja plana de ~17 m desde la fachada posterior.
+   * camino de mixers, con una franja plana de ~18 m desde la fachada posterior (camino, caseta de la
+   * bomba, capacho en reposo y, junto al portón, el estacionamiento y la cancha de lavado).
    */
   talud: { zStart: -25, zTop: -34, height: 6 },
 };
@@ -88,8 +92,13 @@ export const PACE = {
   muroDesmolde: 7.5,
   losaMoldaje: 11,
   losaFierro: 9,
-  losaHormigon: 16,
+  losaHormigon: 20,
   terminacionesPorPiso: 2.5,
+  /**
+   * Bomba detenida en cada cambio de mixer: el que terminó sale por el camino y el portón, y recién
+   * ahí el siguiente (que esperaba en la calle) retrocede hasta la tolva. Ver Logistics.
+   */
+  cambioMixer: 6.9,
 };
 
 /**

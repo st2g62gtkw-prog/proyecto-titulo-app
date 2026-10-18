@@ -239,10 +239,10 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     sweeps[S] = { ...sweep, y: sl.y1, pour: st.pour };
     const paintWin = S === 0 ? null : sched.finish[Math.min(S - 1, nWall - 1)];
 
-    // hormigón de losa (barrido en zig-zag como la bomba)
+    // hormigón de losa (barrido en zig-zag como la bomba; se detiene durante el cambio de mixer)
     const concMat = revealMaterial(
       { color: C.concrete, map: M.concTex, roughness: 0.9 },
-      { mode: 'sweep', concrete: true, cureTime: 22, sweep, ...(paintWin ? { paint: C.facade } : {}) },
+      { mode: 'sweep', concrete: true, cureTime: 22, sweep, pause: st.pumpStop, ...(paintWin ? { paint: C.facade } : {}) },
     );
     concMat.clippingPlanes = clipping;
     const gc = new GeoBuilder();

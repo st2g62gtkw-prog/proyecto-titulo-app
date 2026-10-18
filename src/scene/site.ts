@@ -1,8 +1,8 @@
 /**
  * Faena de obra alrededor del Edificio E (Condominio Espacio Las Tablas, Curauma):
- * terreno con talud de corte, camino de mixers por el costado posterior (portón norponiente,
- * dos carriles, bahía de la bomba y rotonda de retorno), cierros, instalación de faena,
- * acopios al alcance de la grúa, taller de fierro y el barrio alrededor.
+ * terreno con talud de corte, camino de mixers por el costado posterior (un solo camino desde el
+ * portón norponiente hasta la caseta de la bomba, con un ensanche donde se llena el capacho),
+ * cierros, instalación de faena, acopios al alcance de la grúa, taller de fierro y el barrio.
  *
  * Todo lo estático se fusiona por material (≈ 50 mallas en total). Cada acopio y la faena
  * son grupos propios con userData.pick para poder seleccionarlos con un clic.
@@ -10,7 +10,6 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SITE } from '../config';
-import { exitCurve } from '../core/logistics';
 import { BUILDING_FACTS, PROJECT } from '../data/project';
 import { formPanelTexture, plywoodTexture } from './textures';
 
@@ -40,12 +39,11 @@ const G = SITE.groundY;
 const FENCE = { x0: SITE.gate.x, x1: 72, z0: SITE.talud.zTop - 1, z1: 46 };
 const GATE = { z0: SITE.gate.z - 4.3, z1: SITE.gate.z + 4.3 };
 /** Calle exterior del portón (eje x = cte). */
-const ST_W = SITE.gate.x - 8;
-/** Camino posterior: eje entre los dos carriles y rotonda de retorno (centro y radio del eje). */
-const RD = SITE.road;
-const ROAD_Z = (RD.inZ + RD.outZ) / 2;
-/** Estacionamiento de autos de los trabajadores, junto al portón (lado del edificio). */
-const PARK = { x: SITE.gate.x + 14.8, z: GATE.z1 + 3.1 };
+const ST_W = SITE.street.x;
+/** Camino posterior (uno solo, del portón a la bomba): eje z = cte. */
+const RZ = SITE.road.z;
+/** Estacionamiento de autos de los trabajadores, junto al portón (entre el camino y el talud). */
+const PARK = { x: SITE.gate.x + 23, z: RZ - 6.6 };
 /** Barrio: calles a lo largo de x (z = cte) y de z (x = cte), y su extensión plana. */
 const TOWN = { xSt: [56, 100, 144, 188], zSt: [-118, ST_W, 82, 160], x0: -170, x1: 230, z1: 205 };
 
@@ -1558,11 +1556,11 @@ function buildMisc(k: Kit, M: Mats) {
   ];
   for (const [cx, cz, c, n] of coils) for (let i = 0; i < n; i++) coil(p, cx + (r() - 0.5) * 0.15, G + i * 0.24, cz + (r() - 0.5) * 0.15, 0.62 - i * 0.02, c);
   // conos de seguridad
-  // (en el portón, en la isla de la rotonda y marcando la bahía de la bomba)
+  // (en el portón y en el final del camino, a ambos lados de la tolva de la bomba)
+  const tip = SITE.pump.x - 3.2 - 0.8;
   const cones: V2[] = [
     [SITE.gate.x + 2.2, GATE.z1 - 0.6], [SITE.gate.x + 2.2, GATE.z0 + 0.6],
-    [RD.turnX - 1.2, RD.turnZ + 0.6], [RD.turnX + 1.0, RD.turnZ - 0.9], [RD.turnX - 0.3, RD.turnZ - 2.2],
-    [SITE.pump.x + 4.6, RD.bayZ + 2.0], [SITE.pump.x - 5.2, RD.bayZ + 2.0],
+    [tip, RZ + SITE.road.width / 2 + 0.4], [tip, RZ - SITE.road.width / 2 - 0.4],
     [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-28.4, 18.2], [24.6, 17.4],
   ];
   for (const [cx, cz] of cones) cone(p, cx, cz);
@@ -1588,9 +1586,9 @@ function buildMisc(k: Kit, M: Mats) {
     box(p, cx - 3.04, G + 0.06, cz, 0.04, 2.47, 2.32, '#355a73');
     for (const s of [-0.55, -0.15, 0.15, 0.55]) box(k.b(M.metal), cx - 3.08, G + 0.2, cz + s, 0.05, 2.2, 0.05, '#9aa4ad');
   }
-  // cancha de lavado de canoas de mixer (losa con muretes y lechada), junto al carril de salida
+  // cancha de lavado de canoas de mixer (losa con muretes y lechada), junto al portón (lado del talud)
   {
-    const cx = SITE.gate.x + 12, cz = RD.outZ - 4.4, b = k.b(M.rough);
+    const cx = SITE.gate.x + 8, cz = RZ - 10.2, b = k.b(M.rough);
     box(b, cx, G, cz, 4.4, 0.12, 3.4, '#a9a59d');
     box(b, cx + 0.2, G + 0.12, cz, 3.6, 0.02, 2.8, '#c9c6c0');
     box(b, cx + 2.1, G, cz, 0.2, 0.5, 3.4, '#9e9a92');
@@ -1623,9 +1621,10 @@ function buildMisc(k: Kit, M: Mats) {
     const cx = PARK.x - 7.8 + i * 2.6;
     car(k, M, cx, PARK.z + (r() - 0.5) * 0.4, Math.PI / 2 + (i % 3 === 1 ? Math.PI : 0) + (r() - 0.5) * 0.06, colors[i], i === 2 || i === 5);
   }
-  car(k, M, PARK.x - 4.8, PARK.z + 7.3, 0.02, '#f2f3f4', true);
-  car(k, M, ST_W + 2.9, 14, -Math.PI / 2, '#8d969e');
-  car(k, M, ST_W + 2.9, 48, Math.PI / 2, '#c9ccd0');
+  car(k, M, PARK.x + 10.6, PARK.z, Math.PI / 2, '#f2f3f4', true);
+  // autos en la calle, fuera del recorrido de los mixers (que llegan y salen por el tramo del portón)
+  car(k, M, ST_W + 2.9, 72, -Math.PI / 2, '#8d969e');
+  car(k, M, ST_W + 2.9, 90, Math.PI / 2, '#c9ccd0');
   car(k, M, ST_W - 2.9, 64, -Math.PI / 2, '#3b4c63');
 }
 
@@ -1803,27 +1802,21 @@ export function createSite(): SiteRig {
   const padAt = (x: number, z: number, w: number, d: number, alpha = 1) =>
     ribbon(pads, [[x - w / 2, z], [x + w / 2, z]], { width: d, texLen: 6, uRep: d / 6, fade: 0.8, alpha, lift: 0.02 });
   padAt(F.x, F.z + 1, F.w + 2, F.d + 3);
-  padAt(PARK.x, PARK.z + 0.6, 21, 7.5);
-  // caseta de la bomba y franja entre la bahía y la fachada posterior
+  padAt(PARK.x, PARK.z - 0.3, 21, 7.2);
+  // caseta de la bomba y franja hasta la fachada posterior (operador y tubería)
   {
-    const z0 = RD.bayZ - 2.2, z1 = -6.4;
-    padAt(SITE.pump.x + 0.8, (z0 + z1) / 2, 9.4, z1 - z0, 0.9);
+    const z0 = RZ - 2.4, z1 = -6.4, P = SITE.pump;
+    padAt(P.x + 0.6, (z0 + z1) / 2, 9.6, z1 - z0, 0.9);
   }
-  padAt(RD.turnX, RD.turnZ, 2 * RD.turnR + 7, 2 * RD.turnR + 7, 0.85);
   for (const A of [SITE.acopioMoldajeMuro, SITE.acopioMoldajeLosa, SITE.acopioFierro, SITE.tallerFierro, SITE.acopioPuntales]) padAt(A.x, A.z, A.w + 1.5, A.d + 1.5, 0.75);
-  // camino posterior de dos carriles: parte en el borde de la calzada exterior (no se pinta ripio
-  // sobre el asfalto), entra por el portón y corre detrás del edificio hasta la rotonda
-  ribbon(roads, [[ST_W + 4.3, ROAD_Z], [RD.turnX - 7, ROAD_Z]], { width: 8, texLen: 12, uRep: 2, fade: 0.6, step: 4, lift: 0.035 });
-  // rotonda de retorno (anillo) y bahía de la bomba, que empalma con la parte alta de la rotonda
-  const ring: V2[] = [];
-  for (let i = 0; i <= 48; i++) {
-    const a = (i / 48) * Math.PI * 2;
-    ring.push([RD.turnX + RD.turnR * Math.sin(a), RD.turnZ + RD.turnR * Math.cos(a)]);
-  }
-  ribbon(roads, ring, { width: 5, texLen: 12, fade: 0.6, step: 2, lift: 0.04 });
-  // curva en S larga (la misma que siguen los mixers) de la parte baja de la rotonda al carril de salida
-  ribbon(roads, exitCurve(), { width: 4.4, texLen: 12, fade: 0.6, step: 2, lift: 0.036 });
-  ribbon(roads, [[SITE.mixerPump.x - 5.6, RD.bayZ], [RD.turnX - 8, RD.bayZ], [RD.turnX - 1, RD.turnZ + RD.turnR]], { width: 4.4, texLen: 12, fade: 0.6, step: 2, lift: 0.032 });
+  // camino posterior (uno solo): boca ancha en el portón, para el giro en retroceso desde la calle
+  // (parte en el borde de la calzada: no se pinta ripio sobre el asfalto), y de ahí derecho por
+  // detrás del edificio hasta la tolva de la bomba, donde termina
+  const W = SITE.road.width, endX = SITE.pump.x - 3.2;
+  ribbon(roads, [[ST_W + 4.3, RZ], [SITE.gate.x + 5, RZ]], { width: 9, texLen: 12, uRep: 2, fade: 0.6, step: 2, lift: 0.036 });
+  ribbon(roads, [[SITE.gate.x + 2, RZ], [endX, RZ]], { width: W, texLen: 12, fade: 0.6, step: 4, lift: 0.035 });
+  // ensanche del lado del talud donde se llena el capacho y queda en reposo, hasta la caseta
+  ribbon(roads, [[SITE.mixerCapacho.x + 2, RZ - W / 2 - 0.9], [endX, RZ - W / 2 - 0.9]], { width: 3.4, texLen: 12, fade: 0.8, step: 4, lift: 0.033 });
   const decals: [Batch, THREE.Material, number][] = [[pads, M.pad, -3], [roads, M.road, -2]];
   for (const [b, m, order] of decals) {
     const mesh = new THREE.Mesh(b.build()!, m);

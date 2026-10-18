@@ -1,19 +1,22 @@
 /**
- * Logística de hormigón: llegada de mixers, colas y salidas. Los muros se hormigonan con
+ * Logística de hormigón: llegada de mixers, esperas y salidas. Los muros se hormigonan con
  * capacho; las losas y el radier con la bomba estacionaria que queda fija en su caseta.
  * Igual que la grúa, todo es función del tiempo de simulación.
  *
- * Circuito (costado posterior, ver SITE.road): portón norponiente → carril de entrada (+x) →
- * punto de descarga → rotonda del extremo +x → carril de salida (−x) → portón. Para la bomba el
- * mixer pasa frente a la caseta, se detiene y retrocede por la bahía hasta la tolva; al terminar
- * sale hacia adelante por la bahía y el siguiente (que espera en el carril) retrocede apenas
- * el anterior despeja la bahía. Para el capacho el mixer se detiene en el carril de entrada, con la
- * canaleta desplegada mientras el capacho entra y sale a ras de suelo (ver CranePlan).
+ * Camino (costado posterior, ver SITE.road): es uno solo y termina en la bomba. El mixer llega por
+ * la calle del portón (carril del lado de la obra), pasa el portón y se detiene; retrocede girando
+ * por el portón y sigue en retroceso por el camino hasta el punto de descarga, porque la canaleta
+ * va atrás: el capacho (muros) o la tolva de la bomba (losas y radier), que está al final del camino.
+ * Al terminar sale hacia adelante por el mismo camino y el mismo portón y dobla hacia el barrio por
+ * el otro carril de la calle. Como no hay por dónde adelantar, en cada hormigonado de losa el
+ * segundo mixer espera en la calle, pasado el portón, hasta que sale el primero; mientras tanto la
+ * bomba está detenida (SlabTiming.pumpStop). Para muros basta un mixer (7 capachos de 1 m³), igual
+ * que para el radier, que se hormigona entre el último mixer de una losa y el del capacho.
  */
 import { SITE } from '../config';
-import { capachoSwapTrip, capachoWindows } from './cranePlan';
+import { capachoWindows } from './cranePlan';
 import { Route, easeTravel, type Pose } from './paths';
-import type { Schedule } from './schedule';
+import { pourFrac, type Schedule } from './schedule';
 
 /** Tramo de un recorrido: una ruta que se recorre entre t[0] y t[1], hacia adelante o en retroceso. */
 export interface Leg {
@@ -26,12 +29,18 @@ export interface MixerVisit {
   id: number;
   /** 'capacho' = descarga al capacho de la grúa; 'bomba' = alimenta la tolva de la bomba. */
   spot: 'capacho' | 'bomba';
-  /** Tramos de llegada en orden (entrada, avance desde la cola, retroceso hasta la tolva). */
+  /** Tramos de llegada en orden: por la calle hasta pasar el portón y, en retroceso, hasta el punto de descarga. */
   legs: Leg[];
-  /** Tramo de salida: del punto de descarga, por la rotonda, hasta la calle. */
+  /** Tramo de salida: del punto de descarga, hacia adelante por el camino y el portón, hasta la calle. */
   out: Leg;
-  /** Entrada a la faena (inicio del primer tramo) y llegada al punto de descarga (fin del último). */
+  /** Aparece en la calle (inicio del primer tramo) y llega al punto de descarga (fin del último). */
   arrive: [number, number];
+  /** Instante en que empieza a retroceder desde la calle por el portón. */
+  gateIn: number;
+  /** Si espera su turno en la calle (el camino está ocupado): desde cuándo. */
+  waitFrom: number | null;
+  /** Ventanas en que vierte hormigón por la canaleta (una en la tolva; un llenado por capacho). */
+  pours: [number, number][];
   discharge: [number, number];
   leave: [number, number];
   /** Canaleta: empieza a desplegarse en chute[0] y termina de replegarse en chute[1] (con el camión detenido). */
@@ -54,84 +63,95 @@ export interface PumpPour {
   /** Índice de la losa (0 = radier del 1er piso). */
   slab: number;
   pour: [number, number];
+  /** Bomba detenida mientras se cambia de mixer. */
+  pumpStop: [number, number];
 }
 
 export interface PumpState {
+  /** Hormigonado en curso (tubería armada hasta la losa), incluida la pausa del cambio de mixer. */
+  pour: boolean;
+  /** Bombeando (hay un mixer descargando en la tolva). */
   pumping: boolean;
   /** Losa que se está hormigonando (o la próxima, si la bomba está detenida). */
   slab: number;
-  /** Fracción del hormigonado de la losa (0..1). */
+  /** Fracción del hormigonado de la losa (0..1); no avanza durante el cambio de mixer. */
   progress: number;
 }
 
 type P = [number, number];
-const RD = SITE.road, G = SITE.gate;
-const IN = RD.inZ, OUT = RD.outZ, BAY = RD.bayZ;
+const RZ = SITE.road.z, G = SITE.gate, ST = SITE.street;
 const PMP = SITE.mixerPump, CAP = SITE.mixerCapacho;
-/** Centro del mixer en el carril de entrada cuando se detiene para retroceder hasta la bomba. */
-const REV_X = PMP.x + 16.5;
-/** Centro del mixer que espera en cola detrás del que carga el capacho. */
-const CAP_QUEUE_X = CAP.x - 14;
 /**
- * Largo (en x) de la curva en S que baja de la rotonda al carril de salida: larga para que el camión
- * gire poco (a lo más ≈ 16°, a media curva) y llegue casi recto al carril de salida, sin que su
- * esquina delantera invada el carril de entrada cuando se cruza con el mixer que entra.
+ * Carriles de la calle del portón: de llegada (lado de la obra, hacia −z) y de salida (hacia +z; un
+ * poco hacia el eje para que al doblar la esquina delantera no pase sobre la vereda de enfrente).
  */
-const EXIT_S_LEN = 22;
-/** Canaleta del mixer en el capacho: se despliega y repliega rápido para alcanzar el cambio de camión. */
+const LANE_IN = ST.x + ST.width / 4, LANE_OUT = ST.x - ST.width / 4 + 0.35;
+/** Radio (eje del camión) del giro en retroceso de la calle al portón y del giro de salida a la calle. */
+const R_IN = 8, R_OUT = G.x - LANE_OUT;
+/**
+ * Punto de la calle, pasado el portón, donde el mixer se detiene antes de retroceder; ahí espera su
+ * turno el segundo mixer de una losa (el que sale dobla hacia el otro lado, no lo cruza).
+ */
+const WAIT: P = [LANE_IN, RZ - R_IN];
+/** Donde aparece y desaparece cada mixer en la calle (bajo el tablero en la vista principal). */
+const FAR = RZ + 52;
+/**
+ * Al salir, el mixer cruza el carril de llegada para doblar hacia el barrio: si en ese momento
+ * viene otro por la calle, este se detiene antes del portón (UP) y sigue cuando el otro ya dobló.
+ * Mientras su eje está entre GATE_ZONE[0] y GATE_ZONE[1] (z) el que llega estorbaría al que sale.
+ */
+const UP: P = [LANE_IN, RZ + 16.5];
+const GATE_ZONE: [number, number] = [RZ + 16, RZ - 6.6];
+/** Rapidez media (m/s de simulación) por la calle, en retroceso y al salir (vacío). */
+const V_STREET = 18, V_BACK = 17, V_OUT = 21;
+/** Pausa en la calle entre detenerse y empezar a retroceder. */
+const HOLD = 0.25;
+/** Canaleta: despliegue y repliegue (s). En el capacho es más corta: el camión ya está detenido. */
 const CAP_CHUTE: [number, number] = [0.25, 0.22];
 const PUMP_CHUTE: [number, number] = [0.45, 0.3];
-/**
- * Bomba: tiempo entre el fin de una descarga y el inicio de la siguiente, duración del retroceso
- * hasta la tolva y de la salida. El siguiente camión empieza a retroceder ≈ 1 s después de que
- * arranca el anterior, cuando este ya va saliendo de la bahía (sus costados quedan a ≥ 0,9 m).
- */
-const PUMP_SWAP = 2.15, PUMP_REV = 1.0, PUMP_EXIT = 5.6;
 
-/** Curva en S suave (planta) de (x0, z0) a (x1, z1), con ambos extremos paralelos al eje x. */
-function sCurve(x0: number, z0: number, x1: number, z1: number, n = 10): P[] {
+/** Puntos de un tramo recto cada ~4 m (así el Catmull-Rom no se curva entre dos puntos lejanos). */
+function line(a: P, b: P, step = 4): P[] {
+  const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step));
+  return Array.from({ length: n + 1 }, (_, i) => [a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n] as P);
+}
+
+/** Arco (planta) de centro c y radio r entre los ángulos a0 y a1 (rad, desde +x hacia +z). */
+function arc(c: P, r: number, a0: number, a1: number): P[] {
+  const n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / (Math.PI / 18)));
   return Array.from({ length: n + 1 }, (_, i) => {
-    const u = i / n;
-    return [x0 + (x1 - x0) * u, z0 + (z1 - z0) * u * u * (3 - 2 * u)] as P;
+    const a = a0 + ((a1 - a0) * i) / n;
+    return [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)] as P;
   });
 }
 
-/** Parte alta de la rotonda (lado del edificio), donde se entra hacia +x. */
-const TURN_TOP: P = [RD.turnX, RD.turnZ + RD.turnR];
-
-/** Rotonda del extremo +x: desde su parte alta gira hasta quedar hacia −x y baja al carril de salida. */
-function turnaround(): P[] {
-  const pts: P[] = [];
-  for (let d = 15; d <= 180; d += 15) {
-    const a = (d * Math.PI) / 180;
-    pts.push([RD.turnX + RD.turnR * Math.sin(a), RD.turnZ + RD.turnR * Math.cos(a)]);
-  }
-  return [...pts, ...exitCurve().slice(1)];
-}
-
-/** Curva en S de la parte baja de la rotonda al carril de salida (también la pinta el sitio). */
-export function exitCurve(): P[] {
-  return sCurve(RD.turnX - 1.5, RD.turnZ - RD.turnR, RD.turnX - EXIT_S_LEN, OUT, 14);
-}
-
-/** Entrada desde la calle por el portón hasta un punto del carril de entrada. */
-function entry(xStop: number) {
-  return new Route().add([[G.x - 9, IN], [G.x, IN], [xStop, IN]]);
-}
-
-/** Salida: desde `pts` (que terminan en la parte alta de la rotonda) hasta la calle. */
-function exitVia(pts: P[]) {
-  return new Route().add([...pts, ...turnaround(), [G.x, OUT], [G.x - 10, OUT]]);
-}
-
-/** Retroceso desde el carril de entrada hasta que la canaleta queda sobre la tolva. */
-const reverseToPump = () => new Route().add([[REV_X, IN], ...sCurve(REV_X - 2.5, IN, PMP.x + 1.0, BAY), [PMP.x, BAY]], true);
-/** Salida de la bahía de la bomba hacia adelante, hasta la parte alta de la rotonda. */
-const exitFromPump = () => exitVia([[PMP.x, BAY], ...sCurve(RD.turnX - 12, BAY, TURN_TOP[0], TURN_TOP[1])]);
-/** Salida desde el punto del capacho por el carril de entrada. */
-const exitFromCapacho = () => exitVia([[CAP.x, IN], ...sCurve(RD.turnX - 14, IN, TURN_TOP[0], TURN_TOP[1])]);
+/** Llegada por la calle hasta pasar el portón (de frente, hacia −z). */
+const arrival = () => new Route().add(line([LANE_IN, FAR], WAIT, 6));
+/** Retroceso: gira de la calle al portón (la trasera adelante) y sigue por el camino hasta xStop. */
+const reverseTo = (xStop: number) => new Route().add([
+  ...arc([LANE_IN + R_IN, RZ - R_IN], R_IN, Math.PI, Math.PI / 2),
+  ...line([LANE_IN + R_IN, RZ], [xStop, RZ]).slice(1),
+], true);
+/** Salida de frente: por el camino hasta el portón, dobla al carril de salida y sigue hacia el barrio. */
+const exitFrom = (xStop: number) => new Route().add([
+  ...line([xStop, RZ], [G.x, RZ]),
+  ...arc([G.x, RZ + R_OUT], R_OUT, -Math.PI / 2, -Math.PI).slice(1),
+  ...line([LANE_OUT, RZ + R_OUT], [LANE_OUT, FAR], 6).slice(1),
+]);
 
 const leg = (route: Route, t0: number, t1: number, back = false): Leg => ({ route, t: [t0, t1], back });
+/** Duración de un tramo a la rapidez media v (con arranque y frenado suaves). */
+const dur = (r: Route, v: number) => 0.5 + r.length / v;
+
+/** Instante en que un tramo recorrido con easeTravel llega a la distancia s (inversa de easeTravel). */
+function timeAt(L: Leg, s: number) {
+  const f = Math.min(Math.max(s / L.route.length, 0), 1);
+  const u = f <= 0.5 ? Math.sqrt(f / 2) : 1 - Math.sqrt((1 - f) / 2);
+  return L.t[0] + u * (L.t[1] - L.t[0]);
+}
+
+/** Largo del arco de salida (del portón al carril de salida). */
+const OUT_ARC = (R_OUT * Math.PI) / 2;
 
 /** Recorre una ruta entre t0 y t1 con aceleración suave. */
 function travel(route: Route, t: number, [t0, t1]: [number, number]) {
@@ -145,60 +165,89 @@ export class Logistics {
   pours: PumpPour[] = [];
 
   constructor(sched: Schedule) {
-    const visit = (spot: MixerVisit['spot'], legs: Leg[], discharge: [number, number], chute: [number, number], out: Leg) => {
+    /**
+     * Visita de un mixer que debe quedar detenido en xStop en `at`: llega por la calle (si hay que
+     * esperar, se detiene pasado el portón a más tardar en `waitBy`), retrocede hasta xStop, vierte
+     * en `pours` y sale con la canaleta ya replegada en `done`.
+     */
+    const visit = (spot: MixerVisit['spot'], xStop: number, at: number, pours: [number, number][], done: number, waitBy = Infinity) => {
+      const [dOut, dIn] = spot === 'capacho' ? CAP_CHUTE : PUMP_CHUTE;
+      const back = reverseTo(xStop), street = arrival(), out = exitFrom(xStop);
+      const gateIn = at - dur(back, V_BACK);
+      const stopAt = Math.min(gateIn - HOLD, waitBy);
+      const legs = [leg(street, stopAt - dur(street, V_STREET), stopAt), leg(back, gateIn, at, true)];
+      const exit = leg(out, done, done + dur(out, V_OUT));
       this.mixers.push({
-        id: 0, spot, legs, out, arrive: [legs[0].t[0], legs[legs.length - 1].t[1]], discharge, leave: out.t,
-        chute, chuteDur: spot === 'capacho' ? CAP_CHUTE : PUMP_CHUTE,
+        id: 0, spot, legs, out: exit, arrive: [legs[0].t[0], at], gateIn, waitFrom: gateIn - stopAt > 1 ? stopAt : null,
+        pours, discharge: [pours[0][0], pours[pours.length - 1][1]], leave: exit.t,
+        chute: [at, done], chuteDur: [dOut, dIn],
       });
     };
-    const capIn = CAP_CHUTE[1];
+    const xOf = (m: MixerVisit) => (m.spot === 'capacho' ? CAP.x : PMP.x);
+    /** Ventana en que el que sale cruza el carril de llegada (de antes del portón a ya doblado). */
+    const crossing = (m: MixerVisit): [number, number] => {
+      const s0 = xOf(m) - G.x;
+      return [timeAt(m.out, s0 - 1.5), timeAt(m.out, s0 + OUT_ARC + 2)];
+    };
+    /** Ventana en que el que llega por la calle pasa frente al portón (hasta quedar pasado el portón). */
+    const passing = (m: MixerVisit): [number, number] => {
+      const L = m.legs[m.legs.length - 2], z0 = L.route.at(0).z;
+      return [timeAt(L, z0 - GATE_ZONE[0]), timeAt(L, z0 - GATE_ZONE[1])];
+    };
+    // muros y zapatas: un mixer por serie de capachos; llega en retroceso con la canaleta replegada,
+    // la despliega antes de que el capacho entre bajo ella y la repliega después del último llenado
     for (const a of sched.activities) {
-      if (a.kind === 'muroHormigon' || a.kind === 'fundaciones') {
-        const tr = a.trips;
-        const half = capachoSwapTrip(tr.length);
-        const W = tr.map((x, k) => capachoWindows(x, k === half));
-        const t1 = a.t0 + 1.9;
-        // mixer 1: llega antes del primer llenado y despliega la canaleta apenas se detiene; la
-        // repliega cuando el capacho ya salió de bajo ella y se va por el carril de entrada
-        const r1 = W[half - 1].slideOut[1] + 0.01;
-        const out1 = r1 + capIn;
-        visit('capacho', [leg(entry(CAP.x), t1 - 5, t1)], [W[0].fill[0] - 0.05, W[half - 1].fill[1]], [t1 + 0.05, out1],
-          leg(exitFromCapacho(), out1, out1 + 4.6));
-        // mixer 2: espera en cola detrás y avanza apenas arranca el primero (sin alcanzarlo); llega,
-        // despliega la canaleta y el capacho entra bajo ella para el primer llenado que le toca
-        const at2 = out1 + 1.0;
-        const r2 = W[tr.length - 1].slideOut[1] + 0.01;
-        const out2 = r2 + capIn;
-        visit('capacho', [
-          leg(entry(CAP_QUEUE_X), out1 - 5, out1 - 0.3),
-          leg(new Route().add([[CAP_QUEUE_X, IN], [CAP.x, IN]]), out1 + 0.2, at2),
-        ], [W[half].fill[0] - 0.05, W[tr.length - 1].fill[1]], [at2 + 0.02, out2], leg(exitFromCapacho(), out2, out2 + 5.6));
-      }
+      if (a.kind !== 'muroHormigon' && a.kind !== 'fundaciones') continue;
+      const W = a.trips.map((x) => capachoWindows(x));
+      const at = W[0].slideIn[0] - 0.05 - CAP_CHUTE[0];
+      const done = W[W.length - 1].slideOut[1] + 0.01 + CAP_CHUTE[1];
+      visit('capacho', CAP.x, at, W.map((w) => w.fill), done);
     }
-    // losas y radier: los mixers alimentan la tolva de la bomba estacionaria
+    // losas: dos mixers alimentan la tolva; el segundo espera en la calle mientras descarga el
+    // primero y retrocede cuando este ya salió por el portón (la bomba se detiene en el cambio).
+    // El radier, sin cambio de camión, lo hace uno solo
     for (const a of [...sched.activities, ...sched.parallel]) {
       if (a.kind !== 'losaHormigon' && a.kind !== 'radier') continue;
       const S = a.kind === 'radier' ? 0 : a.level;
-      const pour = sched.slab[S].pour;
-      this.pours.push({ slab: S, pour });
-      // tres mixers por hormigonado; el siguiente espera en el carril mientras descarga el anterior
-      // y retrocede cuando este ya salió de la bahía (cambio de camión = PUMP_SWAP)
-      const n = 3;
-      const d0 = pour[0] - 0.1;
-      const each = (pour[1] - d0 - PUMP_SWAP * (n - 1)) / n;
-      for (let k = 0; k < n; k++) {
-        const s0 = d0 + k * (each + PUMP_SWAP), s1 = s0 + each;
-        const legs = k === 0
-          ? [leg(entry(REV_X), s0 - 6.3, s0 - 1.55), leg(reverseToPump(), s0 - 1.4, s0 - 0.15, true)]
-          : [leg(entry(REV_X), s0 - PUMP_SWAP - 4.9, s0 - PUMP_SWAP - 0.3), leg(reverseToPump(), s0 - PUMP_REV - 0.1, s0 - 0.1, true)];
-        const arrived = legs[legs.length - 1].t[1];
-        visit('bomba', legs, [s0, s1 - 0.05], [Math.max(arrived, s0 - 0.6), s1], leg(exitFromPump(), s1, s1 + PUMP_EXIT));
+      const { pour, pumpStop } = sched.slab[S];
+      this.pours.push({ slab: S, pour, pumpStop });
+      const [dOut, dIn] = PUMP_CHUTE;
+      if (pumpStop[1] - pumpStop[0] < 0.01) {
+        // sin cambio de camión (radier): un solo mixer descarga todo el hormigonado
+        visit('bomba', PMP.x, pour[0] - dOut - 0.05, [pour], pour[1] + dIn);
+        continue;
       }
+      visit('bomba', PMP.x, pour[0] - dOut - 0.05, [[pour[0], pumpStop[0]]], pumpStop[0] + dIn);
+      visit('bomba', PMP.x, pumpStop[1] - dOut - 0.05, [[pumpStop[1], pour[1]]], pour[1] + dIn, pumpStop[0] - 0.6);
     }
     this.pours.sort((p, q) => p.pour[0] - q.pour[0]);
+    // si el que llega pasaría frente al portón mientras otro sale y dobla por su carril, espera en la
+    // calle antes del portón (UP) y sigue cuando el otro ya dobló
+    for (const m of this.mixers) {
+      for (const o of this.mixers) {
+        const [c0, c1] = crossing(o), [a0, a1] = passing(m);
+        if (o === m || a1 <= c0 || a0 >= c1) continue;
+        const stopAt = m.legs[m.legs.length - 2].t[1];
+        const toUp = new Route().add(line([LANE_IN, FAR], UP, 6)), toWait = new Route().add(line(UP, WAIT, 6));
+        const go = c1 + 0.1, d2 = dur(toWait, V_STREET);
+        const atUp = Math.min(go, stopAt - d2) - 0.2;
+        m.legs.splice(0, m.legs.length - 1, leg(toUp, atUp - dur(toUp, V_STREET), atUp), leg(toWait, go, go + d2));
+        m.arrive[0] = m.legs[0].t[0];
+        m.waitFrom = atUp;
+        if (go + d2 > m.gateIn - HOLD + 1e-6) console.warn(`Logística: el mixer que entra en ${m.gateIn.toFixed(1)} s llega tarde al portón (${(go + d2 - m.gateIn + HOLD).toFixed(2)} s)`);
+      }
+    }
     // numeración correlativa por orden de llegada (también reparte los camiones del pool sin choques)
     this.mixers.sort((p, q) => p.arrive[0] - q.arrive[0]);
     this.mixers.forEach((m, i) => (m.id = i + 1));
+    // el camino es uno solo: cada mixer debe empezar a retroceder después de que el anterior cruzó
+    // el portón de salida (si no, se cruzarían en el camino)
+    const byGate = [...this.mixers].sort((p, q) => p.gateIn - q.gateIn);
+    for (let i = 1; i < byGate.length; i++) {
+      const prev = byGate[i - 1], m = byGate[i];
+      const free = timeAt(prev.out, xOf(prev) - G.x);
+      if (m.gateIn < free) console.warn(`Logística: el mixer ${m.id} retrocede ${(free - m.gateIn).toFixed(2)} s antes de que salga el ${prev.id}`);
+    }
   }
 
   mixerStates(t: number): MixerState[] {
@@ -224,15 +273,17 @@ export class Logistics {
       // canaleta desplegada solo con el camión detenido en el punto de descarga
       const [c0, c1] = m.chute, [dOut, dIn] = m.chuteDur;
       const chute = Math.min(1, Math.max(0, Math.min((t - c0) / dOut, (c1 - t) / dIn)));
-      out.push({ id: m.id, pose, chute, discharging: t >= m.discharge[0] && t <= m.discharge[1], dist });
+      const discharging = m.pours.some(([a, b]) => t >= a && t <= b);
+      out.push({ id: m.id, pose, chute, discharging, dist });
     }
     return out;
   }
 
-  /** Estado de la bomba estacionaria: bombeando durante cada hormigonado de losa o radier. */
+  /** Estado de la bomba estacionaria: bombeando durante cada hormigonado, salvo en el cambio de mixer. */
   pumpState(t: number): PumpState {
     const p = this.pours.find((x) => t <= x.pour[1] + 0.5) ?? this.pours[this.pours.length - 1];
-    const k = Math.min(Math.max((t - p.pour[0]) / (p.pour[1] - p.pour[0]), 0), 1);
-    return { pumping: t >= p.pour[0] && t <= p.pour[1], slab: p.slab, progress: k };
+    const pour = t >= p.pour[0] && t <= p.pour[1];
+    const stopped = t > p.pumpStop[0] && t < p.pumpStop[1];
+    return { pour, pumping: pour && !stopped, slab: p.slab, progress: pourFrac(p, t) };
   }
 }

@@ -9,7 +9,8 @@
  * Modos de aparición:
  *   rise   el elemento crece de abajo hacia arriba (fierro de muros, hormigón en moldaje)
  *   drop   el elemento baja desde arriba hasta su lugar (moldajes que coloca la grúa)
- *   sweep  la losa se llena en franjas en zig-zag, como avanza la bomba (strips = 0: barrido lineal en x)
+ *   sweep  la losa se llena en franjas en zig-zag, como avanza la bomba (strips = 0: barrido lineal en x);
+ *          con `pause` el barrido se detiene en esa ventana (cambio de mixer) y sigue después
  *   pop    aparece de golpe en in0
  *
  * Retiro: entre out0 y out1 el elemento se desplaza `outLift` (p. ej. sube con la grúa)
@@ -39,6 +40,8 @@ export interface RevealOptions {
   cap?: boolean;
   /** Parámetros de barrido en zig-zag (modo sweep): rectángulo xz y número de franjas. */
   sweep?: { xmin: number; xmax: number; zmin: number; zmax: number; strips: number; dir?: 1 | -1 };
+  /** Modo sweep: ventana (s de simulación, dentro de in0..in1) en que el barrido queda detenido. */
+  pause?: [number, number];
   /** Si se define, la ventana de retiro (out0..out1) pinta el elemento de este color en vez de retirarlo. */
   paint?: THREE.ColorRepresentation;
 }
@@ -56,6 +59,7 @@ function makeUniforms(o: RevealOptions) {
     uSweep: { value: new THREE.Vector4(s.xmin, s.xmax, s.zmin, s.zmax) },
     uStrips: { value: s.strips },
     uSweepDir: { value: s.dir ?? 1 },
+    uPause: { value: new THREE.Vector2(...(o.pause ?? [NEVER, NEVER])) },
     uPaint: { value: new THREE.Color(o.paint ?? '#dcdad4') },
   };
 }
@@ -69,6 +73,7 @@ uniform vec3 uWet;
 uniform vec4 uSweep;
 uniform float uStrips;
 uniform float uSweepDir;
+uniform vec2 uPause;
 uniform vec3 uPaint;
 varying vec3 vRvWorld;
 varying vec4 vRvT;
@@ -85,6 +90,10 @@ float rvSweepFrac(vec2 xz) {
   float along = mod(strip, 2.0) < 0.5 ? fz : 1.0 - fz;
   return (strip + along) / uStrips;
 }
+
+// Tiempo "de vaciado": el reloj sin la pausa del barrido (igual a uT si no hay pausa)
+float rvPauseLen() { return uPause.y - uPause.x; }
+float rvPoured(float t) { return t - clamp(t - uPause.x, 0.0, rvPauseLen()); }
 `;
 
 const VERTEX_DECL = /* glsl */ `
@@ -121,7 +130,7 @@ const FRAGMENT_DISCARD = /* glsl */ `
     if (vRvWorld.y > vRvBox.x + vRvBox.y * rvP + 0.001) discard;
   #endif
   #ifdef REVEAL_SWEEP
-    float rvP = (uT - vRvT.x) / max(vRvT.y - vRvT.x, 1e-4);
+    float rvP = (rvPoured(uT) - vRvT.x) / max(vRvT.y - vRvT.x - rvPauseLen(), 1e-4);
     if (rvP < rvSweepFrac(vRvWorld.xz)) discard;
   #endif
 `;
@@ -130,7 +139,9 @@ const FRAGMENT_CONCRETE = /* glsl */ `
   #ifdef REVEAL_CONCRETE
     float rvReveal;
     #ifdef REVEAL_SWEEP
-      rvReveal = mix(vRvT.x, vRvT.y, rvSweepFrac(vRvWorld.xz));
+      // instante en que el barrido pasó por este punto (después de la pausa, si ya la había pasado)
+      rvReveal = mix(vRvT.x, vRvT.y - rvPauseLen(), rvSweepFrac(vRvWorld.xz));
+      if (rvReveal > uPause.x) rvReveal += rvPauseLen();
     #else
       rvReveal = mix(vRvT.x, vRvT.y, clamp((vRvWorld.y - vRvBox.x) / max(vRvBox.y, 1e-3), 0.0, 1.0));
     #endif

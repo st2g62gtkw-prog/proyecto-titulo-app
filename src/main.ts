@@ -51,19 +51,20 @@ const ISO_TARGET = new THREE.Vector3(-1.3, 5, 8.3);
  */
 const VIEWS = {
   iso: { target: ISO_TARGET, az: 55, el: 33, zoom: 1.0 },
-  back: { target: new THREE.Vector3(1, 2, 0), az: 55 + 180, el: 33, zoom: 0.92 },
+  back: { target: new THREE.Vector3(-14, 2, -6), az: 55 + 180, el: 33, zoom: 1.1 },
   top: { target: new THREE.Vector3(-7, 0, -2), az: 90, el: 89.5, zoom: 0.8 },
 };
 const MIN_POLAR = THREE.MathUtils.degToRad(12);
 
 /**
- * Planta (en pantalla +x a la derecha y −z hacia arriba): encuadra el recorrido completo de los
- * camiones, de la calle del portón a la rotonda, y de la faena al pie del talud, en el espacio
- * libre entre las columnas del tablero. Devuelve el objetivo y el zoom de la cámara.
+ * Planta (en pantalla +x a la derecha y −z hacia arriba): encuadra el recorrido de los camiones
+ * (la calle del portón, el camino posterior y la bomba), el edificio y los acopios, y de la faena
+ * al pie del talud, en el espacio libre entre las columnas del tablero. Devuelve el objetivo y el
+ * zoom de la cámara.
  */
 function topFit() {
-  const R = SITE.road;
-  const x0 = SITE.gate.x - 3, x1 = R.turnX + R.turnR + 3;
+  const A = SITE.acopioFierro;
+  const x0 = SITE.street.x - SITE.street.width / 2 - 2, x1 = A.x + A.w / 2 + 2;
   const z0 = SITE.talud.zStart - 1, z1 = SITE.faena.z + SITE.faena.d / 2 + 2;
   const c = stage.renderer.domElement.getBoundingClientRect();
   // espacio libre: entre las columnas (escritorio) y bajo la barra superior, sobre la línea de tiempo
@@ -203,7 +204,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
           ['Uso', 'Hormigonado de muros y zapatas'],
           ['Llenado', 'En el camino posterior, bajo la canaleta del mixer'],
         ],
-        note: 'Entre hormigonados queda en el suelo junto al carril; la grúa lo engancha ahí, lo pasa por sobre el edificio hasta el muro y lo devuelve al terminar.',
+        note: 'Entre hormigonados queda en el suelo al costado del camino posterior, junto a donde se detiene el mixer; la grúa lo engancha ahí, lo entra a ras de suelo bajo la canaleta, lo pasa por sobre el edificio hasta el muro y lo devuelve al terminar.',
       };
     case 'mixer':
       return {
@@ -216,7 +217,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
           ['Despachados a la fecha', fmt(prog.mixers)],
           ['Hormigón colocado', `${fmt(prog.hormigon)} m³`],
         ],
-        note: 'Entra por el portón norponiente y recorre el camino del costado posterior. Para muros se detiene en el carril y descarga al capacho que toma la grúa; para losas retrocede por la bahía hasta la tolva de la bomba. Da la vuelta en la rotonda del otro extremo del camino y sale por el mismo portón.',
+        note: 'Llega por la calle, pasa el portón norponiente y entra en retroceso (la canaleta va atrás) por el único camino del costado posterior. Para muros se detiene antes de la bomba y llena el capacho que toma la grúa; para losas sigue hasta la tolva de la bomba, al final del camino. Descarga y sale de frente por el mismo camino y el mismo portón; si el camino está ocupado, espera en la calle junto al portón.',
       };
     case 'pump': {
       const ps = w.log.pumpState(T);
@@ -225,13 +226,13 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
         subtitle: EQUIPMENT.bomba.tipo,
         badge: 'BOMBA',
         rows: [
-          ['Estado', ps.pumping ? `Bombeando · ${fmt(ps.progress * 100)} %` : 'Detenida'],
+          ['Estado', ps.pumping ? `Bombeando · ${fmt(ps.progress * 100)} %` : ps.pour ? `Detenida: cambio de mixer · ${fmt(ps.progress * 100)} %` : 'Detenida'],
           ['Ubicación', 'Costado posterior, frente opuesto a la grúa'],
           ['Tubería', 'Ø125 mm por el suelo y el shaft del ascensor'],
           ['Rendimiento', EQUIPMENT.bomba.caudal],
           ['Losas hormigonadas', `${prog.losas} de 7`],
         ],
-        note: 'Queda fija en su caseta toda la obra, junto al camino de mixers. El mixer retrocede hasta la tolva y descarga con su canaleta; la tubería entra por la puerta posterior del hall, sube por el shaft del ascensor hasta la losa y la cuadrilla reparte el hormigón con la manguera.',
+        note: 'Queda fija en su caseta toda la obra, al final del camino de mixers. Cada mixer llega en retroceso hasta la tolva y descarga con su canaleta; mientras uno sale y entra el siguiente, la bomba se detiene. La tubería entra por la puerta posterior del hall, sube por el shaft del ascensor hasta la losa y la cuadrilla reparte el hormigón con la manguera.',
       };
     }
     case 'pipe':

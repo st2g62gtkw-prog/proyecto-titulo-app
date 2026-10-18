@@ -33,6 +33,9 @@ export interface WorldDeps {
 
 const MIXER_POOL = 5;
 
+/** Punto plano {x, y, z} de un vector (para el plan de la grúa, que no depende de three). */
+const toP3 = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
+
 export interface WorldState {
   /** Punto de trabajo actual (para seguir la obra con la cámara). */
   focus: THREE.Vector3;
@@ -60,9 +63,10 @@ export class World {
   labels: { obj: CSS2DObject; el: HTMLElement; key: string }[] = [];
   state: WorldState = { focus: new THREE.Vector3(0, 8, 0), craneTask: '', pumpBusy: false, mixersOnSite: 0 };
   private capachoRest = new THREE.Vector3();
+  private capachoFill = new THREE.Vector3();
+  private pumpHopper = new THREE.Vector3();
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
-  private mixerChuteLocal = new THREE.Vector3();
   private labelsOn = true;
   private highlight: THREE.LineSegments;
 
@@ -110,27 +114,27 @@ export class World {
       m.pickables.forEach((p) => (p.userData.pick = { ...(p.userData.pick ?? { type: 'mixer' }), slot: i }));
       this.pickables.push(...m.pickables);
     }
-    // canaleta del mixer estacionado para el capacho (en coordenadas de mundo)
+    // punta de la canaleta del mixer detenido para el capacho (llega en retroceso: la cabina mira al
+    // portón, hacia −x, y la canaleta queda hacia la bomba)
+    const cap = SITE.mixerCapacho, stopHeading = Math.PI;
+    const toCab = new THREE.Vector3(Math.cos(stopHeading), 0, Math.sin(stopHeading));
     {
       const m = this.mixers[0];
       m.setChute(1);
-      m.group.position.set(0, 0, 0);
-      m.group.rotation.set(0, 0, 0);
+      m.group.position.set(cap.x, SITE.groundY, cap.z);
+      m.group.rotation.set(0, -stopHeading, 0);
       m.group.updateMatrixWorld(true);
-      m.chuteTip.getWorldPosition(this.mixerChuteLocal);
+      m.chuteTip.getWorldPosition(this.capachoFill);
       m.setChute(0);
     }
     // el capacho se llena apoyado en el suelo, con la punta de la canaleta sobre su boca (un poco
-    // hacia el camión); entra y sale a ras de suelo desde 1,7 m frente a la punta (sobre el eje del
-    // mixer, fuera del alcance de la canaleta) y en reposo queda a un costado del carril (lado del
-    // edificio), un poco más atrás que el punto de llenado para no rozar la parte trasera del mixer
-    const capachoFill = {
-      x: SITE.mixerCapacho.x + this.mixerChuteLocal.x + 0.25,
-      y: SITE.groundY,
-      z: SITE.mixerCapacho.z + this.mixerChuteLocal.z,
-    };
-    const capachoSlide = { x: capachoFill.x - 1.7, y: SITE.groundY, z: capachoFill.z };
-    this.capachoRest.set(capachoFill.x - 1.0, SITE.groundY, SITE.road.inZ + 3.0);
+    // hacia el camión); entra y sale a ras de suelo desde 1,7 m más allá de la punta (sobre el eje
+    // del mixer, fuera del alcance de la canaleta) y en reposo queda al lado de ese punto, a un
+    // costado del camino (lado del talud): la grúa lo lleva de uno a otro sin pasar sobre el camión
+    this.capachoFill.addScaledVector(toCab, 0.25).setY(SITE.groundY);
+    const capachoFill = toP3(this.capachoFill);
+    const capachoSlide = toP3(this.capachoFill.clone().addScaledVector(toCab, -1.7));
+    this.capachoRest.set(capachoSlide.x, SITE.groundY, SITE.road.z - 3.4);
     // asa perpendicular al eje del mixer (el gancho no gira con la pluma): así la canaleta pasa bajo
     // el travesaño del asa y no a través de sus brazos
     this.capacho.group.rotation.y = Math.PI / 2;
@@ -143,6 +147,7 @@ export class World {
     this.pump.group.updateMatrixWorld(true);
     this.pickables.push(...this.pump.pickables);
     const outlet = this.pump.outlet.getWorldPosition(new THREE.Vector3());
+    this.pump.hopper.getWorldPosition(this.pumpHopper);
     // la tubería sale de la caseta por su muro trasero (−z local de la bomba)
     const outletDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.pump.group.quaternion);
     this.pipeline = createPipeline(data, this.sched, outlet, outletDir, this.structure.clipping);
@@ -158,20 +163,19 @@ export class World {
     // plan de grúa y logística
     const lv = data.levels;
     const anchors = this.site.anchors;
-    const P = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
     this.plan = new CranePlan({
       base: { x: C.x, z: C.z, y: SITE.groundY },
       jibY: SITE.groundY + this.crane.jibHeight,
       jibLength: C.jibLength,
       anchors: {
-        acopioMoldajeMuro: P(anchors.acopioMoldajeMuro),
-        acopioMoldajeLosa: P(anchors.acopioMoldajeLosa),
-        acopioFierro: P(anchors.acopioFierro),
-        acopioPuntales: P(anchors.acopioPuntales),
+        acopioMoldajeMuro: toP3(anchors.acopioMoldajeMuro),
+        acopioMoldajeLosa: toP3(anchors.acopioMoldajeLosa),
+        acopioFierro: toP3(anchors.acopioFierro),
+        acopioPuntales: toP3(anchors.acopioPuntales),
       },
       capachoFill,
       capachoSlide,
-      capachoRest: P(this.capachoRest),
+      capachoRest: toP3(this.capachoRest),
       hang,
       topAt: (t) => {
         const a = this.sched.at(t);
@@ -361,10 +365,11 @@ export class World {
     this.state.pumpBusy = ps.pumping;
     this.pump.setPumping(ps.pumping, clock);
     const sw = this.structure.sweeps[ps.slab];
-    const target = ps.pumping && sw ? this.sweepPoint(sw, ps.progress) : null;
-    const tip = this.pipeline.update(ps.slab, ps.pumping, target);
+    // durante el cambio de mixer la tubería y la manguera siguen armadas, pero no sale hormigón
+    const target = ps.pour && sw ? this.sweepPoint(sw, ps.progress) : null;
+    const tip = this.pipeline.update(ps.slab, ps.pour, target);
     if (tip && target && sw) {
-      sHose.set(tip, new THREE.Vector3(target.x, sw.y, target.z), 1, clock);
+      sHose.set(tip, new THREE.Vector3(target.x, sw.y, target.z), ps.pumping ? 1 : 0, clock);
       this.state.focus.set(target.x, sw.y, target.z);
     } else sHose.set(this.tmp, this.tmp, 0, clock);
     if (pumpHopperFeed && ps.pumping) {
@@ -381,20 +386,20 @@ export class World {
       { x: SITE.tallerFierro.x, z: SITE.tallerFierro.z, r: 1.6, action: 'work' },
       { x: SITE.tallerFierro.x - 2, z: SITE.tallerFierro.z + 2, r: 1.2, action: 'work' },
       { x: a.acopioMoldajeMuro.x + 6.5, z: a.acopioMoldajeMuro.z - 1.5, r: 0.8, action: 'work' },
-      // rigger del capacho: al borde del carril (lado del edificio), junto al punto de llenado
-      { x: this.capachoRest.x + 2.5, z: SITE.road.inZ + 2.6, r: 0.3, spread: 0.5, action: act.kind === 'muroHormigon' || act.kind === 'fundaciones' ? 'work' : 'idle' },
+      // rigger del capacho: al borde del camino (lado del talud), junto al punto de llenado
+      { x: this.capachoFill.x, z: SITE.road.z - 2.75, r: 0.3, spread: 0.5, action: act.kind === 'muroHormigon' || act.kind === 'fundaciones' ? 'work' : 'idle' },
       { x: a.acopioMoldajeLosa.x - 5.5, z: a.acopioMoldajeLosa.z + 1.5, r: 0.8, action: 'work' },
       { x: SITE.faena.x + 7, z: SITE.faena.z + 5, r: 1.5, action: 'idle' },
       { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },
     ];
-    // concreteros en la bomba: el operador junto a la caseta (lado del edificio) y uno en la tolva.
-    // Los puestos están siempre en la lista y en el mismo lugar (en espera fuera del bombeo) para que
-    // el largo no cambie y nadie salte de puesto al empezar o terminar un hormigonado
+    // concreteros en la bomba: el operador junto a la caseta (lado del edificio) y uno en la tolva,
+    // al costado del camión. Los puestos están siempre en la lista y en el mismo lugar (en espera
+    // fuera del bombeo) para que el largo no cambie y nadie salte de puesto al empezar o terminar
     {
-      const P = SITE.pump, mode = ps.pumping ? 'work' : 'idle';
+      const P = SITE.pump, H = this.pumpHopper, mode = ps.pour ? 'work' : 'idle';
       ground.push(
-        { x: P.x - 0.4, z: P.z + 2.6, r: 0.15, spread: 0.35, action: mode },
-        { x: P.x + 3.0, z: P.z + 2.25, r: 0.15, spread: 0.3, action: mode },
+        { x: P.x + 0.4, z: P.z + 2.6, r: 0.15, spread: 0.35, action: mode },
+        { x: H.x - 0.4, z: P.z + 2.25, r: 0.15, spread: 0.3, action: mode },
       );
     }
     // trabajos en paralelo en el 1er piso (redes bajo radier, hormigonado del radier): cuatro puestos
@@ -408,7 +413,7 @@ export class World {
       }
       const b0 = this.structure.sweeps[0];
       const k = (T - par.t0) / (par.t1 - par.t0);
-      const at = par.kind === 'radier' && ps.pumping && ps.slab === 0 && target
+      const at = par.kind === 'radier' && ps.pour && ps.slab === 0 && target
         ? { x: target.x, z: target.z }
         : { x: b0.xmin + k * (b0.xmax - b0.xmin), z: (b0.zmin + b0.zmax) / 2 + 0.6 };
       ground.push({ x: at.x + (i - 1.5) * 1.2, z: at.z + (i % 2 ? 1 : -1), r: 0.5, action: 'work' });
@@ -416,7 +421,7 @@ export class World {
     this.crews.update(T, act, ground);
     this.crews.members.forEach((m, i) => this.crowd.set(i, { ...m, t: clock + i * 0.37 }));
     this.crowd.commit();
-    if (!ps.pumping) {
+    if (!ps.pour) {
       const f = this.crews.focus(act, T);
       this.state.focus.set(f.x, f.y + 1, f.z);
     }

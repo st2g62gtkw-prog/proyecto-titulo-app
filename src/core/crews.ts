@@ -4,7 +4,7 @@
  */
 import type { BuildingData } from '../data/building';
 import type { Activity, Schedule } from './schedule';
-import { haWalls } from './schedule';
+import { haWalls, pourFrac } from './schedule';
 import { offsetPolygon, pointInPolygon, polyBounds, type V2 } from '../scene/geom';
 import { SITE } from '../config';
 
@@ -100,9 +100,11 @@ export class Crews {
   focus(a: Activity, t: number): { x: number; z: number; L: number; y: number } {
     const lv = this.s.data.levels;
     const trip = a.trips.find((tr) => t >= tr.t0 && t < tr.t1) ?? a.trips[a.trips.length - 1];
-    const slabFront = (S: number, w: [number, number]) => {
+    // frente de la losa: avanza con la ventana dada o, en el hormigonado, con lo ya vaciado (se
+    // detiene en el cambio de mixer, igual que el barrido de la losa)
+    const slabFront = (S: number, w: [number, number] | 'pour') => {
       const b = polyBounds(lv[S].slab.outer);
-      const k = Math.min(Math.max((t - w[0]) / (w[1] - w[0]), 0), 1);
+      const k = w === 'pour' ? pourFrac(this.s.sched.slab[S], t) : Math.min(Math.max((t - w[0]) / (w[1] - w[0]), 0), 1);
       return b.x0 + k * (b.x1 - b.x0);
     };
     switch (a.kind) {
@@ -113,11 +115,11 @@ export class Crews {
       case 'losaFierro':
       case 'losaHormigon': {
         const S = a.level;
-        const w = a.kind === 'losaFierro' ? this.s.sched.slab[S].rebar : this.s.sched.slab[S].pour;
+        const w = a.kind === 'losaFierro' ? this.s.sched.slab[S].rebar : 'pour';
         return { x: slabFront(S, w), z: polyBounds(lv[S].slab.outer).cz, L: S, y: lv[S].slab.y0 };
       }
       case 'radier':
-        return { x: slabFront(0, this.s.sched.slab[0].pour), z: 0, L: 0, y: -0.12 };
+        return { x: slabFront(0, 'pour'), z: 0, L: 0, y: -0.12 };
       case 'fundaciones':
         return { x: trip?.x ?? 0, z: trip?.z ?? 0, L: 0, y: -0.2 };
       default:

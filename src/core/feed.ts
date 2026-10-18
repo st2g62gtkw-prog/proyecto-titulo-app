@@ -32,13 +32,15 @@ export function buildFeed(sched: Schedule, log: Logistics): FeedEvent[] {
   const rad = sched.slab[0].pour;
   ev.push({ t: rad[1], text: 'Radier del 1er piso hormigonado · 665,7 m²', kind: 'ok' });
   for (const m of log.mixers) {
-    ev.push({ t: m.arrive[0] + 1, text: `Mixer N° ${m.id} ingresa por el portón norponiente · 7 m³ G25`, kind: 'mixer' });
+    if (m.waitFrom !== null) ev.push({ t: m.waitFrom, text: `Mixer N° ${m.id} espera en la calle junto al portón a que salga el anterior`, kind: 'mixer' });
+    ev.push({ t: m.gateIn + 0.3, text: `Mixer N° ${m.id} entra en retroceso por el portón norponiente · 7 m³ G25`, kind: 'mixer' });
     ev.push({ t: m.discharge[0], text: m.spot === 'bomba' ? `Mixer N° ${m.id} descarga en tolva de la bomba` : `Mixer N° ${m.id} carga el capacho`, kind: 'mixer' });
   }
   for (const p of log.pours) {
     const name = p.slab === 0 ? 'radier del 1er piso' : sched.levelNames[p.slab] === 'Techumbre' ? 'losa de techumbre' : `losa de piso ${sched.levelNames[p.slab]}`;
     ev.push({ t: p.pour[0] - 0.3, text: `Bomba estacionaria: se arma la tubería hasta la ${p.slab === 0 ? 'zona del radier' : 'losa por el shaft del ascensor'}`, kind: 'pump' });
     ev.push({ t: p.pour[0], text: `Bomba estacionaria inicia el hormigonado ${p.slab === 0 ? 'del' : 'de la'} ${name}`, kind: 'pump' });
+    if (p.pumpStop[1] > p.pumpStop[0]) ev.push({ t: p.pumpStop[0] + 0.05, text: 'Bomba detenida: cambio de mixer (el camino es uno solo)', kind: 'pump' });
   }
   for (const a of sched.parallel) ev.push({ t: a.t0, text: `En paralelo: ${a.title.toLowerCase()}`, kind: 'info' });
   return ev.sort((a, b) => a.t - b.t);

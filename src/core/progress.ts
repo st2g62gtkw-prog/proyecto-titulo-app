@@ -3,7 +3,7 @@
  * desde el cronograma y las cantidades reales de la cubicación.
  */
 import { EQUIPMENT, RATIOS, ROOF_WALL_M3, SLAB_M3, TOTALS, WALL_M3 } from '../data/project';
-import type { Activity, ActivityKind, Schedule } from './schedule';
+import { pourFrac, type Activity, type ActivityKind, type Schedule } from './schedule';
 
 const k01 = (t: number, a: number, b: number) => Math.min(Math.max((t - a) / Math.max(b - a, 1e-6), 0), 1);
 
@@ -66,8 +66,7 @@ export function computeProgress(sched: Schedule, t: number): Progress {
         acero += slabM3 * RATIOS.aceroLosaPorM3 * k;
         break;
       case 'losaHormigon': {
-        const p = sched.slab[a.level].pour;
-        const kp = k01(t, p[0], p[1]);
+        const kp = pourFrac(sched.slab[a.level], t);
         hormigon += slabM3 * kp;
         if (kp >= 1) losas++;
         break;
@@ -79,8 +78,7 @@ export function computeProgress(sched: Schedule, t: number): Progress {
     }
   }
   // mixers: radier (≈66,6 m³) + todo el hormigón colocado, en camiones de 7 m³
-  const rad = sched.slab[0].pour;
-  const radM3 = TOTALS.radier * 0.1 * k01(t, rad[0], rad[1]);
+  const radM3 = TOTALS.radier * 0.1 * pourFrac(sched.slab[0], t);
   const mixers = Math.floor((hormigon + radM3) / EQUIPMENT.mixerM3 + 1e-6);
   const capachos = Math.floor(hormigonMuros / EQUIPMENT.capachoM3 + 1e-6);
 
