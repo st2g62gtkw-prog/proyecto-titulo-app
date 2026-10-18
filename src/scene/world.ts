@@ -121,14 +121,19 @@ export class World {
       m.setChute(0);
     }
     // el capacho se llena apoyado en el suelo, con la punta de la canaleta sobre su boca (un poco
-    // hacia el camión); en reposo queda a un costado del carril (lado del edificio), un poco más
-    // atrás que el punto de llenado para que al moverlo no roce la parte trasera del mixer
+    // hacia el camión); entra y sale a ras de suelo desde 1,7 m frente a la punta (sobre el eje del
+    // mixer, fuera del alcance de la canaleta) y en reposo queda a un costado del carril (lado del
+    // edificio), un poco más atrás que el punto de llenado para no rozar la parte trasera del mixer
     const capachoFill = {
       x: SITE.mixerCapacho.x + this.mixerChuteLocal.x + 0.25,
       y: SITE.groundY,
       z: SITE.mixerCapacho.z + this.mixerChuteLocal.z,
     };
+    const capachoSlide = { x: capachoFill.x - 1.7, y: SITE.groundY, z: capachoFill.z };
     this.capachoRest.set(capachoFill.x - 1.0, SITE.groundY, SITE.road.inZ + 3.0);
+    // asa perpendicular al eje del mixer (el gancho no gira con la pluma): así la canaleta pasa bajo
+    // el travesaño del asa y no a través de sus brazos
+    this.capacho.group.rotation.y = Math.PI / 2;
 
     // bomba estacionaria en su caseta y la tubería que sube por el shaft del ascensor
     this.pump = createStationaryPump();
@@ -165,6 +170,7 @@ export class World {
         acopioPuntales: P(anchors.acopioPuntales),
       },
       capachoFill,
+      capachoSlide,
       capachoRest: P(this.capachoRest),
       hang,
       topAt: (t) => {
@@ -381,20 +387,31 @@ export class World {
       { x: SITE.faena.x + 7, z: SITE.faena.z + 5, r: 1.5, action: 'idle' },
       { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },
     ];
-    // concreteros en la bomba: el operador junto a la caseta (lado del edificio) y uno en la tolva
-    if (ps.pumping) {
-      const P = SITE.pump;
-      ground.push({ x: P.x - 0.4, z: P.z + 2.6, r: 0.15, spread: 0.35, action: 'work' }, { x: P.x + 3.0, z: P.z + 2.25, r: 0.15, spread: 0.3, action: 'work' });
+    // concreteros en la bomba: el operador junto a la caseta (lado del edificio) y uno en la tolva.
+    // Los puestos están siempre en la lista (en espera fuera del bombeo) para que el largo no cambie
+    // y nadie más salte de puesto al empezar o terminar un hormigonado
+    {
+      const P = SITE.pump, on = ps.pumping;
+      ground.push(
+        { x: P.x - 0.4, z: P.z + 2.6, r: 0.15, spread: 0.35, action: on ? 'work' : 'idle' },
+        on ? { x: P.x + 3.0, z: P.z + 2.25, r: 0.15, spread: 0.3, action: 'work' } : { x: P.x + 0.8, z: P.z + 2.7, r: 0.2, spread: 0.4, action: 'idle' },
+      );
     }
-    // trabajos en paralelo en el 1er piso: redes bajo radier y hormigonado del radier
-    for (const par of this.sched.parallel) {
-      if (T < par.t0 || T > par.t1) continue;
+    // trabajos en paralelo en el 1er piso (redes bajo radier, hormigonado del radier): cuatro puestos
+    // fijos; sin trabajo en paralelo esas personas apoyan en el taller de fierro y en la faena
+    const par = this.sched.parallel.find((x) => T >= x.t0 && T <= x.t1);
+    const spare = [ground[1], ground[2], ground[6], ground[7]];
+    for (let i = 0; i < 4; i++) {
+      if (!par) {
+        ground.push(spare[i]);
+        continue;
+      }
       const b0 = this.structure.sweeps[0];
       const k = (T - par.t0) / (par.t1 - par.t0);
       const at = par.kind === 'radier' && ps.pumping && ps.slab === 0 && target
         ? { x: target.x, z: target.z }
         : { x: b0.xmin + k * (b0.xmax - b0.xmin), z: (b0.zmin + b0.zmax) / 2 + 0.6 };
-      for (let i = 0; i < 4; i++) ground.push({ x: at.x + (i - 1.5) * 1.2, z: at.z + (i % 2 ? 1 : -1), r: 0.5, action: 'work' });
+      ground.push({ x: at.x + (i - 1.5) * 1.2, z: at.z + (i % 2 ? 1 : -1), r: 0.5, action: 'work' });
     }
     this.crews.update(T, act, ground);
     this.crews.members.forEach((m, i) => this.crowd.set(i, { ...m, t: clock + i * 0.37 }));

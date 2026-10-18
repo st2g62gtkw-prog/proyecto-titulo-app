@@ -6,9 +6,12 @@
  * Circuito (costado posterior, ver SITE.road): portón norponiente → carril de entrada (+x) →
  * punto de descarga → rotonda del extremo +x → carril de salida (−x) → portón. Para la bomba el
  * mixer pasa frente a la caseta, se detiene y retrocede por la bahía hasta la tolva; al terminar
- * sale hacia adelante por la bahía, así el siguiente (que espera en el carril) retrocede enseguida.
+ * sale hacia adelante por la bahía y el siguiente (que espera en el carril) retrocede apenas
+ * el anterior despeja la bahía. Para el capacho el mixer se detiene en el carril de entrada, con la
+ * canaleta desplegada mientras el capacho entra y sale a ras de suelo (ver CranePlan).
  */
 import { SITE } from '../config';
+import { capachoSwapTrip, capachoWindows } from './cranePlan';
 import { Route, easeTravel, type Pose } from './paths';
 import type { Schedule } from './schedule';
 
@@ -31,6 +34,10 @@ export interface MixerVisit {
   arrive: [number, number];
   discharge: [number, number];
   leave: [number, number];
+  /** Canaleta: empieza a desplegarse en chute[0] y termina de replegarse en chute[1] (con el camión detenido). */
+  chute: [number, number];
+  /** Duración del despliegue y del repliegue de la canaleta (s). */
+  chuteDur: [number, number];
 }
 
 export interface MixerState {
@@ -65,6 +72,21 @@ const PMP = SITE.mixerPump, CAP = SITE.mixerCapacho;
 const REV_X = PMP.x + 16.5;
 /** Centro del mixer que espera en cola detrás del que carga el capacho. */
 const CAP_QUEUE_X = CAP.x - 14;
+/**
+ * Largo (en x) de la curva en S que baja de la rotonda al carril de salida: larga para que el camión
+ * gire poco (a lo más ≈ 16°, a media curva) y llegue casi recto al carril de salida, sin que su
+ * esquina delantera invada el carril de entrada cuando se cruza con el mixer que entra.
+ */
+const EXIT_S_LEN = 22;
+/** Canaleta del mixer en el capacho: se despliega y repliega rápido para alcanzar el cambio de camión. */
+const CAP_CHUTE: [number, number] = [0.25, 0.22];
+const PUMP_CHUTE: [number, number] = [0.45, 0.3];
+/**
+ * Bomba: tiempo entre el fin de una descarga y el inicio de la siguiente, duración del retroceso
+ * hasta la tolva y de la salida. El siguiente camión empieza a retroceder ≈ 1 s después de que
+ * arranca el anterior, cuando este ya va saliendo de la bahía (sus costados quedan a ≥ 0,9 m).
+ */
+const PUMP_SWAP = 2.15, PUMP_REV = 1.0, PUMP_EXIT = 5.6;
 
 /** Curva en S suave (planta) de (x0, z0) a (x1, z1), con ambos extremos paralelos al eje x. */
 function sCurve(x0: number, z0: number, x1: number, z1: number, n = 10): P[] {
@@ -84,7 +106,12 @@ function turnaround(): P[] {
     const a = (d * Math.PI) / 180;
     pts.push([RD.turnX + RD.turnR * Math.sin(a), RD.turnZ + RD.turnR * Math.cos(a)]);
   }
-  return [...pts, ...sCurve(RD.turnX - 1.5, RD.turnZ - RD.turnR, RD.turnX - 13, OUT).slice(1)];
+  return [...pts, ...exitCurve().slice(1)];
+}
+
+/** Curva en S de la parte baja de la rotonda al carril de salida (también la pinta el sitio). */
+export function exitCurve(): P[] {
+  return sCurve(RD.turnX - 1.5, RD.turnZ - RD.turnR, RD.turnX - EXIT_S_LEN, OUT, 14);
 }
 
 /** Entrada desde la calle por el portón hasta un punto del carril de entrada. */
@@ -118,25 +145,34 @@ export class Logistics {
   pours: PumpPour[] = [];
 
   constructor(sched: Schedule) {
-    const visit = (spot: MixerVisit['spot'], legs: Leg[], discharge: [number, number], out: Leg) => {
-      this.mixers.push({ id: 0, spot, legs, out, arrive: [legs[0].t[0], legs[legs.length - 1].t[1]], discharge, leave: out.t });
+    const visit = (spot: MixerVisit['spot'], legs: Leg[], discharge: [number, number], chute: [number, number], out: Leg) => {
+      this.mixers.push({
+        id: 0, spot, legs, out, arrive: [legs[0].t[0], legs[legs.length - 1].t[1]], discharge, leave: out.t,
+        chute, chuteDur: spot === 'capacho' ? CAP_CHUTE : PUMP_CHUTE,
+      });
     };
+    const capIn = CAP_CHUTE[1];
     for (const a of sched.activities) {
       if (a.kind === 'muroHormigon' || a.kind === 'fundaciones') {
         const tr = a.trips;
-        const fill = (k: number) => tr[k].t0 + (tr[k].t1 - tr[k].t0) * 0.22;
-        const fillEnd = (k: number) => tr[k].t0 + (tr[k].t1 - tr[k].t0) * 0.32;
-        const half = Math.ceil(tr.length / 2);
+        const half = capachoSwapTrip(tr.length);
+        const W = tr.map((x, k) => capachoWindows(x, k === half));
         const t1 = a.t0 + 1.9;
-        // mixer 1: llega justo antes del primer llenado
-        const m1Leave = fillEnd(half - 1) + 0.1;
-        visit('capacho', [leg(entry(CAP.x), t1 - 5, t1)], [fill(0) - 0.4, m1Leave], leg(exitFromCapacho(), m1Leave + 0.15, m1Leave + 5.6));
-        // mixer 2: espera en cola detrás y avanza cuando sale el primero
-        const end = fillEnd(tr.length - 1) + 0.1;
+        // mixer 1: llega antes del primer llenado y despliega la canaleta apenas se detiene; la
+        // repliega cuando el capacho ya salió de bajo ella y se va por el carril de entrada
+        const r1 = W[half - 1].slideOut[1] + 0.01;
+        const out1 = r1 + capIn;
+        visit('capacho', [leg(entry(CAP.x), t1 - 5, t1)], [W[0].fill[0] - 0.05, W[half - 1].fill[1]], [t1 + 0.05, out1],
+          leg(exitFromCapacho(), out1, out1 + 4.6));
+        // mixer 2: espera en cola detrás y avanza apenas arranca el primero (sin alcanzarlo); llega,
+        // despliega la canaleta y el capacho entra bajo ella para el primer llenado que le toca
+        const at2 = out1 + 1.0;
+        const r2 = W[tr.length - 1].slideOut[1] + 0.01;
+        const out2 = r2 + capIn;
         visit('capacho', [
-          leg(entry(CAP_QUEUE_X), m1Leave - 5, m1Leave - 0.3),
-          leg(new Route().add([[CAP_QUEUE_X, IN], [CAP.x, IN]]), m1Leave + 0.55, fill(half) - 0.25),
-        ], [fill(half) - 0.2, end], leg(exitFromCapacho(), end + 0.2, end + 5.8));
+          leg(entry(CAP_QUEUE_X), out1 - 5, out1 - 0.3),
+          leg(new Route().add([[CAP_QUEUE_X, IN], [CAP.x, IN]]), out1 + 0.2, at2),
+        ], [W[half].fill[0] - 0.05, W[tr.length - 1].fill[1]], [at2 + 0.02, out2], leg(exitFromCapacho(), out2, out2 + 5.6));
       }
     }
     // losas y radier: los mixers alimentan la tolva de la bomba estacionaria
@@ -146,16 +182,17 @@ export class Logistics {
       const pour = sched.slab[S].pour;
       this.pours.push({ slab: S, pour });
       // tres mixers por hormigonado; el siguiente espera en el carril mientras descarga el anterior
-      // y retrocede apenas este despeja la bahía (cambio de camión ≈ 2,2 s)
-      const n = 3, swap = 2.15;
+      // y retrocede cuando este ya salió de la bahía (cambio de camión = PUMP_SWAP)
+      const n = 3;
       const d0 = pour[0] - 0.1;
-      const each = (pour[1] - d0 - swap * (n - 1)) / n;
+      const each = (pour[1] - d0 - PUMP_SWAP * (n - 1)) / n;
       for (let k = 0; k < n; k++) {
-        const s0 = d0 + k * (each + swap), s1 = s0 + each;
+        const s0 = d0 + k * (each + PUMP_SWAP), s1 = s0 + each;
         const legs = k === 0
           ? [leg(entry(REV_X), s0 - 6.3, s0 - 1.55), leg(reverseToPump(), s0 - 1.4, s0 - 0.15, true)]
-          : [leg(entry(REV_X), s0 - swap - 4.9, s0 - swap - 0.3), leg(reverseToPump(), s0 - 1.25, s0 - 0.1, true)];
-        visit('bomba', legs, [s0, s1 - 0.05], leg(exitFromPump(), s1, s1 + 5.6));
+          : [leg(entry(REV_X), s0 - PUMP_SWAP - 4.9, s0 - PUMP_SWAP - 0.3), leg(reverseToPump(), s0 - PUMP_REV - 0.1, s0 - 0.1, true)];
+        const arrived = legs[legs.length - 1].t[1];
+        visit('bomba', legs, [s0, s1 - 0.05], [Math.max(arrived, s0 - 0.6), s1], leg(exitFromPump(), s1, s1 + PUMP_EXIT));
       }
     }
     this.pours.sort((p, q) => p.pour[0] - q.pour[0]);
@@ -185,11 +222,8 @@ export class Logistics {
         break;
       }
       // canaleta desplegada solo con el camión detenido en el punto de descarga
-      let chute = 0;
-      if (t >= m.arrive[1] && t < m.leave[0]) {
-        const from = Math.max(m.arrive[1], m.discharge[0] - 0.6);
-        chute = Math.min(1, Math.max(0, (t - from) / 0.45), Math.max(0, (m.leave[0] - t) / 0.3));
-      }
+      const [c0, c1] = m.chute, [dOut, dIn] = m.chuteDur;
+      const chute = Math.min(1, Math.max(0, Math.min((t - c0) / dOut, (c1 - t) / dIn)));
       out.push({ id: m.id, pose, chute, discharging: t >= m.discharge[0] && t <= m.discharge[1], dist });
     }
     return out;

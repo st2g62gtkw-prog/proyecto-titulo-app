@@ -145,6 +145,8 @@ export class Crews {
   /**
    * `groundTargets`: puntos de trabajo en terreno; cada trabajador se ubica a r + (0..spread) m
    * del punto (spread = 1,6 m si no se indica; menor en lugares estrechos, como junto a la bomba).
+   * El trabajador j toma el puesto j % largo, así que la lista debe tener siempre el mismo largo
+   * (un puesto ocasional se deja en espera en vez de quitarlo) para que nadie salte de puesto.
    */
   update(t: number, a: Activity, groundTargets: { x: number; z: number; r?: number; spread?: number; action: Action }[]) {
     const seg = 3.2; // cada cuánto un trabajador cambia de puesto (s de simulación)

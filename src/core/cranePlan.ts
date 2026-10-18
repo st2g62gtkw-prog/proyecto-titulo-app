@@ -55,6 +55,12 @@ export interface CraneSetup {
    */
   capachoFill: P3;
   /**
+   * Punto (mundo) del suelo frente a la punta de la canaleta, sobre el eje del mixer: el capacho
+   * baja ahí y entra (y sale) arrastrado a ras de suelo hasta el punto de llenado, así nunca baja ni
+   * sube a través de la canaleta desplegada.
+   */
+  capachoSlide: P3;
+  /**
    * Punto (mundo) del suelo donde queda el capacho entre hormigonados: a un costado del carril, fuera
    * del paso de los mixers. La grúa lo engancha ahí antes del primer viaje y lo deja al terminar.
    */
@@ -69,6 +75,30 @@ export interface CraneSetup {
 }
 
 const TAU = Math.PI * 2;
+
+/** Fracción del viaje que dura el arrastre del capacho a ras de suelo, al entrar o salir de la canaleta. */
+const SLIDE = 0.025;
+
+/**
+ * Ventanas de un viaje de capacho (instantes absolutos): entra a ras de suelo bajo la canaleta, se
+ * llena y sale. En el viaje del cambio de mixer (`swap`) el llenado parte más tarde y dura menos,
+ * para que el segundo camión alcance a avanzar hasta el punto de descarga y desplegar su canaleta.
+ * La logística de los mixers usa las mismas ventanas.
+ */
+export function capachoWindows(tr: { t0: number; t1: number }, swap = false) {
+  const D = tr.t1 - tr.t0;
+  const T = (x: number) => tr.t0 + x * D;
+  const [f0, f1] = swap ? [0.28, 0.35] : [0.22, 0.32];
+  const w: Record<'slideIn' | 'fill' | 'slideOut', [number, number]> = {
+    slideIn: [T(f0 - SLIDE), T(f0)],
+    fill: [T(f0), T(f1)],
+    slideOut: [T(f1), T(f1 + SLIDE)],
+  };
+  return w;
+}
+
+/** Viaje de la serie en que el segundo mixer reemplaza al primero (cada uno llena la mitad de los capachos). */
+export const capachoSwapTrip = (nTrips: number) => Math.ceil(nTrips / 2);
 
 export class CranePlan {
   keys: Key[] = [];
@@ -134,40 +164,46 @@ export class CranePlan {
 
   /**
    * Viaje de capacho: llenado en el mixer y descarga sobre muros o zapatas. En el primero de la
-   * serie (`first`) el capacho ya cuelga sobre la canaleta (lo trae pickCapacho) y solo baja.
+   * serie (`first`) el capacho ya cuelga frente a la canaleta (lo trae pickCapacho) y solo baja.
    */
-  private capacho(t0: number, D: number, to: P3, task: string, first = false) {
+  private capacho(t0: number, D: number, to: P3, task: string, first: boolean, swap: boolean) {
     const s = this.s;
     const h = s.hang.capacho;
-    const fill = s.capachoFill;
+    const fill = s.capachoFill, slide = s.capachoSlide;
     const T = (x: number) => t0 + x * D;
+    const w = capachoWindows({ t0, t1: t0 + D }, swap);
     const safe = this.safeY(t0 + D, 'capacho', to, fill);
-    // el capacho baja hasta apoyar sus patas en el suelo, con la boca bajo la canaleta
+    // baja frente a la punta de la canaleta y entra a ras de suelo (2 cm) hasta apoyar sus patas con
+    // la boca bajo la punta; al terminar el llenado sale igual y recién ahí se iza
     const atMixer = { x: fill.x, y: fill.y + 0.01, z: fill.z };
+    const low = { x: slide.x, y: slide.y + 0.02, z: slide.z };
     const over = { x: to.x, y: to.y + 0.35, z: to.z };
     if (!first) {
       this.key(T(0.04), null, safe);
-      this.key(T(0.16), atMixer, safe);
+      this.key(T(0.15), low, safe);
     }
-    this.key(T(0.22), atMixer, atMixer.y + h);
-    this.key(T(0.32), atMixer, atMixer.y + h);
-    this.key(T(0.38), atMixer, safe);
+    this.key(w.slideIn[0], low, low.y + h);
+    this.key(w.fill[0], atMixer, atMixer.y + h);
+    this.key(w.fill[1], atMixer, atMixer.y + h);
+    this.key(w.slideOut[1], low, low.y + h);
+    this.key(w.slideOut[1] + 0.035 * D, low, safe);
     this.key(T(0.5), over, safe);
     this.key(T(0.55), over, over.y + h);
     this.key(T(0.86), over, over.y + h);
     this.key(T(0.93), over, over.y + h + 3);
-    this.cycles.push({ fill: [T(0.22), T(0.32)], pour: [T(0.55), T(0.86)], to });
+    this.cycles.push({ fill: w.fill, pour: [T(0.55), T(0.86)], to });
     this.tasks.push({ t0, t1: t0 + D, task });
   }
 
   /**
    * Antes del primer viaje (entre t0 y t1): la grúa engancha el capacho donde quedó en reposo, lo
-   * levanta lo justo para pasar sobre el carril y lo deja colgando sobre el punto de llenado cuando
-   * el mixer ya se detuvo; el primer viaje lo baja al suelo. Devuelve el instante del enganche.
+   * levanta lo justo para pasar sobre el carril y lo deja colgando frente a la punta de la canaleta
+   * cuando el mixer ya se detuvo; el primer viaje lo baja y lo entra bajo la canaleta. Devuelve el
+   * instante del enganche.
    */
   private pickCapacho(t0: number, t1: number) {
     const s = this.s, h = s.hang.capacho;
-    const rest = s.capachoRest, fill = s.capachoFill;
+    const rest = s.capachoRest, fill = s.capachoFill, slide = s.capachoSlide;
     const T = (x: number) => t0 + x * (t1 - t0);
     const safe = this.safeY(t1, 'capacho', rest, fill);
     const low = rest.y + 0.01 + h; // patas apoyadas en el suelo
@@ -177,7 +213,7 @@ export class CranePlan {
     this.key(T(0.5), rest, low);
     this.key(T(0.58), rest, low);
     this.key(T(0.7), rest, lift);
-    this.key(T(0.95), fill, lift);
+    this.key(T(0.95), slide, lift);
     this.tasks.push({ t0, t1, task: 'Engancha el capacho junto al camino posterior' });
     return T(0.54);
   }
@@ -201,7 +237,8 @@ export class CranePlan {
   private capachoSeries(a: Activity, to: (tr: Activity['trips'][number]) => P3, task: (k: number) => string) {
     const tr = a.trips;
     const attach = this.pickCapacho(a.t0, tr[0].t0);
-    tr.forEach((x, k) => this.capacho(x.t0, x.t1 - x.t0, to(x), task(k), k === 0));
+    const swap = capachoSwapTrip(tr.length);
+    tr.forEach((x, k) => this.capacho(x.t0, x.t1 - x.t0, to(x), task(k), k === 0, k === swap));
     const last = tr[tr.length - 1];
     const release = this.returnCapacho(last.t0 + 0.93 * (last.t1 - last.t0), a.t1 - 0.05);
     // el capacho cuelga del gancho desde que se engancha hasta que vuelve al suelo
