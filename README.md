@@ -20,7 +20,7 @@ El calendario está calibrado en ~290 días hábiles (poco más de un año, como
 - Al hacer clic en un piso, la grúa, un mixer, la bomba, los acopios o la faena se abren sus datos en un panel lateral.
 - El tablero muestra la etapa actual, el avance de cada piso, los indicadores (hormigón, acero, moldaje, mixers y capachos) y la bitácora de obra.
 - Botones: Vista iso (vista principal, desde el frente) · Vista posterior (desde el talud: camino de mixers, portón, bomba y tubería) · Seguir la obra · Planta · Etiquetas · Corte (corta el edificio para ver el interior).
-- Parámetros de URL para revisar un momento: `?act=losaHormigon-4&k=0.5` (fracción de una actividad), `?t=` (segundos de simulación), `?play=0`, `?view=back` (abre en la vista posterior) y `?cam=x,y,z&zoom=&az=&el=` (cámara fija).
+- Parámetros de URL para revisar un momento: `?act=losaHormigon-4&k=0.5` (fracción de una actividad), `?t=` (segundos de simulación), `?play=0`, `?view=back` o `?view=top` (abre en la vista posterior o en planta), `?labels=0` (oculta las etiquetas), `?cut=1` (activa el corte) y `?cam=x,y,z&zoom=&az=&el=` (cámara fija).
 
 ## De dónde salen los datos
 
@@ -51,7 +51,7 @@ pip install ifcopenshell numpy
 python tools/ifc_to_json.py ruta/Edificio-E.ifc public/data
 ```
 
-`sandbox/` es un banco de pruebas para revisar cada modelo por separado (`/sandbox/?m=crane`, `?m=vehicles`, `?m=site`, `?m=workers`, `?m=structure`).
+`sandbox/` es un banco de pruebas para revisar cada modelo por separado (`/sandbox/?m=crane`, `?m=vehicles`, `?m=site`, `?m=workers`, `?m=structure`, `?m=world`, `?m=stationaryPump`).
 
 ## Estructura
 

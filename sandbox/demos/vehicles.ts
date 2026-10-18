@@ -22,11 +22,14 @@ export default function demo(stage: Stage) {
   mixer.setDischarge(true);
   mixer.group.updateMatrixWorld(true);
   const chute = mixer.chuteTip.getWorldPosition(new THREE.Vector3());
+  // como en la app (World): apoyado en el suelo, 0,25 m hacia el camión desde la punta de la
+  // canaleta y con el asa perpendicular al eje del mixer; el chorro cae al hormigón de adentro
   const capacho = createCapacho();
-  capacho.group.position.set(chute.x - 0.35, G + capacho.height, chute.z);
+  capacho.group.position.set(chute.x + 0.25, G + capacho.height + 0.01, chute.z);
+  capacho.group.rotation.y = Math.PI / 2;
   capacho.setFill(0.55);
   scene.add(capacho.group);
-  const toCapacho = new THREE.Vector3(chute.x - 0.45, G + capacho.height - 1.2, chute.z);
+  const toCapacho = new THREE.Vector3(chute.x + 0.25, G + capacho.height + 0.01 - 1.25, chute.z);
   const mixerStream = createConcreteStream();
   scene.add(mixerStream.group);
 

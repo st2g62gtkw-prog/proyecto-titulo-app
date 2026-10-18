@@ -388,13 +388,13 @@ export class World {
       { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },
     ];
     // concreteros en la bomba: el operador junto a la caseta (lado del edificio) y uno en la tolva.
-    // Los puestos están siempre en la lista (en espera fuera del bombeo) para que el largo no cambie
-    // y nadie más salte de puesto al empezar o terminar un hormigonado
+    // Los puestos están siempre en la lista y en el mismo lugar (en espera fuera del bombeo) para que
+    // el largo no cambie y nadie salte de puesto al empezar o terminar un hormigonado
     {
-      const P = SITE.pump, on = ps.pumping;
+      const P = SITE.pump, mode = ps.pumping ? 'work' : 'idle';
       ground.push(
-        { x: P.x - 0.4, z: P.z + 2.6, r: 0.15, spread: 0.35, action: on ? 'work' : 'idle' },
-        on ? { x: P.x + 3.0, z: P.z + 2.25, r: 0.15, spread: 0.3, action: 'work' } : { x: P.x + 0.8, z: P.z + 2.7, r: 0.2, spread: 0.4, action: 'idle' },
+        { x: P.x - 0.4, z: P.z + 2.6, r: 0.15, spread: 0.35, action: mode },
+        { x: P.x + 3.0, z: P.z + 2.25, r: 0.15, spread: 0.3, action: mode },
       );
     }
     // trabajos en paralelo en el 1er piso (redes bajo radier, hormigonado del radier): cuatro puestos

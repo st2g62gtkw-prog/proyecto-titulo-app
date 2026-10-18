@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SITE } from '../config';
+import { exitCurve } from '../core/logistics';
 import { BUILDING_FACTS, PROJECT } from '../data/project';
 import { formPanelTexture, plywoodTexture } from './textures';
 
@@ -1820,6 +1821,8 @@ export function createSite(): SiteRig {
     ring.push([RD.turnX + RD.turnR * Math.sin(a), RD.turnZ + RD.turnR * Math.cos(a)]);
   }
   ribbon(roads, ring, { width: 5, texLen: 12, fade: 0.6, step: 2, lift: 0.04 });
+  // curva en S larga (la misma que siguen los mixers) de la parte baja de la rotonda al carril de salida
+  ribbon(roads, exitCurve(), { width: 4.4, texLen: 12, fade: 0.6, step: 2, lift: 0.036 });
   ribbon(roads, [[SITE.mixerPump.x - 5.6, RD.bayZ], [RD.turnX - 8, RD.bayZ], [RD.turnX - 1, RD.turnZ + RD.turnR]], { width: 4.4, texLen: 12, fade: 0.6, step: 2, lift: 0.032 });
   const decals: [Batch, THREE.Material, number][] = [[pads, M.pad, -3], [roads, M.road, -2]];
   for (const [b, m, order] of decals) {

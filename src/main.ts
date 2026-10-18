@@ -52,9 +52,37 @@ const ISO_TARGET = new THREE.Vector3(-1.3, 5, 8.3);
 const VIEWS = {
   iso: { target: ISO_TARGET, az: 55, el: 33, zoom: 1.0 },
   back: { target: new THREE.Vector3(1, 2, 0), az: 55 + 180, el: 33, zoom: 0.92 },
-  top: { target: new THREE.Vector3(0, 0, 4), az: 90, el: 89.5, zoom: 1.1 },
+  top: { target: new THREE.Vector3(-7, 0, -2), az: 90, el: 89.5, zoom: 0.8 },
 };
 const MIN_POLAR = THREE.MathUtils.degToRad(12);
+
+/**
+ * Planta (en pantalla +x a la derecha y −z hacia arriba): encuadra el recorrido completo de los
+ * camiones, de la calle del portón a la rotonda, y de la faena al pie del talud, en el espacio
+ * libre entre las columnas del tablero. Devuelve el objetivo y el zoom de la cámara.
+ */
+function topFit() {
+  const R = SITE.road;
+  const x0 = SITE.gate.x - 3, x1 = R.turnX + R.turnR + 3;
+  const z0 = SITE.talud.zStart - 1, z1 = SITE.faena.z + SITE.faena.d / 2 + 2;
+  const c = stage.renderer.domElement.getBoundingClientRect();
+  // espacio libre: entre las columnas (escritorio) y bajo la barra superior, sobre la línea de tiempo
+  let l = c.left, r = c.right;
+  const el = app.querySelector('.hud');
+  if (el && !el.classList.contains('is-mobile')) {
+    const L = el.querySelector('.hud-left')?.getBoundingClientRect();
+    const Rr = el.querySelector('.hud-right')?.getBoundingClientRect();
+    if (L && L.width > 0) l = Math.max(l, L.right - 12);
+    if (Rr && Rr.width > 0) r = Math.min(r, Rr.left + 12);
+  }
+  const w = Math.max(r - l, c.width * 0.4), h = c.height * 0.8;
+  // px por metro con zoom 1 (mismo encuadre que Stage.resize: 90 m de alto, o 70 m de ancho en vertical)
+  const k1 = c.width < c.height ? c.width / 70 : c.height / stage.frustum;
+  const zoom = THREE.MathUtils.clamp(Math.min(w / (x1 - x0), h / (z1 - z0)) / k1, 0.45, 1.4);
+  // corre el objetivo para que el recorrido quede al centro del espacio libre (no de la pantalla)
+  const dx = ((l + r) / 2 - (c.left + c.right) / 2) / (k1 * zoom);
+  return { target: new THREE.Vector3((x0 + x1) / 2 - dx, 0, (z0 + z1) / 2), zoom };
+}
 
 function setView(v: ViewMode, animate = true) {
   view = v;
@@ -64,7 +92,7 @@ function setView(v: ViewMode, animate = true) {
     c.minPolarAngle = MIN_POLAR;
     return;
   }
-  const V = VIEWS[v];
+  const V = v === 'top' ? { ...VIEWS.top, ...topFit() } : VIEWS[v];
   // durante el giro se libera el tope de inclinación (la planta queda casi vertical)
   c.minPolarAngle = 0;
   const done = () => (c.minPolarAngle = v === 'top' ? 0 : MIN_POLAR);
@@ -316,8 +344,9 @@ async function start() {
   if (act) T = act.t0 + (act.t1 - act.t0) * +(q.get('k') ?? 0.5);
   if (q.has('speed')) speed = +q.get('speed')!;
   if (q.get('play') === '0') playing = false;
-  // ?view=back abre en la vista posterior
-  setView(q.get('view') === 'back' ? 'back' : 'iso', false);
+  // ?view=back abre en la vista posterior y ?view=top en planta
+  const v0 = q.get('view');
+  setView(v0 === 'back' || v0 === 'top' ? v0 : 'iso', false);
   // ?labels=0 oculta las etiquetas y ?cut=1 activa el corte (para revisar detalles)
   if (q.get('labels') === '0') {
     world.setLabels(false);
