@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import './ui/hud.css';
 import './ui/app.css';
-import { SITE } from './config';
+import { PINTURA, SITE } from './config';
 import { loadBuilding } from './data/building';
 import { BUILDING_FACTS, EQUIPMENT, FLOOR_PROGRAM, PROJECT, RATIOS, SLAB_M3, TOTALS, WALL_M3 } from './data/project';
 import { buildFeed, dayLabel, dayShort, type FeedEvent } from './core/feed';
@@ -271,6 +271,45 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
       const [title, subtitle] = cargas[p.id ?? ''] ?? ['Carga de grúa', ''];
       return { title, subtitle, badge: 'GRÚA', rows: [['Tarea de la grúa', w.state.craneTask]] };
     }
+    case 'balancin': {
+      const ps = w.state.paint;
+      const plan = w.paint;
+      const P = PINTURA.plataforma;
+      const fase: Record<string, string> = {
+        montaje: 'Montando pescantes, contrapesos y cables en la techumbre',
+        bajando: 'Bajando y pintando',
+        subiendo: 'Subiendo vacío con los huinches',
+        traslado: 'Corriendo los pescantes al paño siguiente',
+        cambio: 'Cambio de fachada: se desarma y se vuelve a armar',
+        desmontaje: 'Retiro del equipo',
+      };
+      const rows: [string, string][] = [
+        ['Tipo', `Andamio colgante (balancín) · plataforma ${fmt(P.largo, 1)} × ${fmt(P.ancho, 2)} m`],
+        ['Subcontrato', 'Pintura de fachada (a su propio ritmo)'],
+        ['Dotación', '2 pintores con arnés y cuerda de vida independiente'],
+        ['Suspensión', '2 pescantes con contrapeso en la techumbre, 2 cables de acero y huinche en cada estribo'],
+      ];
+      if (ps) {
+        const p = ps.next && ps.phase === 'cambio' ? ps.next : ps.pano;
+        rows.push(
+          ['Fachada actual', p.facade.name],
+          ['Paño actual', `${p.k} de ${p.nOf} en esta fachada · ${p.i + 1} de ${plan.panos.length} en total`],
+          ['Estado', ps.phase === 'bajando' ? `${fase.bajando} · ${fmt(ps.progress * 100)} % del paño` : fase[ps.phase]],
+        );
+      } else rows.push(['Estado', T < plan.mount[0] ? 'Aún no llega a la obra (parte al terminar la obra gruesa)' : 'Fachada terminada, equipo retirado']);
+      rows.push(
+        ['Fachada pintada', `${fmt(plan.paintedArea(T))} de ${fmt(plan.area)} m²`],
+        ['Esquema', `Empaste y sellador + 2 manos de látex · ${PINTURA.rendimiento} m²/día por mano`],
+        ['Período', `${dayLabel(plan.dStart)} a ${dayLabel(plan.dEnd)}`],
+      );
+      return {
+        title: 'Balancín de pintura',
+        subtitle: 'Andamio colgante · subcontrato de pintura de fachada',
+        badge: 'PINTURA',
+        rows,
+        note: 'Parte desde arriba cuando la obra gruesa está terminada y baja por paños del ancho del balancín, una fachada a la vez; al terminar un paño sube, se corren los pescantes y baja por el siguiente. Avanza independiente de las terminaciones de cada piso (tabiques, ventanas y barandas).',
+      };
+    }
     case 'faena':
       return { title: 'Instalación de faena', subtitle: 'Oficinas, bodega, comedor y baños', badge: 'FAENA', rows: [['Dotación', `${EQUIPMENT.dotacion} personas`], ['Constructora', PROJECT.constructora], ['Mandante', PROJECT.mandante]] };
     default:
@@ -301,6 +340,8 @@ function hudState(): HudState {
   else if (a.kind !== 'terminaciones') detail = `${a.detail} · Grúa: ${w.state.craneTask}`;
   const par = s.parallel.find((p) => T >= p.t0 && T <= p.t1);
   if (par) detail += ` · En paralelo: ${par.title.toLowerCase()}`;
+  const ps = w.state.paint;
+  if (ps && a.kind === 'terminaciones') detail += ` · Pintura (subcontrato): ${ps.pano.facade.name.toLowerCase()}, paño ${ps.pano.k}/${ps.pano.nOf}`;
   const lastIdx = feed.findIndex((e) => e.t > T);
   const recent = (lastIdx === -1 ? feed : feed.slice(0, lastIdx)).slice(-5).reverse();
   // el ciclo de piso se identifica por sus muros: la losa que se hormigona es la "losa cielo" de ese piso
@@ -333,7 +374,7 @@ async function start() {
   await new Promise((r) => setTimeout(r, 30));
   world = new World(stage, b, { createSite, createCrowd, createTag });
   hud.setLoading(0.85, 'Preparando la faena…');
-  feed = buildFeed(world.sched, world.log);
+  feed = buildFeed(world.sched, world.log, world.paint);
   const markers = world.sched.activities
     .filter((a) => a.kind === 'muroFierro' || a.kind === 'fundaciones' || (a.kind === 'terminaciones' && a.level === 0))
     .map((a) => ({ t: a.t0, label: a.kind === 'fundaciones' ? 'Fund.' : a.kind === 'terminaciones' ? 'Term.' : a.levelName }));

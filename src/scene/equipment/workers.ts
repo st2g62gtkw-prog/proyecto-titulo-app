@@ -4,7 +4,7 @@
  *
  * Cada figura tiene su origen en el suelo bajo la pelvis y mira hacia +x local
  * (heading 0 = +x del mundo, positivo hacia +z). La pose se arma en CPU como ángulos de
- * articulaciones (caminar, trabajar, cargar, reposo), se mezcla suavemente al cambiar de
+ * articulaciones (caminar, trabajar, cargar, reposo, pintar con rodillo), se mezcla suavemente al cambiar de
  * acción y se "aterriza" apoyando siempre el pie más bajo en el suelo. Al caminar, cada bota
  * queda plantada mientras sostiene el cuerpo (talón → planta → punta) y las piernas se
  * resuelven con IK de dos huesos, así los pies no patinan sobre la losa.
@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-export type WorkerAction = 'idle' | 'walk' | 'work' | 'carry';
+export type WorkerAction = 'idle' | 'walk' | 'work' | 'carry' | 'paint';
 
 export interface WorkerPose {
   x: number;
@@ -219,8 +219,16 @@ function buildGeometries() {
   ]);
   tool.rotateZ(-gamma).translate(0.006, HAND_Y, 0);
 
+  // rodillo de pintor en la mano derecha (marco del antebrazo): mango corto que sigue al antebrazo,
+  // horquilla y rodillo atravesado (eje z), ya manchado con el color de la fachada
+  const roller = merge([
+    paint(box(0.024, 0.34, 0.024, 0.006, HAND_Y - 0.12, 0), '#e3b23c'),
+    paint(box(0.02, 0.02, 0.15, 0.03, HAND_Y - 0.3, 0.05), '#8c9298'),
+    paint(new THREE.CylinderGeometry(0.038, 0.038, 0.24, 8).rotateX(Math.PI / 2).translate(0.05, HAND_Y - 0.33, 0.07), '#ece9e2'),
+  ]);
+
   const proxy = new THREE.BoxGeometry(0.62, 1.95, 0.62).translate(0, 0.975, 0);
-  return { torso: merge(torsoParts), head, upper, fore, thigh, shin, foot, prop, tool, proxy };
+  return { torso: merge(torsoParts), head, upper, fore, thigh, shin, foot, prop, tool, roller, proxy };
 }
 
 // ─────────────────────────── material ───────────────────────────
@@ -258,10 +266,12 @@ vGlow = aGlow;`,
 const LEAN = 0, TWIST = 1, ROLL = 2, HIPYAW = 3, SHIFT = 4;
 const THL = 5, THR = 6, KNL = 7, KNR = 8, FTL = 9, FTR = 10, SPREAD = 11;
 const SHL = 12, SHR = 13, ABL = 14, ABR = 15, ELL = 16, ELR = 17;
-const HYAW = 18, HPITCH = 19, BREATH = 20, PROP = 21, TOOL = 22;
-const NP = 23;
+const HYAW = 18, HPITCH = 19, BREATH = 20, PROP = 21, TOOL = 22, ROLLER = 23;
+const NP = 24;
 
-const ACTIONS: Record<WorkerAction, number> = { idle: 0, walk: 1, work: 2, carry: 3 };
+const ACTIONS: Record<WorkerAction, number> = { idle: 0, walk: 1, work: 2, carry: 3, paint: 4 };
+/** Cantidad de acciones que se mezclan. */
+const NA = 5;
 
 const clamp = THREE.MathUtils.clamp;
 const fract = (x: number) => x - Math.floor(x);
@@ -463,6 +473,30 @@ function poseWork(o: Float32Array, t: number, v: number) {
   }
 }
 
+/**
+ * Pintar con rodillo (pintor del balancín, mirando al muro): brazos en alto, el rodillo sube y baja
+ * por la fachada; la mano izquierda acompaña el mango y el cuerpo se balancea con la pasada.
+ */
+function posePaint(o: Float32Array, t: number, v: number) {
+  const c = Math.sin(t * 2.3 + v * 6), b = Math.sin(t * 0.6 + v * 3);
+  o[THL] = 0.04;
+  o[THR] = -0.08;
+  o[KNL] = 0.08 + 0.06 * Math.max(0, -c);
+  o[KNR] = 0.05;
+  o[SPREAD] = 0.08;
+  o[LEAN] = -0.06 + 0.05 * c;
+  o[TWIST] = 0.1 * b;
+  o[SHR] = 2.15 + 0.4 * c;
+  o[ELR] = 0.3 - 0.15 * c;
+  o[ABR] = -0.08;
+  o[SHL] = 1.75 + 0.3 * c;
+  o[ELL] = 0.65;
+  o[ABL] = -0.2;
+  o[HPITCH] = -0.3 - 0.15 * c;
+  o[HYAW] = 0.08 * b;
+  o[ROLLER] = 1;
+}
+
 /** Altura de la suela más baja de una pierna respecto a la cadera. */
 function soleY(th: number, kn: number, ft: number, spread: number) {
   const ankle = -(THIGH * Math.cos(th) + SHIN * Math.cos(th - kn)) * Math.cos(spread);
@@ -519,6 +553,7 @@ export function createCrowd(max: number): Crowd {
   const head = part(geo.head, 'cabeza');
   const prop = part(geo.prop, 'carga');
   const tool = part(geo.tool, 'martillo');
+  const roller = part(geo.roller, 'rodillo');
   const upper = part(geo.upper, 'brazo', true);
   const fore = part(geo.fore, 'antebrazo', true);
   const thigh = part(geo.thigh, 'muslo', true);
@@ -560,7 +595,7 @@ export function createCrowd(max: number): Crowd {
   const helmet = HELMET_COLORS.map((c) => new THREE.Color(c));
 
   // estado por trabajador (mezcla de acciones, marcha, rumbo suavizado)
-  const W = new Float32Array(max * 4);
+  const W = new Float32Array(max * NA);
   const lastT = new Float64Array(max), lastWalk = new Float64Array(max), gait = new Float64Array(max);
   const amp = new Float32Array(max), dir = new Float64Array(max);
   const ready = new Uint8Array(max), vis = new Uint8Array(max);
@@ -587,12 +622,12 @@ export function createCrowd(max: number): Crowd {
     }
     vis[i] = 1;
     const a = ACTIONS[p.action] ?? 0;
-    const wi = i * 4;
+    const wi = i * NA;
     const dt = p.t - lastT[i];
     if (ready[i] && dt > 1e-4 && dt < 0.5) {
       // transición suave entre acciones; cadencia y amplitud según la velocidad real
       const k = 1 - Math.exp(-dt * 5);
-      for (let j = 0; j < 4; j++) W[wi + j] += ((j === a ? 1 : 0) - W[wi + j]) * k;
+      for (let j = 0; j < NA; j++) W[wi + j] += ((j === a ? 1 : 0) - W[wi + j]) * k;
       const dw = Math.abs(p.walk - lastWalk[i]);
       amp[i] += (Math.min(1, dw / dt / 0.7) - amp[i]) * (1 - Math.exp(-dt * 6));
       // fase en ciclos: avanza con la distancia real (pies plantados) hasta un trote de 2,5 m/s
@@ -601,7 +636,7 @@ export function createCrowd(max: number): Crowd {
       dir[i] += Math.atan2(Math.sin(dh), Math.cos(dh)) * (1 - Math.exp(-dt * 10));
     } else {
       // primer cuadro, salto de la línea de tiempo o tiempo fijo: sin suavizado
-      for (let j = 0; j < 4; j++) W[wi + j] = j === a ? 1 : 0;
+      for (let j = 0; j < NA; j++) W[wi + j] = j === a ? 1 : 0;
       amp[i] = 1;
       gait[i] = p.walk / STRIDE;
       dir[i] = p.heading;
@@ -613,14 +648,15 @@ export function createCrowd(max: number): Crowd {
     // pose mezclada
     const ph = gait[i];
     F.fill(0);
-    for (let j = 0; j < 4; j++) {
+    for (let j = 0; j < NA; j++) {
       const w = W[wi + j];
       if (w < 0.002) continue;
       P.fill(0);
       if (j === 0) poseIdle(P, p.t, vIdle[i]);
       else if (j === 1) poseWalk(P, ph, amp[i]);
       else if (j === 2) poseWork(P, p.t, vWork[i]);
-      else poseCarry(P, ph, amp[i]);
+      else if (j === 3) poseCarry(P, ph, amp[i]);
+      else posePaint(P, p.t, vWork[i]);
       for (let k = 0; k < NP; k++) F[k] += P[k] * w;
     }
 
@@ -653,7 +689,10 @@ export function createCrowd(max: number): Crowd {
       upper.setMatrixAt(k, m);
       RZ(T(m, 0, -UPPER_ARM, 0), F[ELL + side]);
       fore.setMatrixAt(k, m);
-      if (side) tool.setMatrixAt(i, F[TOOL] > 0.5 ? m : ZERO);
+      if (side) {
+        tool.setMatrixAt(i, F[TOOL] > 0.5 ? m : ZERO);
+        roller.setMatrixAt(i, F[ROLLER] > 0.5 ? m : ZERO);
+      }
     }
 
     if (vestOf[i] !== p.vest) {

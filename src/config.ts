@@ -126,3 +126,33 @@ export const DAYS = {
 
 /** Días hábiles por mes, para mostrar el mes de obra. */
 export const DAYS_PER_MONTH = 22;
+
+/**
+ * Pintura de fachada: subcontrato aparte que trabaja con un andamio colgante (balancín) desde la
+ * techumbre, a su propio ritmo e independiente de las terminaciones piso a piso (que siguen con
+ * tabiques, ventanas y barandas). Parte cuando la obra gruesa está terminada arriba y baja por
+ * paños (franjas verticales del ancho del balancín), una fachada a la vez. El ritmo sale del área
+ * real de fachada (caras exteriores de los muros H.A. y cantos de losa, ver core/paintPlan).
+ */
+export const PINTURA = {
+  /** Rendimiento por balancín (2 pintores) y por mano (m²/día). */
+  rendimiento: 60,
+  /** Manos por paño: empaste y sellador + 2 manos de látex acrílico para exteriores. */
+  manos: 3,
+  /** Ancho máximo de cada paño (m); el balancín cubre el paño completo sin moverse de lado. */
+  anchoPano: 5.5,
+  /** Montaje en la techumbre de pescantes, contrapesos, cables y balancín (días hábiles). */
+  montajeDias: 4,
+  /** Subir, correr los pescantes y bajar por el paño siguiente de la misma fachada. */
+  trasladoDias: 1,
+  /** Desarmar el balancín y volver a armarlo en la fachada siguiente. */
+  cambioFachadaDias: 2,
+  /** Retiro final del equipo. */
+  desmontajeDias: 2,
+  /** Plataforma metálica del balancín (m). */
+  plataforma: { largo: 4.5, ancho: 0.75 },
+  /** Separación entre la cara de la fachada y la plataforma (m). */
+  holgura: 0.25,
+  /** Altura de la línea de pintura sobre el piso de la plataforma (alcance del rodillo, m). */
+  alcance: 1.3,
+};

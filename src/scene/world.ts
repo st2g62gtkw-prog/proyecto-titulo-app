@@ -9,13 +9,16 @@ import type { LoadedBuilding } from '../data/building';
 import { CranePlan, type PayloadKind } from '../core/cranePlan';
 import { Crews } from '../core/crews';
 import { Logistics } from '../core/logistics';
+import { buildPaintPlan, type PaintPlan, type PaintState } from '../core/paintPlan';
 import { buildSchedule, haWalls, type Schedule } from '../core/schedule';
+import { createBalancin, type BalancinRig } from './equipment/balancin';
 import { createCapacho, type CapachoRig } from './equipment/capacho';
 import { createCrane, type CraneRig } from './equipment/crane';
 import { createMixer, type MixerRig } from './equipment/mixer';
 import { createPanelPack, createDeckPack, createPropBundle, createRebarBundle } from './equipment/payloads';
 import { createConcreteStream, type ConcreteStream } from './equipment/pour';
 import { createStationaryPump, type StationaryPumpRig } from './equipment/stationaryPump';
+import { buildFacadePaint } from './facadePaint';
 import { createPipeline, type Pipeline } from './pipeline';
 import type { Crowd } from './equipment/workers';
 import { uTime } from './reveal';
@@ -42,6 +45,8 @@ export interface WorldState {
   craneTask: string;
   pumpBusy: boolean;
   mixersOnSite: number;
+  /** Balancín del subcontrato de pintura (null si no está en obra). */
+  paint: PaintState | null;
 }
 
 export class World {
@@ -53,6 +58,11 @@ export class World {
   log: Logistics;
   crews: Crews;
   crowd: Crowd;
+  /** Subcontrato de pintura de fachada: plan, piel pintada, balancín y sus dos pintores. */
+  paint: PaintPlan;
+  facade: THREE.Mesh;
+  balancin: BalancinRig;
+  painters: Crowd;
   capacho: CapachoRig;
   pump: StationaryPumpRig;
   pipeline: Pipeline;
@@ -61,7 +71,7 @@ export class World {
   payloads: Record<Exclude<PayloadKind, 'capacho'>, THREE.Group>;
   pickables: THREE.Object3D[] = [];
   labels: { obj: CSS2DObject; el: HTMLElement; key: string }[] = [];
-  state: WorldState = { focus: new THREE.Vector3(0, 8, 0), craneTask: '', pumpBusy: false, mixersOnSite: 0 };
+  state: WorldState = { focus: new THREE.Vector3(0, 8, 0), craneTask: '', pumpBusy: false, mixersOnSite: 0, paint: null };
   private capachoRest = new THREE.Vector3();
   private capachoFill = new THREE.Vector3();
   private pumpHopper = new THREE.Vector3();
@@ -196,6 +206,20 @@ export class World {
     scene.add(this.crowd.group);
     this.pickables.push(...this.crowd.pickables);
 
+    // pintura de fachada (subcontrato): la piel pintada va con el edificio (corte incluido) y el
+    // balancín cuelga de la techumbre con dos pintores (casco azul y chaleco naranjo)
+    this.paint = buildPaintPlan(data, this.sched);
+    this.facade = buildFacadePaint(this.paint, this.structure.clipping);
+    this.structure.group.add(this.facade);
+    this.balancin = createBalancin({ roofY: this.paint.roofY, groundY: SITE.groundY });
+    scene.add(this.balancin.group);
+    this.pickables.push(...this.balancin.pickables);
+    this.painters = deps.createCrowd(2);
+    this.painters.group.name = 'pintores';
+    for (const p of this.painters.pickables) p.userData.pick = { type: 'balancin' };
+    scene.add(this.painters.group);
+    this.pickables.push(...this.painters.pickables);
+
     // resaltado de piso seleccionado
     this.highlight = new THREE.LineSegments(
       new THREE.BufferGeometry(),
@@ -230,6 +254,7 @@ export class World {
     this.addLabel('gate', 'Portón de camiones', 'info', root, new THREE.Vector3(SITE.gate.x, 7.2, SITE.gate.z + 4.6));
     this.mixers.forEach((m, i) => this.addLabel(`mixer${i}`, 'Mixer 7 m³', 'mixer', m.group, new THREE.Vector3(0, 4.6, 0)));
     this.addLabel('front', 'Frente de trabajo', 'work', root, new THREE.Vector3());
+    this.addLabel('balancin', 'Balancín · pintura', 'info', this.balancin.group, new THREE.Vector3());
   }
 
   setLabels(on: boolean) {
@@ -381,6 +406,20 @@ export class World {
       sHop.set(pumpHopperFeed, this.tmp2, 0.8, clock);
     } else sHop.set(this.tmp2, this.tmp2, 0, clock);
 
+    // --- pintura de fachada (subcontrato con balancín) ---
+    this.facade.visible = T >= this.paint.skinFrom;
+    const pst = this.paint.state(T);
+    this.state.paint = pst;
+    this.balancin.set(pst);
+    this.balancin.painters.forEach((pp, i) => {
+      const action = !pst ? 'idle' : pp.onPlatform ? (pst.phase === 'bajando' ? 'paint' : 'idle') : pst.phase === 'traslado' ? 'walk' : 'work';
+      this.painters.set(i, {
+        x: pp.x, y: pp.y, z: pp.z, heading: pp.heading, walk: pst ? Math.abs(pst.x) + Math.abs(pst.z) : 0,
+        action, t: clock + i * 0.9, vest: 1, helmet: 3, visible: !!pst,
+      });
+    });
+    this.painters.commit();
+
     // --- cuadrillas ---
     const act = this.sched.at(T);
     const a = this.site.anchors;
@@ -436,7 +475,10 @@ export class World {
       front.obj.position.copy(this.state.focus).add(new THREE.Vector3(0, 3.2, 0));
       front.obj.visible = this.labelsOn && act.kind !== 'terminaciones';
     }
+    const lb = this.labels.find((l) => l.key === 'balancin');
+    if (lb && pst) lb.obj.position.set(pst.x, pst.y + 3.2, pst.z);
     for (const l of this.labels) {
+      if (l.key === 'balancin') l.obj.visible = this.labelsOn && !!pst && pst.rigged;
       if (l.key.startsWith('mixer')) l.obj.visible = this.labelsOn && this.mixers[+l.key.slice(5)].group.visible;
     }
   }

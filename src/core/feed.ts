@@ -2,6 +2,7 @@
 import { SLAB_M3, WALL_M3 } from '../data/project';
 import { DAYS_PER_MONTH } from '../config';
 import type { Logistics } from './logistics';
+import type { PaintPlan } from './paintPlan';
 import type { Schedule } from './schedule';
 
 export type FeedKind = 'mixer' | 'crane' | 'pump' | 'info' | 'ok';
@@ -11,7 +12,7 @@ export interface FeedEvent {
   kind: FeedKind;
 }
 
-export function buildFeed(sched: Schedule, log: Logistics): FeedEvent[] {
+export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): FeedEvent[] {
   const ev: FeedEvent[] = [];
   const fmt = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 1 });
   for (const a of sched.activities) {
@@ -43,6 +44,16 @@ export function buildFeed(sched: Schedule, log: Logistics): FeedEvent[] {
     if (p.pumpStop[1] > p.pumpStop[0]) ev.push({ t: p.pumpStop[0] + 0.05, text: 'Bomba detenida: cambio de mixer (el camino es uno solo)', kind: 'pump' });
   }
   for (const a of sched.parallel) ev.push({ t: a.t0, text: `En paralelo: ${a.title.toLowerCase()}`, kind: 'info' });
+  if (paint) {
+    // subcontrato de pintura de fachada con balancín: inicio, cada cambio de fachada y término
+    ev.push({ t: paint.mount[0] + 0.02, text: 'Parte el subcontrato de pintura: se montan pescantes y balancín en la techumbre', kind: 'info' });
+    paint.panos.forEach((p, i) => {
+      if (i === 0 || paint.panos[i - 1].facade !== p.facade) {
+        ev.push({ t: p.down[0], text: `Balancín de pintura ${i === 0 ? 'baja por el primer paño de la' : 'pasa a la'} ${p.facade.name.toLowerCase()} · ${p.nOf} paños`, kind: 'info' });
+      }
+    });
+    ev.push({ t: paint.dismount[0], text: `Pintura de fachada terminada · ${fmt(Math.round(paint.area))} m², se retira el balancín`, kind: 'ok' });
+  }
   return ev.sort((a, b) => a.t - b.t);
 }
 
