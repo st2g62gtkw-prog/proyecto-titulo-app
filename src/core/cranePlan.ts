@@ -102,7 +102,7 @@ export class CranePlan {
   carries: { t0: number; t1: number; kind: PayloadKind; task: string }[] = [];
   cycles: CapachoCycle[] = [];
   tasks: { t0: number; t1: number; task: string }[] = [];
-  constructor(private s: CraneSetup, sched: Schedule) {
+  constructor(private s: CraneSetup, private sched: Schedule) {
     const b = s.base;
     const start = this.polar({ x: b.x + 6, y: 0, z: b.z - 12 });
     this.keys.push({ t: -1, slew: start.slew, r: start.r, y: s.jibY - 4 });
@@ -232,11 +232,15 @@ export class CranePlan {
 
   /** Serie de capachos de una actividad: lo engancha, hace todos los viajes y lo devuelve. */
   private capachoSeries(a: Activity, to: (tr: Activity['trips'][number]) => P3, task: (k: number) => string) {
-    const tr = a.trips;
-    const attach = this.pickCapacho(a.t0, tr[0].t0);
+    this.capachoSeriesAt(a.t0, a.t1, a.trips, to, task);
+  }
+
+  /** Serie de capachos entre t0 y t1 (engancha, viajes y lo deja en reposo). */
+  private capachoSeriesAt<T extends { t0: number; t1: number }>(t0: number, t1: number, tr: T[], to: (tr: T) => P3, task: (k: number) => string) {
+    const attach = this.pickCapacho(t0, tr[0].t0);
     tr.forEach((x, k) => this.capacho(x.t0, x.t1 - x.t0, to(x), task(k), k === 0));
     const last = tr[tr.length - 1];
-    const release = this.returnCapacho(last.t0 + 0.93 * (last.t1 - last.t0), a.t1 - 0.05);
+    const release = this.returnCapacho(last.t0 + 0.93 * (last.t1 - last.t0), t1 - 0.05);
     // el capacho cuelga del gancho desde que se engancha hasta que vuelve al suelo
     this.carries.push({ t0: attach, t1: release, kind: 'capacho', task: '' });
   }
@@ -257,9 +261,20 @@ export class CranePlan {
     const loadF = [0.05, 0.22, 0.3, 0.38, 0.46, 0.64, 0.72, 0.78, 0.86];
     const formF = [0.04, 0.18, 0.25, 0.31, 0.38, 0.56, 0.62, 0.66, 0.74];
     switch (a.kind) {
-      case 'fundaciones':
-        this.capachoSeries(a, (tr) => ({ x: tr.x, y: -0.1, z: tr.z }), () => 'Capacho: hormigón a zapatas');
+      case 'fundaciones': {
+        // paquetes de fierro dimensionado y de tableros al borde de cada sector, y series de capacho
+        // (emplantillado, muros bajo NPT y V.S.C.), en orden de tiempo
+        const F = this.sched.fund;
+        const items = [
+          ...F.craneTrips.map((c) => ({ t: c.t0, run: () => this.trip(c.t0, c.t1 - c.t0, c.kind === 'rebar' ? A.acopioFierro : A.acopioMoldajeMuro, { x: c.x, y: c.y, z: c.z }, c.kind, c.task, loadF) })),
+          ...F.capachos.map((c) => ({
+            t: c.t0,
+            run: () => this.capachoSeriesAt(c.t0, c.t1, c.trips, (tr) => ({ x: tr.x, y: tr.y, z: tr.z }), (k) => `${c.task} (${k + 1}/${c.trips.length})`),
+          })),
+        ].sort((p, q) => p.t - q.t);
+        for (const it of items) it.run();
         break;
+      }
       case 'radier':
       case 'losaHormigon':
         this.park(a.t0, 'En espera: la bomba hormigona la losa', a.t1);

@@ -30,6 +30,11 @@ export interface SiteRig {
    * quedaría delante y taparía el camino de mixers y la bomba.
    */
   setBackView?(on: boolean): void;
+  /**
+   * Recorta el terreno donde está la excavación de las fundaciones (máscara en planta: 1 = no se
+   * dibuja): ahí se ve el terreno excavado que arma structure/foundations.
+   */
+  setGroundMask?(mask: { tex: THREE.Texture; x0: number; z0: number; x1: number; z1: number }): void;
 }
 
 type V2 = [number, number];
@@ -1805,7 +1810,8 @@ export function createSite(): SiteRig {
   padAt(PARK.x, PARK.z - 0.3, 21, 7.2);
   // caseta de la bomba y franja hasta la fachada posterior (operador y tubería)
   {
-    const z0 = RZ - 2.4, z1 = -6.4, P = SITE.pump;
+    // (termina antes de la zanja de los peines posteriores, que llega a z ≈ −7,4)
+    const z0 = RZ - 2.4, z1 = -7.7, P = SITE.pump;
     padAt(P.x + 0.6, (z0 + z1) / 2, 9.6, z1 - z0, 0.9);
   }
   for (const A of [SITE.acopioMoldajeMuro, SITE.acopioMoldajeLosa, SITE.acopioFierro, SITE.tallerFierro, SITE.acopioPuntales]) padAt(A.x, A.z, A.w + 1.5, A.d + 1.5, 0.75);
@@ -1883,6 +1889,28 @@ export function createSite(): SiteRig {
     heightAt,
     setBackView(on: boolean) {
       ridge.visible = !on;
+    },
+    setGroundMask(mask) {
+      const m = M.ground;
+      const uniforms = {
+        uGroundMask: { value: mask.tex },
+        uGroundRect: { value: new THREE.Vector4(mask.x0, mask.z0, mask.x1 - mask.x0, mask.z1 - mask.z0) },
+      };
+      m.onBeforeCompile = (sh) => {
+        Object.assign(sh.uniforms, uniforms);
+        sh.vertexShader = sh.vertexShader
+          .replace('#include <common>', '#include <common>\nvarying vec2 vGroundXZ;')
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGroundXZ = (modelMatrix * vec4(transformed, 1.0)).xz;');
+        sh.fragmentShader = sh.fragmentShader
+          .replace('#include <common>', '#include <common>\nuniform sampler2D uGroundMask;\nuniform vec4 uGroundRect;\nvarying vec2 vGroundXZ;')
+          .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+  {
+    vec2 gm = (vGroundXZ - uGroundRect.xy) / uGroundRect.zw;
+    if (gm.x > 0.0 && gm.x < 1.0 && gm.y > 0.0 && gm.y < 1.0 && texture2D(uGroundMask, gm).r > 0.5) discard;
+  }`);
+      };
+      m.customProgramCacheKey = () => 'terreno-con-excavacion';
+      m.needsUpdate = true;
     },
     update(t: number) {
       // bandera flameando

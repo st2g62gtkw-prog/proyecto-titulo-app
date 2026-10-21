@@ -34,7 +34,7 @@ export const FLOOR_STEPS: { kind: ActivityKind; label: string }[] = [
 export function computeProgress(sched: Schedule, t: number): Progress {
   const acts = sched.activities;
   const names = sched.levelNames;
-  let hormigon = 0, hormigonMuros = 0, acero = 0, moldaje = 0, losas = 0;
+  let hormigon = 0, hormigonMuros = 0, acero = 0, moldaje = 0, losas = 0, fundCapachos = 0;
   let daysDone = 0, daysTotal = 0;
   const wallLevels = sched.wall.length;
   const extraM3 = ROOF_WALL_M3 / wallLevels; // parapetos y sala de máquinas repartidos
@@ -44,11 +44,15 @@ export function computeProgress(sched: Schedule, t: number): Progress {
     const slabName = names[a.level];
     const slabM3 = SLAB_M3[slabName] ?? 0;
     switch (a.kind) {
-      case 'fundaciones':
-        hormigon += TOTALS.hormigonFundaciones * k;
-        acero += TOTALS.aceroFundaciones * k;
-        moldaje += TOTALS.moldajeFundaciones * k;
+      case 'fundaciones': {
+        // cantidades de la cubicación según avanza cada sector (emplantillado, zapatas, capachos)
+        const q = sched.fund.quantities(t);
+        hormigon += Math.min(q.hormigon, TOTALS.hormigonFundaciones);
+        acero += Math.min(q.acero, TOTALS.aceroFundaciones);
+        moldaje += Math.min(q.moldaje, TOTALS.moldajeFundaciones);
+        fundCapachos = q.capachos;
         break;
+      }
       case 'muroFierro':
         acero += wallM3 * RATIOS.aceroMuroPorM3 * k;
         break;
@@ -80,7 +84,7 @@ export function computeProgress(sched: Schedule, t: number): Progress {
   // mixers: radier (≈66,6 m³) + todo el hormigón colocado, en camiones de 7 m³
   const radM3 = TOTALS.radier * 0.1 * pourFrac(sched.slab[0], t);
   const mixers = Math.floor((hormigon + radM3) / EQUIPMENT.mixerM3 + 1e-6);
-  const capachos = Math.floor(hormigonMuros / EQUIPMENT.capachoM3 + 1e-6);
+  const capachos = Math.floor(hormigonMuros / EQUIPMENT.capachoM3 + 1e-6) + fundCapachos;
 
   const floors = names.map((name, L) => {
     const own = [...acts, ...sched.parallel].filter((a) => a.kind !== 'terminaciones' && ((a.kind.startsWith('muro') && a.level === L) || (a.kind.startsWith('losa') && a.level === L) || (L === 0 && (a.kind === 'fundaciones' || a.kind === 'radier'))));
@@ -92,6 +96,14 @@ export function computeProgress(sched: Schedule, t: number): Progress {
   });
 
   return { hormigon, hormigonMuros, acero, moldaje, mixers, capachos, losas, obraGruesa: daysTotal ? daysDone / daysTotal : 0, floors };
+}
+
+/** Pasos de las fundaciones (excavación, sellos, fierro, moldaje, hormigón y relleno). */
+export function fundSteps(sched: Schedule, t: number) {
+  return sched.fund.steps.map((s) => {
+    const p = k01(t, s.win[0], s.win[1]);
+    return { key: s.key, label: s.label, state: (p >= 1 ? 'done' : p > 0 ? 'active' : 'todo') as 'done' | 'active' | 'todo', progress: p };
+  });
 }
 
 /** Pasos del ciclo de piso para el nivel de la actividad actual. */

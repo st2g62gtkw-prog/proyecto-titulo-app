@@ -12,7 +12,7 @@
  * Días: el día hábil d (1..40) ocupa [T(d − 1), T(d)]; cada día dura según lo que pasa en él
  * (FUND_PACE), así la excavación y los hormigonados se alcanzan a ver.
  */
-import { FUND_PACE, SITE } from '../config';
+import { FUND_PACE, PACE, SITE } from '../config';
 import type { FootingStrip, FundData, WallData } from '../data/building';
 import { Route, easeTravel, type Pose } from './paths';
 import { LB_S, RZ, arc, arrival, line, reverseToLayby, shift, type P } from './roads';
@@ -68,6 +68,10 @@ export interface TruckLeg {
   route: Route;
   t: Win;
   back: boolean;
+  /** Por dónde va: calle, camino posterior (portón ↔ huella), al bolsón, del bolsón, salida o huella. */
+  on?: 'calle' | 'camino' | 'bolsón' | 'delBolsón' | 'salida' | 'huella';
+  /** Salida: instante en que ya cruzó el portón (desde ahí no ocupa el camino). */
+  gateAt?: number;
 }
 
 /** Camión tolva de 14 m³ que se carga en un sector (uno por sector en la animación). */
@@ -203,6 +207,20 @@ export interface FundStep {
   win: Win;
 }
 
+/** Fracción vaciada (0..1) del hormigonado de un sector: no avanza en el cambio de mixer. */
+export function fundPourFrac(p: FundPour, t: number) {
+  const [p0, p1] = p.pour, [q0, q1] = p.pumpStop;
+  const tt = Math.min(Math.max(t, p0), p1);
+  const run = p1 - p0 - (q1 - q0);
+  return Math.min(Math.max((tt - p0 - Math.min(Math.max(tt - q0, 0), q1 - q0)) / run, 0), 1);
+}
+/** Instante en que el hormigonado del sector llega a la fracción k (inversa de fundPourFrac). */
+function tOfK(p: FundPour, k: number) {
+  const [p0, p1] = p.pour, [q0, q1] = p.pumpStop;
+  const tt = p0 + k * (p1 - p0 - (q1 - q0));
+  return tt > q0 ? tt + (q1 - q0) : tt;
+}
+
 const clamp01 = (v: number) => Math.min(Math.max(v, 0), 1);
 const k01 = (t: number, [a, b]: Win) => clamp01((t - a) / Math.max(b - a, 1e-6));
 const smooth = (x: number) => {
@@ -226,19 +244,32 @@ const GANTT: GanttRow[] = [
   { exc: [10, 12], perfil: [13, 13], recep: [13, 13], empl: 14, fierro: [20, 25], moldaje: [24, 27], pour: 28, desc: [29, 29], npt: null, igol: [30, 30], relleno: [31, 33] },
 ];
 
+/** Capachos de cada serie: 3 de emplantillado por sector, 2 de muros bajo NPT o V.S.C. */
+const CAP_TRIPS = { emplantillado: 3, murosNPT: 2, vsc: 2 } as const;
+/** Duración de un día con una serie de n capachos: llega el mixer, n viajes y holgura. */
+const capDay = (n: number) => 0.1 + FUND_PACE.capachoLead + n * FUND_PACE.capachoTrip + 3.8;
+
 /** Segundos de simulación de cada día hábil (1..40). */
 function dayWeights(): number[] {
   const w: number[] = [];
-  const cap = new Set(GANTT.flatMap((g) => [g.empl, g.npt?.cap ?? -1]));
+  const cap = new Map<number, number>();
+  GANTT.forEach((g) => {
+    cap.set(g.empl, CAP_TRIPS.emplantillado);
+    if (g.npt) cap.set(g.npt.cap, CAP_TRIPS.murosNPT);
+  });
   const pump = new Set(GANTT.map((g) => g.pour));
   for (let d = 1; d <= 40; d++) {
     let s = FUND_PACE.dia;
     if (d <= 3) s = FUND_PACE.trazado;
+    else if (d <= 6) s = FUND_PACE.excavacionS1;
     else if (d <= 12) s = FUND_PACE.excavacion;
-    else if (d === 13) s = FUND_PACE.trazado;
+    else if (d === 13) s = 5.5; // sale el último camión tolva y se retira la excavadora
     else if (d >= 34) s = FUND_PACE.cierre;
-    if (cap.has(d)) s = Math.max(s, FUND_PACE.capacho);
+    // (durante la excavación, con holgura para que el mixer no se cruce con los camiones tolva)
+    if (cap.has(d)) s = Math.max(s, capDay(cap.get(d)!) + (d <= 12 ? 3 : 0) + (pump.has(d + 1) ? 2.5 : 0));
     if (pump.has(d)) s = FUND_PACE.bomba;
+    // el día siguiente a un hormigonado deja salir al último mixer antes del próximo que entra
+    else if (pump.has(d - 1)) s = Math.max(s, 3.5);
     w.push(s);
   }
   return w;
@@ -301,7 +332,9 @@ const EX = SITE.excavacion;
 export function laneZ(x: number) {
   const P = SITE.pump.x;
   const k = smooth((x - (P - 7.5)) / 2.5) * (1 - smooth((x - (P + 5.5)) / 2.5));
-  return EX.laneZ + (EX.laneZPump - EX.laneZ) * k;
+  // frente a la zanja profunda de A-B (talud 3:1) se aparta 0,6 m más del edificio
+  const ab = 1 - smooth((x + 20.5) / 2.5);
+  return EX.laneZ + (EX.laneZPump - EX.laneZ) * k - 0.6 * ab;
 }
 const laneLine = (xa: number, xb: number): P[] => {
   const n = Math.max(1, Math.ceil(Math.abs(xb - xa) / 1.5));
@@ -425,7 +458,7 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
   }
 
   // --- puestos de la excavadora (por sector: frente, pasillo y peines posteriores) ---
-  const R_DIG = 7.6;
+  const R_DIG = 8.2;
   const STATION_Z = { A: 2.8, B: -4.2, C: -4.2 };
   const DIR = { A: 1, B: -1, C: 1 };
   const FOOT = 2.35; // media huella de la excavadora (orugas y giro de la cola)
@@ -452,14 +485,20 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
           }
         }
         best ??= { x: c0.cx + DIR[ph] * 1.5, z: STATION_Z[ph] };
-        const group = pend.filter((c) => c === c0 || (Math.hypot(c.cx - best!.x, c.cz - best!.z) <= R_DIG && !hits(best!.x, best!.z, c) && Math.abs(c.cx - c0.cx) <= 7));
+        const group = pend.filter((c) => c === c0 || (Math.hypot(c.cx - best!.x, c.cz - best!.z) <= R_DIG && !hits(best!.x, best!.z, c) && Math.abs(c.cx - c0.cx) <= 9));
         for (const c of group) pend.splice(pend.indexOf(c), 1);
         dug.push(...group);
         // camión: en la plataforma (frente) o en la huella de carguío (pasillo y peines)
         const inner = ph === 'A';
         const xMin = inner ? xa + INNER_S + 0.3 : EX.entryX + 1;
-        const tx = Math.max(best.x - TRUCK_BED, xMin);
-        const tz = inner ? EX.innerZ : laneZ(tx);
+        let tx = Math.max(best.x - TRUCK_BED, xMin);
+        let tz = inner ? EX.innerZ : laneZ(tx);
+        // si la tolva del camión ya detenido queda al alcance del brazo, el camión no se mueve
+        const prev = stations[stations.length - 1];
+        if (prev && prev.sector === sn && prev.truck.kind === (inner ? 'inner' : 'lane') && Math.hypot(prev.bed.x - best.x, prev.bed.z - best.z) <= R_DIG) {
+          tx = prev.truck.x;
+          tz = prev.truck.z;
+        }
         stations.push({
           x: best.x, z: best.z, sector: sn, phase: ph, cells: group, dig: [0, 0],
           truck: { x: tx, z: tz, heading: Math.PI, kind: inner ? 'inner' : 'lane' },
@@ -531,100 +570,153 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
   };
   const LBp = SITE.layby;
   const LB_IN = LBp.x - 4 - LB_S;
-  const streetLeg = () => arrival();
+  /** Desde el bolsón, en retroceso: vuelve al camino con una S y entra a la huella en x = LBp.x + 12. */
+  const LB_EXIT_X = LBp.x + 12;
+  /** Fracción del recorrido (inversa de easeTravel): instante relativo en que se llega a la distancia s. */
+  const timeOf = (route: Route, s: number, D: number) => {
+    const f = Math.min(Math.max(s / route.length, 0), 1);
+    return (f <= 0.5 ? Math.sqrt(f / 2) : 1 - Math.sqrt((1 - f) / 2)) * D;
+  };
+  /** Segundos desde que parte la salida hasta que la trasera del que sale ya pasó el bolsón. */
+  const clearAfter = (exR: Route) => {
+    const D = dur(exR, V_OUT);
+    for (let s = 0; s <= exR.length; s += 0.5) if (exR.at(s).x < LB_IN - 6) return timeOf(exR, s, D);
+    return D;
+  };
+  /** Del punto final de un tramo de llegada (en la huella) hasta el puesto `stop`. */
+  const toStop = (fromLane: P[], stop: ExcStation['truck'], xa: number): P[] => {
+    const x = fromLane[fromLane.length - 1][0];
+    const tail = stop.kind === 'inner'
+      ? [...laneLine(x, xa).slice(1), ...shift([xa, laneZ(xa)], [xa + INNER_S, EX.innerZ]).slice(1), ...line([xa + INNER_S, EX.innerZ], [stop.x, stop.z], 1.5).slice(1)]
+      : laneLine(x, stop.x).slice(1);
+    return [...fromLane, ...tail];
+  };
+  /** Llegada desde la calle: gira en retroceso por el portón y sigue por el camino hasta la huella. */
+  const fromGate = (stop: ExcStation['truck'], xa: number) => {
+    const LANE_IN = SITE.street.x + SITE.street.width / 4, R_IN = 8;
+    return R(toStop([
+      ...arc([LANE_IN + R_IN, RZ - R_IN], R_IN, Math.PI, Math.PI / 2),
+      ...line([LANE_IN + R_IN, RZ], [EX.entryX - 8, RZ]).slice(1),
+      ...ROAD_TO_LANE().slice(1),
+    ], stop, xa), true);
+  };
+  const fromLayby = (stop: ExcStation['truck'], xa: number) => R(toStop([...shift([LBp.x, LBp.z], [LB_EXIT_X, laneZ(LB_EXIT_X)])], stop, xa), true);
+  /**
+   * Cargas de un sector: cada carga es un camión tolva que se llena en una serie de puestos seguidos.
+   * El sector 1 (el de mayor volumen, con la zona profunda A-B) se carga en 2 camiones; el cambio se
+   * hace donde el puesto siguiente queda al alcance desde el bolsón (huella, x ≥ LB_EXIT_X).
+   */
+  const splitLoads = (sts: ExcStation[], n: number): ExcStation[][] => {
+    if (n <= 1 || sts.length < 2) return [sts];
+    const vol = sts.map((s) => s.cells.reduce((a, c) => a + c.vol, 0));
+    const tot = vol.reduce((a, b) => a + b, 0);
+    let best = -1, bestErr = Infinity, acc = 0;
+    for (let i = 1; i < sts.length; i++) {
+      acc += vol[i - 1];
+      const s = sts[i].truck;
+      if (s.kind !== 'lane' || s.x < LB_EXIT_X + 0.5) continue;
+      const err = Math.abs(acc / tot - 0.5);
+      if (err < bestErr && err < 0.3) { bestErr = err; best = i; }
+    }
+    return best < 0 ? [sts] : [sts.slice(0, best), sts.slice(best)];
+  };
+  const LOADS = [2, 1, 1];
   let exPos: { x: number; z: number } = first;
-  let prevExit: { route: Route; t: Win } | null = null;
+  /** Salida del último camión cargado (para que el siguiente espere a que pase). */
+  let prevExit: { route: Route; t0: number } | null = null;
   const sectors: SectorPlan[] = [];
   for (const sn of [1, 2, 3]) {
     const g = GANTT[sn - 1];
     const E: Win = span(g.exc[0], g.exc[1]);
     const sts = stations.filter((s) => s.sector === sn);
     const xa = sn === 1 ? EX.entryX : sectorRange(sn)[0];
-    // llegada del camión al primer puesto
-    const legs: TruckLeg[] = [];
-    let startDig: number;
-    let waitFrom: number | null = null;
-    let gateIn: number;
-    const firstStop = sts[0].truck;
-    const entryToFirst = (fromLane: P[]): P[] => {
-      const tail = firstStop.kind === 'inner'
-        ? [...laneLine(fromLane[fromLane.length - 1][0], xa).slice(1), ...shift([xa, laneZ(xa)], [xa + INNER_S, EX.innerZ]).slice(1), ...line([xa + INNER_S, EX.innerZ], [firstStop.x, firstStop.z], 1.5).slice(1)]
-        : laneLine(fromLane[fromLane.length - 1][0], firstStop.x).slice(1);
-      return [...fromLane, ...tail];
-    };
-    if (!prevExit) {
-      // primer camión: de la calle en retroceso por el portón y el camino hasta su puesto
-      const LANE_IN = SITE.street.x + SITE.street.width / 4, R_IN = 8;
-      const back = R(entryToFirst([
-        ...arc([LANE_IN + R_IN, RZ - R_IN], R_IN, Math.PI, Math.PI / 2),
-        ...line([LANE_IN + R_IN, RZ], [EX.entryX - 8, RZ]).slice(1),
-        ...ROAD_TO_LANE().slice(1),
-      ]), true);
-      startDig = E[0];
-      gateIn = startDig - dur(back, V_BACK);
-      const st = streetLeg();
-      legs.push({ route: st, t: [gateIn - 0.25 - dur(st, V_STREET), gateIn - 0.25], back: false }, { route: back, t: [gateIn, startDig], back: true });
-    } else {
-      // espera en el bolsón a que pase el camión del sector anterior y retrocede hasta su puesto
-      const toLb = reverseToLayby();
-      const fromLb = R(entryToFirst([...shift([LBp.x, LBp.z], [LBp.x + 12, laneZ(LBp.x + 12)])]), true);
-      // instante en que el que sale ya pasó el bolsón (su trasera más allá de la entrada de la S)
-      const pe = prevExit;
-      let clear = pe.t[1];
-      for (let s = 0; s <= pe.route.length; s += 0.5) {
-        if (pe.route.at(s).x < LB_IN - 6) {
-          const f = s / pe.route.length;
-          const u = f <= 0.5 ? Math.sqrt(f / 2) : 1 - Math.sqrt((1 - f) / 2);
-          clear = pe.t[0] + u * (pe.t[1] - pe.t[0]);
+    const loads = splitLoads(sts, LOADS[sn - 1]);
+    const isFirst = (s: ExcStation) => loads.some((ld) => ld[0] === s);
+    // duraciones fijas: traslados entre puestos (excavadora y camión) y cambios de camión
+    const moves = sts.map((s, i) => (i === 0 || isFirst(s) ? [] : moveLegs(sts[i - 1].truck, s.truck, xa)));
+    const exTravel = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(b.x - a.x, b.z - a.z) / V_EXC + 0.4;
+    const exitOf = (s: ExcStation) => exitRoute(s.truck);
+    const trans = sts.map((s, i) => {
+      if (i === 0) {
+        // primer puesto del sector: el camión llega (de la calle o del bolsón) y la excavadora se traslada
+        const truck = prevExit ? clearAfter(prevExit.route) + 0.15 + dur(fromLayby(s.truck, xa), V_BACK) : 0;
+        return Math.max(truck, sn > 1 ? exTravel(exPos, s) : 0);
+      }
+      if (isFirst(s)) return Math.max(clearAfter(exitOf(sts[i - 1])) + 0.15 + dur(fromLayby(s.truck, xa), V_BACK), exTravel(sts[i - 1], s));
+      return Math.max(Math.hypot(s.x - sts[i - 1].x, s.z - sts[i - 1].z) / V_EXC + 0.35, moves[i].reduce((acc, m) => acc + dur(m.route, V_SITE), 0) + 0.1);
+    });
+    // los cambios de camión no se acortan (el que llega espera en el bolsón a que pase el que sale);
+    // si no alcanza el tiempo, se apuran los traslados entre puestos
+    const fixed = sts.reduce((a, s, i) => a + (i === 0 || isFirst(s) ? trans[i] : 0), 0);
+    const avail = E[1] - E[0] - fixed;
+    const movesSum = trans.reduce((a, b) => a + b, 0) - fixed;
+    let kTr = 1;
+    if (avail - movesSum < avail * 0.62) kTr = (avail * 0.38) / Math.max(movesSum, 1e-3);
+    const trSum = movesSum * kTr;
+    const volSum = sts.reduce((a, s) => a + s.cells.reduce((b, c) => b + c.vol, 0), 0);
+    const kV = (avail - trSum) / volSum;
+    let t = E[0];
+    let legs: TruckLeg[] = [];
+    let visitCells: ExcCell[] = [];
+    let arrive = 0, gateIn = 0, waitFrom: number | null = null;
+    const closeVisit = (last: ExcStation, at: number) => {
+      const exR = exitOf(last);
+      const exT: Win = [at, at + dur(exR, V_OUT)];
+      let gateAt = exT[1];
+      for (let q = 0; q <= exR.length; q += 0.5) {
+        if (exR.at(q).x < SITE.gate.x - 1) {
+          gateAt = at + timeOf(exR, q, exT[1] - exT[0]);
           break;
         }
       }
-      const go = clear + 0.15;
-      // la excavadora también tiene que llegar al primer puesto del sector
-      const exArrive = E[0] + Math.hypot(sts[0].x - exPos.x, sts[0].z - exPos.z) / V_EXC + 0.4;
-      startDig = Math.max(E[0], go + dur(fromLb, V_BACK), exArrive);
-      const atLb = Math.min(go, E[0]) - 0.6;
-      gateIn = atLb - dur(toLb, V_BACK);
-      const st = streetLeg();
-      legs.push(
-        { route: st, t: [gateIn - 0.25 - dur(st, V_STREET), gateIn - 0.25], back: false },
-        { route: toLb, t: [gateIn, atLb], back: true },
-        { route: fromLb, t: [startDig - dur(fromLb, V_BACK), startDig], back: true },
-      );
-      waitFrom = atLb;
-    }
-    // excavadora: del puesto anterior al primero del sector
-    if (sn > 1) {
-      const tr = Math.hypot(sts[0].x - exPos.x, sts[0].z - exPos.z) / V_EXC + 0.4;
-      pushTravel(exPos, sts[0], E[0], E[0] + tr, `Se traslada al sector ${sn}`);
-    }
-    // repartición: transiciones (el camión se reubica y la excavadora avanza) y excavación por volumen
-    const moves = sts.slice(1).map((s, i) => moveLegs(sts[i].truck, s.truck, xa));
-    const trans = sts.slice(1).map((s, i) => Math.max(
-      Math.hypot(s.x - sts[i].x, s.z - sts[i].z) / V_EXC + 0.35,
-      moves[i].reduce((acc, m) => acc + dur(m.route, V_SITE), 0) + 0.1,
-    ));
-    const avail = E[1] - startDig;
-    let trSum = trans.reduce((a, b) => a + b, 0);
-    let kTr = 1;
-    if (avail - trSum < avail * 0.5) {
-      kTr = (avail * 0.5) / Math.max(trSum, 1e-3);
-      trSum *= kTr;
-    }
-    const volSum = sts.reduce((a, s) => a + s.cells.reduce((b, c) => b + c.vol, 0), 0);
-    const kV = (avail - trSum) / volSum;
-    let t = startDig;
+      legs.push({ route: exR, t: exT, back: false, on: 'salida', gateAt });
+      trucks.push({ id: trucks.length + 1, sector: sn, legs, arrive: [legs[0].t[0], arrive], leave: exT, waitFrom, gateIn, cells: visitCells });
+      prevExit = { route: exR, t0: at };
+    };
     sts.forEach((s, i) => {
-      if (i > 0) {
-        const tr = trans[i - 1] * kTr;
+      const tr = i === 0 || isFirst(s) ? trans[i] : trans[i] * kTr;
+      if (i === 0 || isFirst(s)) {
+        // llega un camión vacío: el primero de la obra desde la calle; los demás esperan en el bolsón
+        if (i > 0) closeVisit(sts[i - 1], t);
+        legs = [];
+        visitCells = [];
+        const st = arrival();
+        if (!prevExit) {
+          const back = fromGate(s.truck, xa);
+          arrive = t;
+          gateIn = t - dur(back, V_BACK);
+          waitFrom = null;
+          legs.push({ route: st, t: [gateIn - 0.25 - dur(st, V_STREET), gateIn - 0.25], back: false, on: 'calle' }, { route: back, t: [gateIn, t], back: true, on: 'camino' });
+        } else {
+          const pe: { route: Route; t0: number } = prevExit;
+          const toLb = reverseToLayby(), fromLb = fromLayby(s.truck, xa);
+          const go = pe.t0 + clearAfter(pe.route) + 0.15;
+          // llega al bolsón antes de que el cargado parta, pero sin pisarle los talones al anterior en la calle
+          const lastGate = trucks.length ? trucks[trucks.length - 1].gateIn : -Infinity;
+          gateIn = Math.max(pe.t0 - 0.4 - dur(toLb, V_BACK), lastGate + 2.8);
+          const atLb = gateIn + dur(toLb, V_BACK);
+          arrive = t + tr;
+          const d = dur(fromLb, V_BACK);
+          legs.push(
+            { route: st, t: [gateIn - 0.25 - dur(st, V_STREET), gateIn - 0.25], back: false, on: 'calle' },
+            { route: toLb, t: [gateIn, atLb], back: true, on: 'bolsón' },
+            { route: fromLb, t: [Math.max(go, arrive - d), arrive], back: true, on: 'delBolsón' },
+          );
+          waitFrom = atLb;
+        }
+        // la excavadora se traslada (al sector siguiente o al puesto del nuevo camión)
+        if (i === 0 && sn > 1) pushTravel(exPos, s, t, t + Math.min(tr, exTravel(exPos, s)), `Se traslada al sector ${sn}`);
+        else if (i > 0) pushTravel(sts[i - 1], s, t, t + Math.min(tr, exTravel(sts[i - 1], s)), 'Avanza al puesto siguiente');
+        t += i === 0 && !prevExit ? 0 : tr;
+      } else {
         pushTravel(sts[i - 1], s, t, t + tr * 0.9, 'Avanza al puesto siguiente');
-        // tramos del camión dentro de la transición
-        const ms = moves[i - 1];
+        // tramos del camión dentro del traslado
+        const ms = moves[i];
         const tot = ms.reduce((acc, m) => acc + dur(m.route, V_SITE), 0) || 1;
         let tt = t + 0.05;
         for (const m of ms) {
           const d = (dur(m.route, V_SITE) / tot) * (tr - 0.1);
-          legs.push({ route: m.route, t: [tt, tt + d], back: m.back });
+          legs.push({ route: m.route, t: [tt, tt + d], back: m.back, on: 'huella' });
           tt += d;
         }
         t += tr;
@@ -637,24 +729,24 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
         c.dig = [tc, tc + c.vol * kV];
         tc += c.vol * kV;
       }
+      visitCells.push(...s.cells);
       t = s.dig[1];
     });
     exPos = sts[sts.length - 1];
-    // salida del camión
-    const exR = exitRoute(sts[sts.length - 1].truck);
-    const exT: Win = [E[1], E[1] + dur(exR, V_OUT)];
-    legs.push({ route: exR, t: exT, back: false });
-    prevExit = { route: exR, t: exT };
-    trucks.push({ id: sn, sector: sn, legs, arrive: [legs[0].t[0], startDig], leave: exT, waitFrom, gateIn, cells: cells.filter((c) => c.sector === sn) });
+    closeVisit(sts[sts.length - 1], Math.max(t, E[1]));
 
     // --- resto del sector ---
     const perfil = span(g.perfil[0], g.perfil[1]);
     const recep = span(g.recep[0], g.recep[1]);
+    // hormigonado con la bomba: el primer mixer entra en retroceso al empezar el día y el segundo
+    // después del cambio (la bomba se detiene al 60 %, como en las losas)
+    const pour: Win = [T(g.pour - 1) + 4.4, T(g.pour) - 1.6];
+    const pm = pour[0] + (pour[1] - pour[0]) * 0.6;
     sectors.push({
       n: sn, x0: sectorRange(sn)[0], x1: sectorRange(sn)[1], exc: E, perfil, recep,
       empl: null as unknown as CapachoSeries,
       fierro: span(g.fierro[0], g.fierro[1]), moldaje: span(g.moldaje[0], g.moldaje[1]),
-      pour: { sector: sn, pour: [T(g.pour - 1) + 4.4, T(g.pour) - 1.0], pumpStop: [T(g.pour) - 1.0, T(g.pour) - 1.0] },
+      pour: { sector: sn, pour, pumpStop: [pm - PACE.cambioMixer / 2, pm + PACE.cambioMixer / 2] },
       desc: span(g.desc[0], g.desc[1]), npt: null, igol: span(g.igol[0], g.igol[1]), relleno: span(g.relleno[0], g.relleno[1]),
       m3: f.sectores[sn - 1]?.hormigonZapatas_m3 ?? 115, kg: (f.sectores[sn - 1]?.fierroZapatas_kg ?? 4000) * 1.05, moldajeM2: 0,
     });
@@ -680,11 +772,30 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
   const strips: StripTiming[] = [];
   const capachos: CapachoSeries[] = [];
   const series = (day: number, sector: number, what: CapachoSeries['what'], pts: P3[], task: string): CapachoSeries => {
-    const a = T(day - 1) + 0.1, b = T(day) - 0.1;
-    const lead = 0.9, tail = 0.55;
-    const D = (b - a - lead - tail) / pts.length;
+    // el mixer entra en retroceso al empezar el día (mientras, la grúa engancha el capacho), pero
+    // el camino es uno solo: si un camión tolva está entrando o saliendo, espera a que termine
+    const lead = FUND_PACE.capachoLead, D = FUND_PACE.capachoTrip;
+    // ventanas del mixer en el camino si la serie parte en x: entra en retroceso (M1), queda detenido
+    // junto al capacho y sale (M2); P = todo el tiempo que está en el camino
+    const win = (x: number) => {
+      const f0 = x + lead + 0.22 * D, at = f0 - 0.025 * D - 0.3, gate = at - 3.3;
+      const done = x + lead + (pts.length - 1) * D + 0.345 * D + 0.23;
+      // (desde que se acerca al portón por la calle, donde cruza el carril de salida)
+      return { P: [gate - 1.8, done + 2.6] as Win, M: [[gate - 1.8, at], [done, done + 2.6]] as Win[] };
+    };
+    // tramos de los camiones tolva por el camino: los que van al bolsón solo topan al mixer en movimiento
+    const lb = trucks.flatMap((v) => v.legs.filter((L) => L.on !== 'calle' && L.on !== 'huella')
+      .map((L) => ({ t: (L.on === 'salida' ? [L.t[0], (L.gateAt ?? L.t[1]) + 1.6] : L.t) as Win, toLb: L.on === 'bolsón' })));
+    const hit = (w: Win, b: Win) => w[0] < b[1] + 0.3 && w[1] > b[0] - 0.3;
+    let a = T(day - 1) + 0.1;
+    for (let guard = 0; guard < 600; guard++) {
+      const m = win(a);
+      if (!lb.some((L) => (L.toLb ? m.M.some((w) => hit(w, L.t)) : hit(m.P, L.t)))) break;
+      a += 0.1;
+    }
+    if (win(a).P[1] > T(day) + 1.5) console.warn(`Fundaciones: la serie de capachos del día ${day} no cabe entre los camiones tolva`);
     const s: CapachoSeries = {
-      t0: a, t1: b, what, sector, task,
+      t0: a, t1: a + lead + pts.length * D + 1.2, what, sector, task,
       trips: pts.map((p, k) => ({ t0: a + lead + k * D, t1: a + lead + (k + 1) * D, walls: [], ...p })),
     };
     capachos.push(s);
@@ -716,7 +827,8 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     const mWins = seq(fr, (x) => 2 * (x.B + x.L), S.moldaje, 0.4);
     // hormigonado: desde el lado de la tubería (que llega por la fachada posterior en x de la puerta)
     const order = [...fr].sort((a, b) => Math.abs(cxOf(a) - (S.n === 2 ? pumpEntryX : S.n === 1 ? S.x1 : S.x0)) - Math.abs(cxOf(b) - (S.n === 2 ? pumpEntryX : S.n === 1 ? S.x1 : S.x0)) || czOf(a) - czOf(b));
-    const pWins = seq(order, (x) => x.B * x.L * (x.tope - x.sello), S.pour.pour, 0);
+    // ventanas en fracción vaciada (0..1) llevadas al reloj, saltando la pausa del cambio de mixer
+    const pWins = seq(order, (x) => x.B * x.L * (x.tope - x.sello), [0, 1], 0).map(([a, b]) => [tOfK(S.pour, a), tOfK(S.pour, b)] as Win);
     const pMap = new Map(order.map((x, i) => [x, pWins[i]]));
     const stripW = S.desc;
     fr.forEach((x, i) => {
@@ -929,7 +1041,7 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
   const pourPoint = (sector: number, k: number): P3 => {
     const sp = sectors[sector - 1];
     const list = strips.filter((s) => s.franja.sector === sector).sort((a, b) => a.pour[0] - b.pour[0]);
-    const tt = sp.pour.pour[0] + clamp01(k) * (sp.pour.pour[1] - sp.pour.pour[0]);
+    const tt = tOfK(sp.pour, clamp01(k));
     const s = list.find((x) => tt <= x.pour[1]) ?? list[list.length - 1];
     const u = k01(tt, s.pour);
     const fr = s.franja;
@@ -1017,7 +1129,7 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
       if (t >= S.empl.t0 && t <= S.empl.t1) parts.push(`${s}: emplantillado G05 de 5 cm con capacho`);
       if (inW(S.fierro)) parts.push(`${s}: enfierradura Ø12 A630-420H y esperas`);
       if (inW(S.moldaje)) parts.push(`${s}: moldaje de costados y pollos`);
-      if (inW([S.pour.pour[0] - 2.5, S.pour.pour[1] + 0.3])) parts.push(`${s}: hormigonado G25 con bomba estacionaria (≈ ${Math.round(S.m3)} m³)`);
+      if (inW([S.pour.pour[0] - 4.6, S.pour.pour[1] + 0.3])) parts.push(`${s}: hormigonado G25 con bomba estacionaria (≈ ${Math.round(S.m3)} m³)`);
       if (inW(S.desc)) parts.push(`${s}: descimbre de costados`);
       if (S.npt && inW(S.npt.fierro)) parts.push(`${s}: ${S.n === 2 ? 'fierro y moldaje de la V.S.C. y muros del foso' : 'fierro y moldaje de muros bajo NPT'}`);
       if (S.npt && t >= S.npt.cap.t0 && t <= S.npt.cap.t1) parts.push(`${s}: ${S.npt.cap.task.toLowerCase()}`);
@@ -1033,7 +1145,7 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
   const focus = (t: number): P3 => {
     const ex = excavator(t);
     for (const S of sectors) {
-      if (t >= S.pour.pour[0] - 2 && t <= S.pour.pour[1]) return pourPoint(S.n, k01(t, S.pour.pour));
+      if (t >= S.pour.pour[0] - 2 && t <= S.pour.pour[1]) return pourPoint(S.n, fundPourFrac(S.pour, t));
     }
     if (ex.visible && t >= sectors[0].exc[0] && t <= sectors[2].exc[1]) return { x: ex.x, y: PLAT, z: ex.z };
     const fr = fronts(t).find((x) => x.n >= 4) ?? fronts(t)[0];
@@ -1051,7 +1163,7 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     const kgTot = sectors.reduce((s, x) => s + x.kg, 0);
     const mTot = sectors.reduce((s, x) => s + x.moldajeM2, 0);
     for (const S of sectors) {
-      hormigon += (S.m3 / m3Tot) * 361.77 * k01(t, S.pour.pour);
+      hormigon += (S.m3 / m3Tot) * 361.77 * fundPourFrac(S.pour, t);
       hormigon += (18.91 / 3) * k01(t, [S.empl.t0, S.empl.t1]);
       acero += (S.kg / kgTot) * 14074.6 * k01(t, S.fierro);
       moldaje += (S.moldajeM2 / mTot) * 597.29 * k01(t, S.moldaje);

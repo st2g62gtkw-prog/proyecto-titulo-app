@@ -11,6 +11,7 @@ import { GeoBuilder, offsetPolygon, pointInPolygon, polyBounds, samplePerimeter,
 import { BANDEJA_LIFT, bandejaSpan, buildBandeja } from './bandeja';
 import { NEVER, revealMaterial, revealMesh, type RevealMaterial } from './reveal';
 import { SITE } from '../config';
+import { buildFoundations, type GroundMask } from './foundations';
 import { concreteTexture, formPanelTexture, plywoodTexture } from './textures';
 import { FACADE_COLORS } from './facadePaint';
 import { exteriorFaces } from '../core/paintPlan';
@@ -42,6 +43,8 @@ export interface Structure {
   sweeps: SlabSweep[];
   /** Planos de corte (vista "Corte"): se activan/desactivan desde la app. */
   clipping: THREE.Plane[];
+  /** Planta de la excavación de fundaciones: el terreno de la faena no se dibuja ahí. */
+  groundMask: GroundMask;
   update(t: number): void;
   /** true si el punto (cara) de la malla ya existe en el tiempo t. */
   isBuiltAt(mesh: THREE.Mesh, faceIndex: number, t: number): boolean;
@@ -127,8 +130,8 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
   const add = (
     geo: THREE.BufferGeometry, mat: RevealMaterial, kind: string, level: number, from: number, to: number,
     pick = false, shadows = true,
-  ) => {
-    if (!geo.getAttribute('position') || geo.getAttribute('position').count === 0) return;
+  ): THREE.Mesh | undefined => {
+    if (!geo.getAttribute('position') || geo.getAttribute('position').count === 0) return undefined;
     const mesh = revealMesh(geo, mat, shadows);
     mesh.name = `${kind}-${levels[level]?.name ?? level}`;
     mesh.userData.kind = kind;
@@ -139,44 +142,30 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     }
     group.add(mesh);
     layers.push({ mesh, from, to, kind, level });
+    return mesh;
   };
 
   const bboxAll = polyBounds(levels[levels.length - 1].slab.outer);
   const X0 = bboxAll.x0, X1 = bboxAll.x1;
 
-  // --- Excavación, fundaciones e instalaciones bajo radier ------------------------------
+  // --- Fundaciones (excavación, zapatas, fierro, moldaje, relleno) e instalaciones bajo radier ---
+  const fund = buildFoundations(sched, add, clipping);
+  group.add(fund.ground);
+  pickables.push(...fund.pickables);
   {
     const rad = sched.slab[0].pour;
-    const fund = sched.activities.find((a) => a.kind === 'fundaciones')!;
     const inst = sched.parallel.find((a) => a.kind === 'instalaciones')!;
     const area0 = offsetPolygon(levels[0].slab.outer, -1.6);
+    const F = sched.fund;
+    const fo = F.data.foso;
 
-    // excavación abierta mientras se hacen las zapatas
-    const g = new GeoBuilder();
-    g.timing(0, 0, fund.t1, fund.t1 + 0.2);
-    g.extrude(area0, [], -0.2, -0.186, false, false);
-    add(g.build(), M.excavation, 'excavacion', 0, 0, fund.t1 + 0.3, false, false);
-
-    // zanjas de las zapatas (se rellenan al terminar las fundaciones)
-    const z = new GeoBuilder();
-    z.timing(0, 0, fund.t1, fund.t1 + 0.2);
-    haWalls(levels[0]).forEach((w) => z.extrude(offsetPolygon(w.poly, -0.32), [], -0.2, -0.183, false, false));
-    add(z.build(), M.trench, 'zanjas', 0, 0, fund.t1 + 0.3, false, false);
-
-    // relleno compactado del 1er piso: queda a la vista hasta que se hormigona el radier
+    // plataforma compactada y nivelada a −0,20 entre zapatas (días 34–37): queda a la vista hasta
+    // que se hormigona el radier; el foso del ascensor queda abierto
     const r = new GeoBuilder();
-    r.timing(fund.t1 - 0.4, fund.t1, rad[1], rad[1] + 0.2);
-    r.extrude(area0, [], -0.2, -0.187, false, false);
-    add(r.build(), M.fill, 'relleno', 0, fund.t1 - 0.5, rad[1] + 0.3, false, false);
-
-    const f = new GeoBuilder();
-    f.uvScale = 1 / 2.4;
-    haWalls(levels[0]).forEach((w, i) => {
-      const [p0, p1] = sched.footing[i];
-      f.timing(p0, p1, NEVER, NEVER, -0.75, 0.6);
-      f.extrude(offsetPolygon(w.poly, -0.22), [], -0.75, -0.15);
-    });
-    add(f.build(), M.footing, 'zapatas', 0, sched.foundations[0], rad[1] + 2);
+    r.timing(F.compactacion[0], F.compactacion[1], rad[1], rad[1] + 0.2);
+    const fosoHole: V2[] = [[fo.losaFoso.x0, fo.losaFoso.z0], [fo.vsc.x1, fo.losaFoso.z0], [fo.vsc.x1, fo.losaFoso.z1], [fo.losaFoso.x0, fo.losaFoso.z1]];
+    r.extrude(area0, [fosoHole], -0.2, -0.187, false, false);
+    add(r.build(), M.fill, 'relleno', 0, F.compactacion[0] - 0.1, rad[1] + 0.3, false, false);
 
     // redes bajo radier: colector de alcantarillado PVC (naranjo), agua potable HDPE (azul) y cámaras
     const b0 = polyBounds(levels[0].slab.outer);
@@ -452,8 +441,9 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
   }
 
   const struct: Structure = {
-    group, layers, pickables, sweeps, clipping,
+    group, layers, pickables, sweeps, clipping, groundMask: fund.mask,
     update(t: number) {
+      fund.update(t);
       for (const l of layers) {
         const vis = t >= l.from - 0.05 && t <= l.to;
         if (l.mesh.visible !== vis) {

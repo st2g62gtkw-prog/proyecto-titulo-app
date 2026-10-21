@@ -14,6 +14,8 @@ import { buildSchedule, haWalls, type Schedule } from '../core/schedule';
 import { createBalancin, type BalancinRig } from './equipment/balancin';
 import { createCapacho, type CapachoRig } from './equipment/capacho';
 import { createCrane, type CraneRig } from './equipment/crane';
+import { createDumpTruck, type DumpTruckRig } from './equipment/dumpTruck';
+import { createExcavator, type ExcavatorRig } from './equipment/excavator';
 import { createMixer, type MixerRig } from './equipment/mixer';
 import { createPanelPack, createDeckPack, createPropBundle, createRebarBundle } from './equipment/payloads';
 import { createConcreteStream, type ConcreteStream } from './equipment/pour';
@@ -35,6 +37,8 @@ export interface WorldDeps {
 }
 
 const MIXER_POOL = 5;
+/** Camiones tolva que pueden estar a la vez en la obra (uno cargando y otro esperando o saliendo). */
+const TRUCK_POOL = 3;
 
 /** Punto plano {x, y, z} de un vector (para el plan de la grúa, que no depende de three). */
 const toP3 = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
@@ -43,6 +47,9 @@ export interface WorldState {
   /** Punto de trabajo actual (para seguir la obra con la cámara). */
   focus: THREE.Vector3;
   craneTask: string;
+  /** Qué hace la excavadora (vacío si no está en obra). */
+  excavatorTask: string;
+  trucksOnSite: number;
   pumpBusy: boolean;
   mixersOnSite: number;
   /** Balancín del subcontrato de pintura (null si no está en obra). */
@@ -67,11 +74,14 @@ export class World {
   pump: StationaryPumpRig;
   pipeline: Pipeline;
   mixers: MixerRig[] = [];
+  /** Excavación de las fundaciones: excavadora y camiones tolva. */
+  excavator: ExcavatorRig;
+  trucks: DumpTruckRig[] = [];
   streams: ConcreteStream[] = [];
   payloads: Record<Exclude<PayloadKind, 'capacho'>, THREE.Group>;
   pickables: THREE.Object3D[] = [];
   labels: { obj: CSS2DObject; el: HTMLElement; key: string }[] = [];
-  state: WorldState = { focus: new THREE.Vector3(0, 8, 0), craneTask: '', pumpBusy: false, mixersOnSite: 0, paint: null };
+  state: WorldState = { focus: new THREE.Vector3(0, 8, 0), craneTask: '', excavatorTask: '', trucksOnSite: 0, pumpBusy: false, mixersOnSite: 0, paint: null };
   private capachoRest = new THREE.Vector3();
   private capachoFill = new THREE.Vector3();
   private pumpHopper = new THREE.Vector3();
@@ -164,6 +174,21 @@ export class World {
     scene.add(this.pipeline.group);
     this.pickables.push(...this.pipeline.pickables);
 
+    // excavadora y camiones tolva de la excavación de fundaciones
+    this.excavator = createExcavator();
+    this.excavator.group.visible = false;
+    scene.add(this.excavator.group);
+    this.pickables.push(...this.excavator.pickables);
+    for (let i = 0; i < TRUCK_POOL; i++) {
+      const tk = createDumpTruck();
+      tk.group.visible = false;
+      scene.add(tk.group);
+      this.trucks.push(tk);
+      this.pickables.push(...tk.pickables);
+    }
+    // la excavación de las zapatas recorta el terreno de la faena
+    this.site.setGroundMask?.(this.structure.groundMask);
+
     for (let i = 0; i < 4; i++) {
       const s = createConcreteStream();
       scene.add(s.group);
@@ -253,6 +278,8 @@ export class World {
     // sobre el pilar del lado +z y más alta que la del mixer, para que no se tapen cuando pasa un camión
     this.addLabel('gate', 'Portón de camiones', 'info', root, new THREE.Vector3(SITE.gate.x, 7.2, SITE.gate.z + 4.6));
     this.mixers.forEach((m, i) => this.addLabel(`mixer${i}`, 'Mixer 7 m³', 'mixer', m.group, new THREE.Vector3(0, 4.6, 0)));
+    this.addLabel('excavator', 'Excavadora 20 t', 'info', this.excavator.group, new THREE.Vector3(0, 5.2, 0));
+    this.trucks.forEach((tk, i) => this.addLabel(`truck${i}`, 'Camión tolva 14 m³', 'mixer', tk.group, new THREE.Vector3(0, 4.4, 0)));
     this.addLabel('front', 'Frente de trabajo', 'work', root, new THREE.Vector3());
     this.addLabel('balancin', 'Balancín · pintura', 'info', this.balancin.group, new THREE.Vector3());
   }
@@ -369,6 +396,27 @@ export class World {
     }
     this.state.mixersOnSite = mstates.length;
 
+    // --- excavadora y camiones tolva (fundaciones) ---
+    const F = this.sched.fund;
+    const ex = F.excavator(T);
+    this.excavator.group.visible = ex.visible;
+    this.state.excavatorTask = ex.visible ? ex.task : '';
+    if (ex.visible) {
+      this.excavator.group.position.set(ex.x, gy, ex.z);
+      this.excavator.setPose({ heading: ex.heading, slew: ex.slew, r: ex.r, h: ex.y - gy, curl: ex.curl, load: ex.load, dist: ex.dist });
+    }
+    const tstates = F.truckStates(T);
+    this.trucks.forEach((tk) => (tk.group.visible = false));
+    for (const s of tstates) {
+      const tk = this.trucks[s.id % TRUCK_POOL];
+      tk.group.visible = true;
+      tk.group.position.set(s.pose.x, gy, s.pose.z);
+      tk.group.rotation.set(0, -s.pose.heading, 0);
+      tk.setWheels(s.dist);
+      tk.setLoad(s.load);
+    }
+    this.state.trucksOnSite = tstates.length;
+
     // chorro mixer → capacho (solo mientras se llena): de la canaleta al hormigón dentro del capacho
     const sMix = this.streams[0];
     if (chuteActive && cs.payload === 'capacho' && cs.cycle && T >= cs.cycle.fill[0] && T <= cs.cycle.fill[1]) {
@@ -392,11 +440,20 @@ export class World {
     this.pump.setPumping(ps.pumping, clock);
     const sw = this.structure.sweeps[ps.slab];
     // durante el cambio de mixer la tubería y la manguera siguen armadas, pero no sale hormigón
-    const target = ps.pour && sw ? this.sweepPoint(sw, ps.progress) : null;
-    const tip = this.pipeline.update(ps.slab, ps.pour, target);
-    if (tip && target && sw) {
-      sHose.set(tip, new THREE.Vector3(target.x, sw.y, target.z), ps.pumping ? 1 : 0, clock);
-      this.state.focus.set(target.x, sw.y, target.z);
+    let target: THREE.Vector3 | null = null, floorY = 0;
+    if (ps.pour && ps.sector > 0) {
+      // zapatas: la manguera recorre las franjas del sector en el orden del plan
+      const p = this.sched.fund.pourPoint(ps.sector, ps.progress);
+      target = new THREE.Vector3(p.x, SITE.groundY + 0.3, p.z);
+      floorY = p.y;
+    } else if (ps.pour && sw) {
+      target = this.sweepPoint(sw, ps.progress);
+      floorY = sw.y;
+    }
+    const tip = this.pipeline.update(ps.sector > 0 ? -1 : ps.slab, ps.pour, target);
+    if (tip && target) {
+      sHose.set(tip, new THREE.Vector3(target.x, floorY, target.z), ps.pumping ? 1 : 0, clock);
+      this.state.focus.set(target.x, floorY, target.z);
     } else sHose.set(this.tmp, this.tmp, 0, clock);
     if (pumpHopperFeed && ps.pumping) {
       // el chorro cae desde el labio de la canaleta hasta la parrilla dentro de la tolva (0,35 m bajo
@@ -480,6 +537,8 @@ export class World {
     for (const l of this.labels) {
       if (l.key === 'balancin') l.obj.visible = this.labelsOn && !!pst && pst.rigged;
       if (l.key.startsWith('mixer')) l.obj.visible = this.labelsOn && this.mixers[+l.key.slice(5)].group.visible;
+      if (l.key.startsWith('truck')) l.obj.visible = this.labelsOn && this.trucks[+l.key.slice(5)].group.visible;
+      if (l.key === 'excavator') l.obj.visible = this.labelsOn && this.excavator.group.visible;
     }
   }
 

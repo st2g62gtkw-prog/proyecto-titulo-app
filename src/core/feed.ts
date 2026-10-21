@@ -37,7 +37,41 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
     ev.push({ t: m.gateIn + 0.3, text: `Mixer N° ${m.id} entra en retroceso por el portón norponiente · 7 m³ G25`, kind: 'mixer' });
     ev.push({ t: m.discharge[0], text: m.spot === 'bomba' ? `Mixer N° ${m.id} descarga en tolva de la bomba` : `Mixer N° ${m.id} carga el capacho`, kind: 'mixer' });
   }
+  // fundaciones: excavación por sectores, sellos, fierro, moldaje, hormigón y relleno
+  {
+    const F = sched.fund;
+    ev.push({ t: F.t0 + 0.1, text: 'Trazado de ejes con estación total, niveletas y cal; escarpe y plataforma a −0,20', kind: 'info' });
+    ev.push({ t: F.t0 + 0.4, text: 'Llega la excavadora de orugas (20 t) en cama baja', kind: 'info' });
+    const vol = (cells: typeof F.cells) => cells.reduce((a, c) => a + c.vol, 0);
+    const tot = vol(F.cells);
+    let acc = 0;
+    for (const v of F.trucks) {
+      ev.push({ t: v.gateIn + 0.2, text: `Camión tolva N° ${v.id} entra en retroceso por el portón${v.waitFrom !== null ? ' y espera en el bolsón' : ''}`, kind: 'mixer' });
+      acc += vol(v.cells);
+      ev.push({ t: v.leave[0] + 0.1, text: `Camión tolva N° ${v.id} sale a botadero · ${fmt(Math.round((acc / tot) * 627))} de 627 m³ excavados`, kind: 'mixer' });
+    }
+    for (const S of F.sectors) {
+      const n = S.n;
+      ev.push({ t: S.exc[0] + 0.05, text: `Excavación del sector ${n}${n === 1 ? ': zona profunda A-B a −2,66 con talud 3:1' : n === 2 ? ': núcleo y foso del ascensor a −1,45' : ''}`, kind: 'info' });
+      ev.push({ t: S.recep[0] + 0.05, text: `Mecánico de suelos recibe los sellos del sector ${n} (libro de obra)`, kind: 'ok' });
+      ev.push({ t: S.empl.t0 + 0.1, text: `Emplantillado G05 de 5 cm en el sector ${n}, con capacho`, kind: 'crane' });
+      ev.push({ t: S.fierro[0] + 0.05, text: `Enfierradura de zapatas del sector ${n} · ≈ ${fmt(S.kg / 1000)} t Ø12`, kind: 'info' });
+      ev.push({ t: S.moldaje[0] + 0.05, text: `Moldaje de costados y pollos del sector ${n}`, kind: 'info' });
+      ev.push({ t: S.pour.pour[0] - 0.3, text: `Bomba estacionaria: se tiende la tubería por el suelo hasta el sector ${n}`, kind: 'pump' });
+      ev.push({ t: S.pour.pour[0], text: `Bomba estacionaria inicia el hormigonado de zapatas del sector ${n}`, kind: 'pump' });
+      ev.push({ t: S.pour.pumpStop[0] + 0.05, text: 'Bomba detenida: cambio de mixer (el camino es uno solo)', kind: 'pump' });
+      ev.push({ t: S.pour.pour[1], text: `Zapatas del sector ${n} hormigonadas · ≈ ${fmt(Math.round(S.m3))} m³ G25`, kind: 'ok' });
+      ev.push({ t: S.desc[0] + 0.05, text: `Descimbre de costados del sector ${n}`, kind: 'info' });
+      if (S.npt) ev.push({ t: S.npt.cap.t0 + 0.1, text: n === 2 ? 'Capacho: V.S.C. 20/140 y muros del foso del ascensor' : 'Capacho: muros bajo NPT de los ejes A-B', kind: 'crane' });
+      ev.push({ t: S.igol[0] + 0.05, text: `Impermeabilización con Igol de las caras contra terreno, sector ${n}`, kind: 'info' });
+      ev.push({ t: S.relleno[0] + 0.05, text: `Relleno lateral compactado en capas de 25 cm, sector ${n}`, kind: 'info' });
+    }
+    ev.push({ t: F.excavatorOnSite[1], text: 'Termina la excavación: se retira la excavadora', kind: 'info' });
+    ev.push({ t: F.compactacion[0] + 0.05, text: 'Compactación de la plataforma y ensayos de densidad', kind: 'info' });
+    ev.push({ t: F.replanteo[1] - 0.2, text: 'Fundaciones recibidas por la ITO · replanteo de muros del 1er piso', kind: 'ok' });
+  }
   for (const p of log.pours) {
+    if (p.sector > 0) continue;
     const name = p.slab === 0 ? 'radier del 1er piso' : sched.levelNames[p.slab] === 'Techumbre' ? 'losa de techumbre' : `losa de piso ${sched.levelNames[p.slab]}`;
     ev.push({ t: p.pour[0] - 0.3, text: `Bomba estacionaria: se arma la tubería hasta la ${p.slab === 0 ? 'zona del radier' : 'losa por el shaft del ascensor'}`, kind: 'pump' });
     ev.push({ t: p.pour[0], text: `Bomba estacionaria inicia el hormigonado ${p.slab === 0 ? 'del' : 'de la'} ${name}`, kind: 'pump' });

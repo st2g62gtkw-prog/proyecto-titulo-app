@@ -100,7 +100,7 @@ export const SITE = {
   excavacion: {
     park0: { x: -29.5, z: -4.5 },
     park1: { x: 29.8, z: -4.5 },
-    laneZ: -9.6,
+    laneZ: -9.45,
     laneZPump: -8.9,
     innerZ: -3.0,
     entryX: -27,
@@ -131,11 +131,17 @@ export const PACE = {
  */
 export const FUND_PACE = {
   trazado: 1.2,
-  excavacion: 2.8,
-  /** Día con una serie de capachos (emplantillado, muros bajo NPT, V.S.C.). */
-  capacho: 4.6,
-  /** Día de hormigonado de un sector con la bomba estacionaria. */
-  bomba: 9,
+  /** Excavación del sector 1 (días 4 a 6: zona profunda A-B y cambio de camión tolva). */
+  excavacionS1: 4.2,
+  excavacion: 3.0,
+  /**
+   * Día con una serie de capachos (emplantillado, muros bajo NPT, V.S.C.): el mixer entra en
+   * retroceso por el camino (capachoLead) y la grúa hace un viaje de capachoTrip por capacho.
+   */
+  capachoLead: 4.3,
+  capachoTrip: 1.7,
+  /** Día de hormigonado de un sector con la bomba estacionaria (dos mixers con cambio al 60 %). */
+  bomba: 16,
   dia: 1.0,
   /** Compactación de la plataforma, replanteo y recepción (días 34 a 40). */
   cierre: 0.7,

@@ -17,7 +17,8 @@ export interface Pipeline {
   /** Punto donde la tubería llega a la base del shaft (para el radier). */
   shaftBase: THREE.Vector3;
   /**
-   * Dibuja la tubería sobre la losa y la manguera hasta `pourPoint` mientras se hormigona.
+   * Dibuja la tubería sobre la losa y la manguera hasta `pourPoint` mientras se hormigona
+   * (slab < 0: hormigonado de zapatas, con la tubería por el suelo).
    * Devuelve la punta de la manguera (de donde cae el hormigón) o null si no hay vaciado.
    */
   update(slab: number, active: boolean, pourPoint: THREE.Vector3 | null): THREE.Vector3 | null;
@@ -112,6 +113,19 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
     g.aabb(vx - 0.12, yB - 0.6, vz - 0.12, vx + 0.12, yB - 0.52, vz + 0.12);
     g.barN(vx - 0.03, (yA + yB) / 2, vz - 0.03, vx + 0.03, (yA + yB) / 2, vz + 0.03, R * 2.6);
   }
+  // fundaciones: mientras se hormigona cada sector de zapatas, la tubería va por el suelo de la caseta
+  // hasta el borde de la excavación frente a la puerta posterior (fundTap) y de ahí, sobre tablones,
+  // hasta la manguera
+  const fundTap = new THREE.Vector3(P.xDoor, yG, -8.7);
+  for (const fp of sched.fund.pours) {
+    g.timing(fp.pour[0] - 3.2, fp.pour[0] - 2.6, fp.pour[1] + 0.6, fp.pour[1] + 1.0);
+    g.barN(outlet.x, outlet.y, outlet.z, drop.x, yG, drop.z, R * 2);
+    joint(drop.x, yG, drop.z);
+    g.barN(drop.x, yG, drop.z, P.xDoor, yG, drop.z, R * 2);
+    joint(P.xDoor, yG, drop.z);
+    g.barN(P.xDoor, yG, drop.z, fundTap.x, yG, fundTap.z, R * 2);
+    joint(fundTap.x, yG, fundTap.z);
+  }
   const fixed = revealMesh(g.build(), mat);
   fixed.userData.pick = { type: 'pipe' };
   group.add(fixed);
@@ -182,9 +196,10 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
         segA.visible = segB.visible = elbow.visible = hose.visible = false;
         return null;
       }
-      const y = slab === 0 ? yIn : levels[slab].slab.y1 + 0.12;
-      // en la losa la tubería sale del shaft; para el radier, desde el tendido del suelo
-      const A = slab === 0 ? radierTap.clone().setY(y) : new THREE.Vector3(vx, y, vz);
+      const y = slab < 0 ? yG : slab === 0 ? yIn : levels[slab].slab.y1 + 0.12;
+      // en la losa la tubería sale del shaft; para el radier, desde el tendido del suelo; en las
+      // zapatas (slab < 0), desde el borde de la excavación frente a la puerta posterior
+      const A = slab < 0 ? fundTap.clone() : slab === 0 ? radierTap.clone().setY(y) : new THREE.Vector3(vx, y, vz);
       const P = pourPoint;
       const dx = P.x - A.x, dz = P.z - A.z;
       const dist = Math.hypot(dx, dz);

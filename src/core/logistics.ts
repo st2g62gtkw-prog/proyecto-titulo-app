@@ -69,6 +69,8 @@ export interface MixerState {
 export interface PumpPour {
   /** Índice de la losa (0 = radier del 1er piso). */
   slab: number;
+  /** Sector de zapatas (1..3) si es un hormigonado de las fundaciones; 0 si es una losa o el radier. */
+  sector: number;
   pour: [number, number];
   /** Bomba detenida mientras se cambia de mixer. */
   pumpStop: [number, number];
@@ -81,6 +83,8 @@ export interface PumpState {
   pumping: boolean;
   /** Losa que se está hormigonando (o la próxima, si la bomba está detenida). */
   slab: number;
+  /** Sector de zapatas que se hormigona (1..3), o 0 si es una losa o el radier. */
+  sector: number;
   /** Fracción del hormigonado de la losa (0..1); no avanza durante el cambio de mixer. */
   progress: number;
 }
@@ -195,12 +199,25 @@ export class Logistics {
     };
     // muros y zapatas: un mixer por serie de capachos; llega en retroceso con la canaleta replegada,
     // la despliega antes de que el capacho entre bajo ella y la repliega después del último llenado
-    for (const a of sched.activities) {
-      if (a.kind !== 'muroHormigon' && a.kind !== 'fundaciones') continue;
-      const W = a.trips.map((x) => capachoWindows(x));
+    // (en las fundaciones, cada serie de capachos del plan: emplantillado, muros bajo NPT y V.S.C.)
+    const series = [
+      ...sched.activities.filter((a) => a.kind === 'muroHormigon').map((a) => a.trips),
+      ...sched.fund.capachos.map((c) => c.trips),
+    ];
+    for (const trips of series) {
+      const W = trips.map((x) => capachoWindows(x));
       const at = W[0].slideIn[0] - 0.05 - CAP_CHUTE[0];
       const done = W[W.length - 1].slideOut[1] + 0.01 + CAP_CHUTE[1];
       visit('capacho', CAP.x, at, W.map((w) => w.fill), done);
+    }
+    // hormigonado de cada sector de zapatas con la bomba estacionaria (tubería tendida por el
+    // suelo): dos mixers con cambio, igual que en las losas
+    for (const fp of sched.fund.pours) {
+      const { pour, pumpStop } = fp;
+      this.pours.push({ slab: 0, sector: fp.sector, pour, pumpStop });
+      const [dOut, dIn] = PUMP_CHUTE;
+      visit('bomba', PMP.x, pour[0] - dOut - 0.05, [[pour[0], pumpStop[0]]], pumpStop[0] + dIn);
+      visit('bomba', PMP.x, pumpStop[1] - dOut - 0.05, [[pumpStop[1], pour[1]]], pour[1] + dIn, pumpStop[0] - 1.6);
     }
     // losas: dos mixers alimentan la tolva; el segundo entra mientras descarga el primero, espera
     // en el bolsón y retrocede hasta la tolva cuando el primero ya lo pasó al salir (la bomba se
@@ -209,7 +226,7 @@ export class Logistics {
       if (a.kind !== 'losaHormigon' && a.kind !== 'radier') continue;
       const S = a.kind === 'radier' ? 0 : a.level;
       const { pour, pumpStop } = sched.slab[S];
-      this.pours.push({ slab: S, pour, pumpStop });
+      this.pours.push({ slab: S, sector: 0, pour, pumpStop });
       const [dOut, dIn] = PUMP_CHUTE;
       if (pumpStop[1] - pumpStop[0] < 0.01) {
         // sin cambio de camión (radier): un solo mixer descarga todo el hormigonado
@@ -291,6 +308,6 @@ export class Logistics {
     const p = this.pours.find((x) => t <= x.pour[1] + 0.5) ?? this.pours[this.pours.length - 1];
     const pour = t >= p.pour[0] && t <= p.pour[1];
     const stopped = t > p.pumpStop[0] && t < p.pumpStop[1];
-    return { pour, pumping: pour && !stopped, slab: p.slab, progress: pourFrac(p, t) };
+    return { pour, pumping: pour && !stopped, slab: p.slab, sector: p.sector, progress: pourFrac(p, t) };
   }
 }

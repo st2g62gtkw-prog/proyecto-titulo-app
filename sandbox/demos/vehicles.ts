@@ -1,11 +1,13 @@
 /**
- * Demo de vehículos y cargas: mixer descargando a un capacho y las cargas de grúa
- * colgando de postes (la última, un capacho con la compuerta abierta).
+ * Demo de vehículos y cargas: mixer descargando a un capacho, las cargas de grúa colgando de
+ * postes (la última, un capacho con la compuerta abierta) y la excavadora cargando un camión tolva.
  */
 import * as THREE from 'three';
 import type { Stage } from '../../src/scene/stage';
 import { SITE } from '../../src/config';
 import { createMixer } from '../../src/scene/equipment/mixer';
+import { createExcavator } from '../../src/scene/equipment/excavator';
+import { createDumpTruck } from '../../src/scene/equipment/dumpTruck';
 import { createCapacho } from '../../src/scene/equipment/capacho';
 import { createConcreteStream } from '../../src/scene/equipment/pour';
 import { createDeckPack, createPanelPack, createPropBundle, createRebarBundle } from '../../src/scene/equipment/payloads';
@@ -50,8 +52,20 @@ export default function demo(stage: Stage) {
     scene.add(post, arm, load);
   });
 
+  // ── excavadora cargando un camión tolva (ciclo: baja, llena, gira, vacía)
+  const exc = createExcavator();
+  exc.group.position.set(-4, G, 24);
+  scene.add(exc.group);
+  const truck = createDumpTruck();
+  truck.group.position.set(-4.5, G, 30.5);
+  truck.group.rotation.y = Math.PI;
+  scene.add(truck.group);
+
   const hose = new THREE.Vector3(), outlet = new THREE.Vector3(), floor = new THREE.Vector3();
   return (t: number) => {
+    const u = (t % 4) / 4, sw = 0.5 - 0.5 * Math.cos(Math.min(1, Math.max(0, (u - 0.3) * 4)) * Math.PI) - (u > 0.75 ? 0.5 - 0.5 * Math.cos((u - 0.75) * 4 * Math.PI) : 0);
+    exc.setPose({ heading: 0, slew: sw * (Math.PI / 2), r: 5.5 + sw * 0.5, h: u < 0.3 ? -1.2 + u * 2 : 3.6, curl: u > 0.55 && u < 0.75 ? 1 : 0.15, load: u > 0.2 && u < 0.6, dist: 0 });
+    truck.setLoad((t % 24) / 24);
     mixer.setDrumSpin(t * 2.4);
     mixerStream.set(mixer.chuteTip.getWorldPosition(hose), toCapacho, 1, t);
 

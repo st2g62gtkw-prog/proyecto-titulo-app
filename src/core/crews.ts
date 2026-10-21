@@ -120,8 +120,10 @@ export class Crews {
       }
       case 'radier':
         return { x: slabFront(0, 'pour'), z: 0, L: 0, y: -0.12 };
-      case 'fundaciones':
-        return { x: trip?.x ?? 0, z: trip?.z ?? 0, L: 0, y: -0.2 };
+      case 'fundaciones': {
+        const f = this.s.sched.fund.focus(t);
+        return { x: f.x, z: f.z, L: 0, y: f.y };
+      }
       default:
         return { x: trip?.x ?? 0, z: trip?.z ?? 0, L: a.level, y: this.floorTop(a.level, t) };
     }
@@ -153,6 +155,39 @@ export class Crews {
   update(t: number, a: Activity, groundTargets: { x: number; z: number; r?: number; spread?: number; action: Action }[]) {
     const seg = 3.2; // cada cuánto un trabajador cambia de puesto (s de simulación)
     const speed = 1.4; // m/s al caminar
+    if (a.kind === 'fundaciones') this.fundFronts(t);
+    else this.floorCrew(t, a, seg, speed);
+    this.groundCrew(t, groundTargets);
+  }
+
+  /**
+   * Fundaciones: cada frente del plan (perfilado en la zanja, enfierradores, carpinteros,
+   * concreteros con la manguera, relleno con vibropisón…) recibe su cuadrilla en sus puntos de
+   * trabajo, a la cota donde se trabaja (fondo de la zanja, sobre el emplantillado o en la plataforma).
+   */
+  private fundFronts(t: number) {
+    const fronts = this.s.sched.fund.fronts(t);
+    let i = 0;
+    for (const fr of fronts) {
+      for (let j = 0; j < fr.n && i < FLOOR_SLOTS && fr.pts.length; j++, i++) {
+        const m = this.members[i];
+        const p = fr.pts[Math.floor(j * fr.pts.length / Math.max(fr.n, 1) + hash(i, 3) * 0.99) % fr.pts.length];
+        const ang = hash(i, 13) * Math.PI * 2;
+        const sway = Math.sin(t * 0.6 + i * 1.7) * 0.12;
+        m.visible = true;
+        m.x = p[0] + Math.cos(ang) * 0.35 + sway;
+        m.y = p[1];
+        m.z = p[2] + Math.sin(ang) * 0.35;
+        m.action = fr.action === 'walk' ? 'walk' : fr.action;
+        m.heading = ang + Math.PI + Math.sin(t * 0.3 + i) * 0.4;
+        m.walk = t * 1.3 + i;
+      }
+    }
+    for (; i < FLOOR_SLOTS; i++) this.members[i].visible = false;
+  }
+
+  /** Cuadrilla en la losa de trabajo, alrededor del frente de la actividad. */
+  private floorCrew(t: number, a: Activity, seg: number, speed: number) {
     const nFloor = Math.min(ACTIVE_ON_FLOOR[a.kind], FLOOR_SLOTS);
     const cache = new Map<number, { pts: V2[]; f: ReturnType<Crews['focus']> }>();
     const now = this.nearFocus(a, t, cache);
@@ -187,7 +222,10 @@ export class Crews {
       }
       m.y = now.f.y;
     }
-    // cuadrilla en terreno: rigger en el acopio, taller de fierro, mixer, caminatas
+  }
+
+  /** Cuadrilla en terreno: rigger en el acopio, taller de fierro, mixer, caminatas. */
+  private groundCrew(t: number, groundTargets: { x: number; z: number; r?: number; spread?: number; action: Action }[]) {
     for (let j = 0; j < GROUND_SLOTS; j++) {
       const m = this.members[FLOOR_SLOTS + j];
       const g = groundTargets[j % Math.max(groundTargets.length, 1)];

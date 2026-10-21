@@ -8,7 +8,7 @@ import { PINTURA, SITE } from './config';
 import { loadBuilding } from './data/building';
 import { BUILDING_FACTS, EQUIPMENT, FLOOR_PROGRAM, PROJECT, RATIOS, SLAB_M3, TOTALS, WALL_M3 } from './data/project';
 import { buildFeed, dayLabel, dayShort, type FeedEvent } from './core/feed';
-import { computeProgress, floorSteps } from './core/progress';
+import { computeProgress, floorSteps, fundSteps } from './core/progress';
 import { CREW_ROLES } from './core/crews';
 import { createStage } from './scene/stage';
 import { World } from './scene/world';
@@ -201,7 +201,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
         badge: 'CAPACHO',
         rows: [
           ['Viajes realizados', fmt(prog.capachos)],
-          ['Uso', 'Hormigonado de muros y zapatas'],
+          ['Uso', 'Muros, emplantillado de zapatas, muros bajo NPT y V.S.C. del foso'],
           ['Llenado', 'En el camino posterior, bajo la canaleta del mixer'],
         ],
         note: 'Entre hormigonados queda en el suelo al costado del camino posterior, junto a donde se detiene el mixer; la grúa lo engancha ahí, lo entra a ras de suelo bajo la canaleta, lo pasa por sobre el edificio hasta el muro y lo devuelve al terminar.',
@@ -311,6 +311,64 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
         note: 'Parte desde arriba cuando la obra gruesa está terminada y baja por paños del ancho del balancín, una fachada a la vez; al terminar un paño sube, se corren los pescantes y baja por el siguiente. Avanza independiente de las terminaciones de cada piso (tabiques, ventanas y barandas).',
       };
     }
+    case 'excavadora':
+    case 'tolva': {
+      const F = w.sched.fund;
+      const dug = F.cells.reduce((a, c) => a + c.vol * Math.min(Math.max((T - c.dig[0]) / Math.max(c.dig[1] - c.dig[0], 1e-6), 0), 1), 0);
+      const tot = F.cells.reduce((a, c) => a + c.vol, 0);
+      // la geometría de las zanjas da ≈ 640 m³; la cubicación (627,31 m³) manda en las cifras
+      const m3 = (dug / tot) * 627.31;
+      const trips = Math.floor((m3 * 1.25) / 14);
+      const ex = F.excavator(T);
+      if (p.type === 'excavadora') {
+        return {
+          title: 'Excavadora hidráulica',
+          subtitle: 'Sobre orugas, ~20 t · balde ≈ 0,9 m³',
+          badge: 'EXCAV.',
+          rows: [
+            ['Tarea actual', ex.visible ? ex.task : 'No está en obra'],
+            ['Excavado a la fecha', `${fmt(m3)} de 627 m³ en sitio`],
+            ['Método', 'Zanjas desde la plataforma a −0,20; últimos 10 cm a mano'],
+            ['Sellos', '−1,11 general · −1,40 núcleo · −1,58 / −1,86 / −2,61 ejes A-B'],
+            ['Taludes', 'Verticales hasta 1,20 m; más hondo, 3:1 (V:H) con berma de 1 m'],
+            ['En obra', `${dayLabel(w.sched.dayAt(F.excavatorOnSite[0]))} a ${dayLabel(w.sched.dayAt(F.excavatorOnSite[1]))}`],
+          ],
+          note: 'Abre las zanjas por sectores (S1 con la zona profunda A-B, S2 con el núcleo y el foso del ascensor, S3) desde puestos sobre el terreno aún sin excavar, y carga los camiones tolva detenidos en la huella junto a la fachada posterior. El mecánico de suelos recibe los sellos de cada sector antes del emplantillado.',
+        };
+      }
+      const st = F.truckStates(T);
+      return {
+        title: 'Camión tolva',
+        subtitle: '3 ejes · tolva basculante de 14 m³',
+        badge: 'TOLVA',
+        rows: [
+          ['En faena ahora', `${st.length}${st.some((x) => x.loading) ? ' · cargando' : ''}`],
+          ['Retirado a botadero', `${fmt(m3 * 1.25)} m³ esponjados (25 %)`],
+          ['Viajes equivalentes', `${fmt(trips)} de ≈ 56`],
+          ['Recorrido', 'Portón norponiente → camino posterior → huella de carguío'],
+        ],
+        note: 'Entra en retroceso por el portón y el camino posterior, igual que los mixers (el camino es uno solo), se aparta a la huella de carguío junto a la fachada posterior y la excavadora lo carga; sale de frente a botadero autorizado. El siguiente espera en el bolsón a que pase el que sale. El maicillo excavado no se reutiliza en el relleno (va integral o estabilizado).',
+      };
+    }
+    case 'fund': {
+      const F = w.sched.fund;
+      const q = F.quantities(T);
+      const rows: [string, string][] = [
+        ['Tipo', 'Zapatas corridas de H.A. G25 (90 %) bajo los muros; aisladas en el frente'],
+        ['Sección típica', 'B = 1,50–2,10 m (núcleo 2,51) × H = 0,95 m; sello −1,11, tope −0,16'],
+        ['Hormigón colocado', `${fmt(Math.min(q.hormigon, 386))} de 386 m³ (incl. emplantillado G05)`],
+        ['Acero instalado', `${fmt(q.acero / 1000, 1)} de 14,1 t · Ø12 A630-420H`],
+        ['Moldaje armado', `${fmt(q.moldaje)} de 597 m²`],
+        ['En curso', F.describe(T)],
+      ];
+      const notes: Record<string, string> = {
+        zapatas: 'Se hormigonan en 3 sectores (juntas en x = −8,9 y x = 9,4) con la bomba estacionaria y la tubería tendida por el suelo; los muros bajo NPT de A-B, la V.S.C. del foso y sus muros van con capacho. Los "pollos" de 16 cm guían el moldaje de los muros del 1er piso.',
+        fierro: 'Parrilla inferior de U transversales Ø12a20 con patas de 50 cm, barras superiores longitudinales Ø12a20 y esperas de doble malla Ø8a20 ancladas 85 cm en la zapata (barras de borde en las cabezas de muro). Recubrimiento 5 cm sobre calugas.',
+        moldaje: 'Costados de terciado con costillas cada 0,6 m, tornapuntas y estacas contra la pared de la zanja y crucetas que fijan el ancho; tablas para el cuello del pollo y paneles de muro para los muros bajo NPT. Se descimbra a las 24–48 h.',
+        excavacion: 'Zanjas de B + 2 × 0,38 m con paredes verticales (zona general, fondo −1,16) y con talud 3:1 en las zonas profundas (núcleo −1,45; eje A −1,63; escalón −1,91; A-B −2,66). Paredes de finos café rojizo (U2) y maicillo café claro (U3) en el fondo; sin napa. Tras descimbrar e impermeabilizar con Igol se rellena en capas de 25 cm compactadas al 95 % del Proctor Modificado.',
+      };
+      return { title: 'Fundaciones del Edificio E', subtitle: 'Planos E-01 / E-02 · rev. 3', badge: 'FUND', rows, note: notes[p.id ?? ''] ?? notes.zapatas };
+    }
     case 'faena':
       return { title: 'Instalación de faena', subtitle: 'Oficinas, bodega, comedor y baños', badge: 'FAENA', rows: [['Dotación', `${EQUIPMENT.dotacion} personas`], ['Constructora', PROJECT.constructora], ['Mandante', PROJECT.mandante]] };
     default:
@@ -336,7 +394,13 @@ function hudState(): HudState {
   ];
   const k = Math.min(Math.max((T - a.t0) / (a.t1 - a.t0), 0), 1);
   let detail = a.detail;
-  if (a.kind === 'muroHormigon' || a.kind === 'fundaciones') detail = `${w.state.craneTask} · ${w.state.mixersOnSite} mixer${w.state.mixersOnSite === 1 ? '' : 's'} en faena`;
+  if (a.kind === 'fundaciones') {
+    // qué pasa en cada sector, la excavadora y los camiones (o la grúa y los mixers)
+    detail = s.fund.describe(T);
+    if (w.state.excavatorTask) detail += ` · Excavadora: ${w.state.excavatorTask.toLowerCase()} · ${w.state.trucksOnSite} camión${w.state.trucksOnSite === 1 ? '' : 'es'} tolva en faena`;
+    else if (w.state.mixersOnSite) detail += ` · Grúa: ${w.state.craneTask} · ${w.state.mixersOnSite} mixer${w.state.mixersOnSite === 1 ? '' : 's'} en faena`;
+    else if (w.state.craneTask && w.state.craneTask !== 'En espera') detail += ` · Grúa: ${w.state.craneTask}`;
+  } else if (a.kind === 'muroHormigon') detail = `${w.state.craneTask} · ${w.state.mixersOnSite} mixer${w.state.mixersOnSite === 1 ? '' : 's'} en faena`;
   else if (a.kind === 'losaHormigon') detail = `${a.detail} · ${fmt(k * 100)} %`;
   else if (a.kind !== 'terminaciones') detail = `${a.detail} · Grúa: ${w.state.craneTask}`;
   const par = s.parallel.find((p) => T >= p.t0 && T <= p.t1);
@@ -354,12 +418,14 @@ function hudState(): HudState {
     speed,
     dayLabel: dayLabel(s.dayAt(T)),
     phaseTitle: a.kind === 'terminaciones' ? 'Terminaciones' : a.kind === 'fundaciones' || a.kind === 'radier' ? 'Fundaciones y radier' : `Piso ${(a.kind.startsWith('losa') ? a.level : a.level + 1)} · ${a.kind.startsWith('losa') ? 'Losa' : 'Muros'}`,
-    activityTitle: a.kind === 'fundaciones' ? 'Zapatas corridas con capacho' : a.kind === 'radier' ? 'Radier del 1er piso con bomba' : a.kind === 'terminaciones' ? `Fachada, ventanas y barandas ${a.levelName}` : a.title.split(' · ').pop() ?? a.title,
+    activityTitle: a.kind === 'fundaciones' ? 'Fundaciones: excavación, fierro, moldaje y hormigón' : a.kind === 'radier' ? 'Radier del 1er piso con bomba' : a.kind === 'terminaciones' ? `Fachada, ventanas y barandas ${a.levelName}` : a.title.split(' · ').pop() ?? a.title,
     activityDetail: detail,
     levelLabel: a.kind === 'fundaciones' || a.kind === 'radier' ? 'FUND' : lvName === 'Techumbre' ? 'TECHO' : lvName,
-    steps: a.kind === 'fundaciones' || a.kind === 'radier' || a.kind === 'terminaciones'
-      ? floorSteps(s, s.activities.find((x) => x.kind === 'muroFierro' && x.level === 0)!, T)
-      : floorSteps(s, a, T),
+    steps: a.kind === 'fundaciones'
+      ? fundSteps(s, T)
+      : a.kind === 'radier' || a.kind === 'terminaciones'
+        ? floorSteps(s, s.activities.find((x) => x.kind === 'muroFierro' && x.level === 0)!, T)
+        : floorSteps(s, a, T),
     overall: prog.obraGruesa,
     floors: prog.floors.map((f) => ({ ...f, name: f.name === 'Techumbre' ? 'Techo' : f.name })),
     kpis,
