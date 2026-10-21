@@ -67,8 +67,9 @@ export interface SlabTiming {
   /** Hormigonado con la bomba (de la primera descarga al fin de la última). */
   pour: [number, number];
   /**
-   * Bomba detenida a medio hormigonado: el primer mixer sale por el camino y el portón y el
-   * segundo entra en retroceso hasta la tolva (PACE.cambioMixer). El vaciado no avanza.
+   * Bomba detenida en el cambio de mixer (al 60 % del hormigonado): el primer mixer sale por el
+   * camino y el segundo, que esperaba en el bolsón, retrocede hasta la tolva (PACE.cambioMixer).
+   * El vaciado no avanza.
    */
   pumpStop: [number, number];
   propsOut: [number, number];
@@ -87,9 +88,12 @@ export function pourFrac(s: Pick<SlabTiming, 'pour' | 'pumpStop'>, t: number) {
   return Math.min(Math.max((tt - p0 - Math.min(Math.max(tt - q0, 0), q1 - q0)) / run, 0), 1);
 }
 
-/** Bomba detenida para el cambio de mixer, centrada en el hormigonado [p0, p1]. */
+/**
+ * Bomba detenida para el cambio de mixer, centrada al 60 % del hormigonado [p0, p1]: el primer
+ * mixer descarga algo más que el segundo, que llega a la tolva con la losa ya avanzada.
+ */
 const pumpStopIn = (p0: number, p1: number): [number, number] => {
-  const m = (p0 + p1) / 2;
+  const m = p0 + (p1 - p0) * 0.6;
   return [m - PACE.cambioMixer / 2, m + PACE.cambioMixer / 2];
 };
 
@@ -117,7 +121,7 @@ export function haWalls(level: LevelData): WallData[] {
   return level.walls.filter((w) => w.ha);
 }
 
-/** Orden de trabajo de los muros: por sectores a lo largo del edificio (de poniente a oriente en x). */
+/** Orden de trabajo de los muros: por sectores a lo largo del edificio (de −x a +x). */
 export function wallOrder(walls: WallData[]): number[] {
   return walls
     .map((w, i) => ({ i, cx: polyBounds(w.poly).cx, cz: polyBounds(w.poly).cz }))
@@ -259,7 +263,7 @@ export function buildSchedule(data: BuildingData): Schedule {
       return { t0, t1: t0 + PACE.losaFierro / 3, walls: [], x: bx.x0 + ((k + 0.5) / 3) * (bx.x1 - bx.x0), z: bx.cz, y: levels[S].slab.y0 + 0.4 };
     });
     // hormigonado con dos mixers: el primero entra en retroceso al comenzar la actividad y el
-    // segundo después del cambio (la bomba se detiene a medio vaciado, ver pumpStop)
+    // segundo después del cambio (la bomba se detiene unos instantes en el cambio, ver pumpStop)
     const pour: [number, number] = [aLH.t0 + 4.4, aLH.t1 - 1.6];
     slab[S] = {
       props: [aLM.t0 + 0.2, aLM.t0 + PACE.losaMoldaje * 0.55],

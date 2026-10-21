@@ -119,9 +119,9 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
   blocks.userData.pick = { type: 'pipe' };
   group.add(blocks);
 
-  // vano de la puerta posterior del hall: los muros del IFC vienen extruidos sin descontar sus
-  // vanos, así que se dibuja oscuro en ambas caras del muro para que se lea que la tubería entra
-  // por la puerta. Aparece al desmoldar los muros del 1P y se quita cuando se instala la puerta.
+  // vano de la puerta posterior del hall (el muro se recorta en structure.ts): se marca con un
+  // pre-marco metálico (jambas y cabezal) para que se lea como puerta por la que entra la tubería.
+  // Aparece al desmoldar los muros del 1P y se quita cuando se instala la puerta.
   {
     const faces = haWalls(levels[0]).flatMap((w) => {
       const zs: number[] = [];
@@ -136,8 +136,11 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
       const strip = sched.activities.find((a) => a.kind === 'muroDesmolde' && a.level === 0);
       const v = new GeoBuilder();
       v.timing(strip?.t1 ?? tLay, strip?.t1 ?? tLay, removeAt, removeAt + 0.05);
-      v.aabb(D.x0, levels[0].slab.y1 - 0.15, z0, D.x1, D.h, z1);
-      const vMat = revealMaterial({ color: '#2b2e33', roughness: 1 }, { mode: 'pop', outLift: new THREE.Vector3() });
+      const yb = levels[0].slab.y1 - 0.15, fw = 0.07;
+      v.aabb(D.x0 - fw, yb, z0, D.x0, D.h + fw, z1);
+      v.aabb(D.x1, yb, z0, D.x1 + fw, D.h + fw, z1);
+      v.aabb(D.x0, D.h, z0, D.x1, D.h + fw, z1);
+      const vMat = revealMaterial({ color: '#5d6166', roughness: 0.6, metalness: 0.4 }, { mode: 'pop', outLift: new THREE.Vector3() });
       vMat.clippingPlanes = clipping;
       group.add(revealMesh(v.build(), vMat, false));
     }

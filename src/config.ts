@@ -2,8 +2,8 @@
  * Disposición de la faena (coordenadas de la app, metros).
  *
  *  x: a lo largo del edificio (≈ -24 … +26)
- *  z: a lo ancho; +z es la fachada poniente (frente, donde está la grúa) y -z la fachada
- *     posterior (oriente), donde corre el camino de los mixers, está la bomba y sube el talud
+ *  z: a lo ancho; +z es la fachada frontal (surponiente según northAngle; donde está la grúa) y -z
+ *     la fachada posterior (nororiente), donde corre el camino de los mixers, está la bomba y sube el talud
  *  y: altura; 0 = NPT del 1er piso (cara superior del radier)
  *
  * Todo lo que es "dónde está cada cosa en la obra" se ajusta aquí.
@@ -15,7 +15,7 @@ export const SITE = {
   /** Rumbo del norte en planta (radianes, desde +x hacia -z). Solo para la brújula. */
   northAngle: (3 * Math.PI) / 4,
 
-  /** Grúa torre: al medio del edificio, en el frente poniente (opuesto al camino de mixers). */
+  /** Grúa torre: al medio del edificio, en el frente (+z), opuesta al camino de mixers. */
   crane: {
     x: -1.0,
     z: 12.6,
@@ -64,6 +64,12 @@ export const SITE = {
    * de descarga (capacho o tolva) y sale hacia adelante por el mismo camino y el mismo portón.
    */
   gate: { x: -56, z: -12.0 },
+  /**
+   * Bolsón de espera: ensanche al costado del camino (lado del talud), entre el portón y la bomba.
+   * En los hormigonados de losa el segundo mixer entra en retroceso y espera aquí (centro del
+   * camión) mientras descarga el primero; cuando este sale y lo pasa, retrocede hasta la tolva.
+   */
+  layby: { x: -29, z: -16.6 },
   road: { z: -12.0, width: 5 },
   street: { x: -64, width: 8 },
 
@@ -76,7 +82,7 @@ export const SITE = {
   faena: { x: -42, z: 12, w: 18, d: 18, rot: 0 },
 
   /**
-   * Talud de corte en el costado oriente (fotos: talud con malla naranja). Su pie queda detrás del
+   * Talud de corte en el costado posterior, nororiente (fotos: talud con malla naranja). Su pie queda detrás del
    * camino de mixers, con una franja plana de ~18 m desde la fachada posterior (camino, caseta de la
    * bomba, capacho en reposo y, junto al portón, el estacionamiento y la cancha de lavado).
    */
@@ -95,10 +101,10 @@ export const PACE = {
   losaHormigon: 20,
   terminacionesPorPiso: 2.5,
   /**
-   * Bomba detenida en cada cambio de mixer: el que terminó sale por el camino y el portón, y recién
-   * ahí el siguiente (que esperaba en la calle) retrocede hasta la tolva. Ver Logistics.
+   * Bomba detenida en cada cambio de mixer: el que terminó sale por el camino y, apenas pasa el
+   * bolsón de espera, el siguiente retrocede desde ahí hasta la tolva. Ver Logistics.
    */
-  cambioMixer: 6.9,
+  cambioMixer: 3.6,
 };
 
 /**

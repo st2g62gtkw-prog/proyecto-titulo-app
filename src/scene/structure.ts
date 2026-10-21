@@ -384,7 +384,14 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
       const tm = timing[i];
       const h = w.y1 - w.y0;
       conc.timing(tm.pour[0], tm.pour[1], fin[0] + (i / walls.length) * (fin[1] - fin[0]) * 0.4, fin[0] + (fin[1] - fin[0]) * 0.75, w.y0, h);
-      conc.extrude(w.poly, wallHoles(w), w.y0, w.y1);
+      const door = L === 0 ? doorCut(w) : null;
+      if (door) {
+        // muro con el vano de la puerta posterior del hall (por donde entra la tubería de la bomba):
+        // a cada lado del vano el muro va completo y sobre el vano queda el dintel
+        for (const piece of [clipX(w.poly, -Infinity, door.x0), clipX(w.poly, door.x1, Infinity)]) if (piece.length >= 3) conc.extrude(piece, [], w.y0, w.y1);
+        const lintel = clipX(w.poly, door.x0, door.x1);
+        if (lintel.length >= 3) conc.extrude(lintel, [], door.h, w.y1);
+      } else conc.extrude(w.poly, wallHoles(w), w.y0, w.y1);
       wallRebar(reb, w, tm.rebar, L < nWall - 1);
       wallForm(form, w, tm.form, tm.strip);
     });
@@ -479,6 +486,42 @@ function wallLoops(w: WallData, minHole = 0.3) {
     { loop: w.poly, hole: false },
     ...w.holes.filter((h) => Math.abs(signedArea(h)) >= minHole).map((loop) => ({ loop, hole: true })),
   ];
+}
+
+/**
+ * Recorte de un contorno a la franja x0 ≤ x ≤ x1 (Sutherland–Hodgman contra los dos semiplanos).
+ * Basta para muros cuyo recorte queda en una sola pieza, como el de la puerta posterior del hall.
+ */
+function clipX(poly: V2[], x0: number, x1: number): V2[] {
+  const half = (pts: V2[], inside: (p: V2) => boolean, xc: number): V2[] => {
+    const out: V2[] = [];
+    pts.forEach((a, i) => {
+      const b = pts[(i + 1) % pts.length];
+      const ia = inside(a), ib = inside(b);
+      if (ia) out.push(a);
+      if (ia !== ib) out.push([xc, a[1] + ((xc - a[0]) / (b[0] - a[0])) * (b[1] - a[1])]);
+    });
+    return out;
+  };
+  let r = poly;
+  if (Number.isFinite(x0)) r = half(r, (p) => p[0] >= x0, x0);
+  if (Number.isFinite(x1) && r.length) r = half(r, (p) => p[0] <= x1, x1);
+  return r;
+}
+
+/**
+ * Vano de la puerta posterior del hall en el 1P (SITE.pipeline.door): los muros del IFC vienen sin
+ * descontar sus vanos, así que se recorta solo este, porque por ahí entra la tubería de la bomba.
+ * Devuelve el vano si el muro de fachada lo contiene (muro sin otros vanos que cruza x0…x1 en zDoor).
+ */
+function doorCut(w: WallData) {
+  const P = SITE.pipeline, D = P.door;
+  if (w.holes.length || !w.ha) return null;
+  const crosses = w.poly.some((a, i) => {
+    const b = w.poly[(i + 1) % w.poly.length];
+    return (a[0] - P.xDoor) * (b[0] - P.xDoor) < 0 && Math.abs(a[1] + ((P.xDoor - a[0]) / (b[0] - a[0])) * (b[1] - a[1]) - P.zDoor) < 1;
+  });
+  return crosses ? { x0: D.x0, x1: D.x1, h: D.h } : null;
 }
 
 /** Vanos que se descuentan del hormigón (se ignoran los de área despreciable). */

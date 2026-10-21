@@ -46,7 +46,7 @@ hud.setLoading(0.05, 'Cargando modelo del Edificio E…');
 /** Objetivo de la vista principal: algo corrido hacia −x para que el portón (arriba a la izquierda) quede a la vista. */
 const ISO_TARGET = new THREE.Vector3(-1.3, 5, 8.3);
 /**
- * Vistas fijas: la principal mira desde el frente poniente (grúa y acopios adelante); la posterior
+ * Vistas fijas: la principal mira desde el frente (+z, grúa y acopios adelante); la posterior
  * gira 180° para ver desde el talud el camino de mixers, el portón, la bomba y la tubería.
  */
 const VIEWS = {
@@ -189,7 +189,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
           ['Pluma / contrapluma', `${SITE.crane.jibLength} m / ${SITE.crane.counterJibLength} m`],
           ['Altura de giro', `${fmt(SITE.crane.mastHeight, 1)} m`],
           ['Carga máx. / en punta', `${EQUIPMENT.grua.cargaMax} / ${EQUIPMENT.grua.cargaPunta}`],
-          ['Ubicación', 'Al centro del frente poniente, opuesta al camino de mixers'],
+          ['Ubicación', 'Al centro del frente del edificio, opuesta al camino de mixers'],
           ['Capachos de muro', `${fmt(prog.capachos)} viajes (1 m³)`],
         ],
         note: 'Sube fierro y moldajes desde los acopios y hormigona los muros con capacho.',
@@ -217,7 +217,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
           ['Despachados a la fecha', fmt(prog.mixers)],
           ['Hormigón colocado', `${fmt(prog.hormigon)} m³`],
         ],
-        note: 'Llega por la calle, pasa el portón norponiente y entra en retroceso (la canaleta va atrás) por el único camino del costado posterior. Para muros se detiene antes de la bomba y llena el capacho que toma la grúa; para losas sigue hasta la tolva de la bomba, al final del camino. Descarga y sale de frente por el mismo camino y el mismo portón; si el camino está ocupado, espera en la calle junto al portón.',
+        note: 'Llega por la calle, pasa el portón norponiente y entra en retroceso (la canaleta va atrás) por el único camino del costado posterior. Para muros se detiene antes de la bomba y llena el capacho que toma la grúa; para losas sigue hasta la tolva de la bomba, al final del camino. Descarga y sale de frente por el mismo camino y el mismo portón. En las losas el segundo mixer entra mientras descarga el primero y espera en el bolsón al costado del camino; cuando el primero sale y lo pasa, retrocede hasta la tolva.',
       };
     case 'pump': {
       const ps = w.log.pumpState(T);

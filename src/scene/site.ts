@@ -42,8 +42,8 @@ const GATE = { z0: SITE.gate.z - 4.3, z1: SITE.gate.z + 4.3 };
 const ST_W = SITE.street.x;
 /** Camino posterior (uno solo, del portón a la bomba): eje z = cte. */
 const RZ = SITE.road.z;
-/** Estacionamiento de autos de los trabajadores, junto al portón (entre el camino y el talud). */
-const PARK = { x: SITE.gate.x + 23, z: RZ - 6.6 };
+/** Estacionamiento de autos de los trabajadores, junto al portón (detrás del bolsón de espera, al pie del talud). */
+const PARK = { x: SITE.gate.x + 21, z: RZ - 9.6 };
 /** Barrio: calles a lo largo de x (z = cte) y de z (x = cte), y su extensión plana. */
 const TOWN = { xSt: [56, 100, 144, 188], zSt: [-118, ST_W, 82, 160], x0: -170, x1: 230, z1: 205 };
 
@@ -138,7 +138,7 @@ function frame(x0: number, z0: number, ry: number) {
 }
 
 // ---------------------------------------------------------------------------------------
-// Terreno: plano de la obra, talud de corte al oriente (-z) y lomas lejanas
+// Terreno: plano de la obra, talud de corte en el costado posterior (-z, nororiente) y lomas lejanas
 // ---------------------------------------------------------------------------------------
 
 const outsideX = (x: number) => Math.max(0, FENCE.x0 - x, x - FENCE.x1);
@@ -1045,7 +1045,7 @@ function buildFences(k: Kit, M: Mats) {
   const tints = ['#ffffff', '#f3ece0', '#e9dfcd', '#fff6e8', '#ddd2bf'];
   const tint = () => tints[Math.floor(r() * tints.length)];
   const { x0, x1, z0, z1 } = FENCE;
-  // poniente (calle, con portón) y oriente: OSB
+  // cierro −x (el de la calle del portón) y cierro +x: OSB
   osbFence(k, M, [x0, z1], [x0, GATE.z1 + 0.2], 1, tint);
   osbFence(k, M, [x0, GATE.z0 - 0.2], [x0, z0], 1, tint);
   osbFence(k, M, [x1, z0], [x1, z1], 1, tint);
@@ -1551,7 +1551,7 @@ function buildMisc(k: Kit, M: Mats) {
   // rollos de tubería HDPE naranja y azul, junto al pie del talud (detrás del camino posterior)
   const zFoot = SITE.talud.zStart;
   const coils: [number, number, string, number][] = [
-    [-35, zFoot + 2.1, COL.orange, 3], [-33.4, zFoot + 1.8, COL.orange, 2], [-34.3, zFoot + 0.7, COL.blue, 2], [-32, zFoot + 1.0, COL.orange, 1],
+    [-19, zFoot + 2.1, COL.orange, 3], [-17.4, zFoot + 1.8, COL.orange, 2], [-18.3, zFoot + 0.7, COL.blue, 2], [-16, zFoot + 1.0, COL.orange, 1],
     [47, zFoot + 1.7, COL.orange, 2], [48.6, zFoot + 1.3, COL.blue, 3],
   ];
   for (const [cx, cz, c, n] of coils) for (let i = 0; i < n; i++) coil(p, cx + (r() - 0.5) * 0.15, G + i * 0.24, cz + (r() - 0.5) * 0.15, 0.62 - i * 0.02, c);
@@ -1750,13 +1750,13 @@ function buildSurroundings(M: Mats, group: THREE.Group) {
       addHouse(x, zr + (r() - 0.5) * 0.6, side > 0 ? Math.PI : 0);
     }
   }
-  // filas junto a las calles en z: poniente (todo el largo) y oriente (frente a la obra)
+  // filas junto a las calles en z: hacia −x (todo el largo) y hacia +x (frente a la obra)
   // (ry = π/2 deja el antejardín hacia +x)
   for (const [xr, ry, z1] of [[-156, -Math.PI / 2, TOWN.z1], [-133, Math.PI / 2, TOWN.z1], [-103, -Math.PI / 2, TOWN.z1], [-79, Math.PI / 2, TOWN.z1],
     [97, -Math.PI / 2, 48], [120, Math.PI / 2, 48], [145, Math.PI / 2, 48], [175, -Math.PI / 2, 48], [198, Math.PI / 2, 48]] as const) {
     for (let z = -4 + (Math.abs(xr) % 2) * 5; z < z1; z += 11.5) addHouse(xr, z, ry);
   }
-  // bosque de eucaliptos y pinos sobre el talud (oriente)
+  // bosque de eucaliptos y pinos sobre el talud (costado posterior)
   for (let i = 0; i < 230; i++) {
     const x = -150 + r() * 330, z = FENCE.z0 - 4 - Math.pow(r(), 1.6) * 120, H = r();
     if (onStreet(x, z)) continue;
@@ -1815,6 +1815,11 @@ export function createSite(): SiteRig {
   const W = SITE.road.width, endX = SITE.pump.x - 3.2;
   ribbon(roads, [[ST_W + 4.3, RZ], [SITE.gate.x + 5, RZ]], { width: 9, texLen: 12, uRep: 2, fade: 0.6, step: 2, lift: 0.036 });
   ribbon(roads, [[SITE.gate.x + 2, RZ], [endX, RZ]], { width: W, texLen: 12, fade: 0.6, step: 4, lift: 0.035 });
+  // bolsón de espera del segundo mixer de cada losa, al costado del camino (lado del talud)
+  {
+    const L = SITE.layby, zl = L.z + 0.2;
+    ribbon(roads, [[L.x - 17, RZ - 1.4], [L.x - 9, zl], [L.x + 4, zl], [L.x + 12, RZ - 1.4]], { width: 4.4, radius: 4, texLen: 12, fade: 0.8, step: 2, lift: 0.034 });
+  }
   // ensanche del lado del talud donde se llena el capacho y queda en reposo, hasta la caseta
   ribbon(roads, [[SITE.mixerCapacho.x + 2, RZ - W / 2 - 0.9], [endX, RZ - W / 2 - 0.9]], { width: 3.4, texLen: 12, fade: 0.8, step: 4, lift: 0.033 });
   const decals: [Batch, THREE.Material, number][] = [[pads, M.pad, -3], [roads, M.road, -2]];

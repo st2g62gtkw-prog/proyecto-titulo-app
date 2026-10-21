@@ -226,7 +226,8 @@ export class World {
     this.addLabel('af', 'Acopio de fierro', 'acopio', root, a.acopioFierro.clone().add(new THREE.Vector3(0, 2.2, 0)));
     this.addLabel('faena', 'Instalación de faena', 'info', root, new THREE.Vector3(SITE.faena.x, 5, SITE.faena.z));
     this.addLabel('pump', 'Bomba estacionaria', 'pump', this.pump.group, new THREE.Vector3(0, 4.2, 0));
-    this.addLabel('gate', 'Portón de camiones', 'info', root, new THREE.Vector3(SITE.gate.x + 1, 4.2, SITE.gate.z));
+    // sobre el pilar del lado +z y más alta que la del mixer, para que no se tapen cuando pasa un camión
+    this.addLabel('gate', 'Portón de camiones', 'info', root, new THREE.Vector3(SITE.gate.x, 7.2, SITE.gate.z + 4.6));
     this.mixers.forEach((m, i) => this.addLabel(`mixer${i}`, 'Mixer 7 m³', 'mixer', m.group, new THREE.Vector3(0, 4.6, 0)));
     this.addLabel('front', 'Frente de trabajo', 'work', root, new THREE.Vector3());
   }
@@ -373,7 +374,10 @@ export class World {
       this.state.focus.set(target.x, sw.y, target.z);
     } else sHose.set(this.tmp, this.tmp, 0, clock);
     if (pumpHopperFeed && ps.pumping) {
+      // el chorro cae desde el labio de la canaleta hasta la parrilla dentro de la tolva (0,35 m bajo
+      // el punto de la tolva), así se alcanza a ver entre la canaleta y el borde
       this.pump.hopper.getWorldPosition(this.tmp2);
+      this.tmp2.y -= 0.35;
       sHop.set(pumpHopperFeed, this.tmp2, 0.8, clock);
     } else sHop.set(this.tmp2, this.tmp2, 0, clock);
 
