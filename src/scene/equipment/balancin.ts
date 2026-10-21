@@ -182,9 +182,9 @@ export function createBalancin(o: { roofY: number; groundY: number }): BalancinR
       stretch(cables[i], _a, _b);
       cables[i].visible &&= show;
       local(_a, s.x, s.z, h, sx - (i ? 0.02 : -0.02), s.y + 0.85, 0.02);
-      local(_b, s.x, s.z, h, sx - (i ? 0.02 : -0.02), o.groundY + 0.02, 0.02);
+      local(_b, s.x, s.z, h, sx - (i ? 0.02 : -0.02), s.base + 0.02, 0.02);
       stretch(tails[i], _a, _b);
-      tails[i].visible &&= show && s.y > o.groundY + 0.6;
+      tails[i].visible &&= show && s.y > s.base + 0.6;
     });
 
     // pintores y cuerdas de vida
@@ -206,11 +206,12 @@ export function createBalancin(o: { roofY: number; groundY: number }): BalancinR
       pp.z = _a.z;
       const [anchor, over, drop, lanyard] = ropes[i];
       local(_a, s.x, s.z, h, lx + 0.25, o.roofY + 0.1, -d - 1.9);
-      local(_b, s.x, s.z, h, lx + 0.25, o.roofY + 1.2, -d + 0.15);
+      // quiebre sobre la baranda de borde de la techumbre (1,1 m), con su protector de canto
+      local(_b, s.x, s.z, h, lx + 0.25, o.roofY + 1.3, -d + 0.15);
       stretch(anchor, _a, _b);
-      local(_a, s.x, s.z, h, lx + 0.25, o.roofY + 1.2, ropeOut);
+      local(_a, s.x, s.z, h, lx + 0.25, o.roofY + 1.3, ropeOut);
       stretch(over, _b, _a);
-      local(_b, s.x, s.z, h, lx + 0.25, o.groundY + 0.02, ropeOut);
+      local(_b, s.x, s.z, h, lx + 0.25, s.base + 0.02, ropeOut);
       stretch(drop, _a, _b);
       for (const m of [anchor, over, drop]) m.visible &&= show;
       // estrobo del arnés (espalda del pintor) a la cuerda

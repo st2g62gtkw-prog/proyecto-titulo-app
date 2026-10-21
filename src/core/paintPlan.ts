@@ -25,6 +25,8 @@ export type FacadeKey = 'frente' | 'suroriente' | 'posterior' | 'norponiente';
 export interface Facade {
   key: FacadeKey;
   name: string;
+  /** Artículo del nombre (para la bitácora: «a la fachada…», «al cabezal…»). */
+  art: 'la' | 'el';
   /** Normal hacia afuera en planta (x, z). */
   n: V2;
   /** Eje de la tangente (coordenada que recorre la fachada). */
@@ -34,10 +36,10 @@ export interface Facade {
 }
 
 export const FACADES: Facade[] = [
-  { key: 'frente', name: 'Fachada frontal (surponiente)', n: [0, 1], axis: 'x', dir: 1 },
-  { key: 'suroriente', name: 'Cabezal suroriente', n: [1, 0], axis: 'z', dir: -1 },
-  { key: 'posterior', name: 'Fachada posterior (nororiente)', n: [0, -1], axis: 'x', dir: -1 },
-  { key: 'norponiente', name: 'Cabezal norponiente', n: [-1, 0], axis: 'z', dir: 1 },
+  { key: 'frente', name: 'Fachada frontal (surponiente)', art: 'la', n: [0, 1], axis: 'x', dir: 1 },
+  { key: 'suroriente', name: 'Cabezal suroriente', art: 'el', n: [1, 0], axis: 'z', dir: -1 },
+  { key: 'posterior', name: 'Fachada posterior (nororiente)', art: 'la', n: [0, -1], axis: 'x', dir: -1 },
+  { key: 'norponiente', name: 'Cabezal norponiente', art: 'el', n: [-1, 0], axis: 'z', dir: 1 },
 ];
 
 export interface Pano {
@@ -58,6 +60,16 @@ export interface Pano {
   roof: number;
   /** Área a pintar del paño (m²). */
   area: number;
+  /**
+   * Cota más baja del piso de la plataforma: sobre el terreno o, si al pie del paño hay algo fijo
+   * de la faena (cerco de la base de la grúa, puerta posterior del hall con la tubería de la bomba),
+   * sobre ese obstáculo. Lo que queda más abajo se pinta con rodillo extensible desde la plataforma.
+   */
+  yMin: number;
+  /** Cota donde se apoyan las colas de los cables y las cuerdas de vida (terreno u obstáculo). */
+  base: number;
+  /** Qué detiene la plataforma antes del terreno (null si llega abajo). */
+  stopBy: string | null;
   /** Bajada pintando, subida y traslado al paño siguiente (o desmontaje), en s de simulación. */
   down: [number, number];
   up: [number, number];
@@ -75,6 +87,9 @@ export interface FacadePiece {
   /** Normal hacia afuera. */
   n: V2;
   pano: number;
+  /** Desde cuándo existe la cara (s de simulación): 0 en los muros H.A. y losas; en la fachada
+   *  liviana, cuando la levantan las terminaciones de su piso. */
+  from: number;
 }
 
 export type PaintPhase = 'montaje' | 'bajando' | 'subiendo' | 'traslado' | 'cambio' | 'desmontaje';
@@ -92,6 +107,10 @@ export interface PaintState {
   heading: number;
   /** Coordenada hacia afuera del borde de techumbre bajo los pescantes y del eje de los cables. */
   roofOut: number;
+  /** Cota donde se apoyan las colas de los cables y las cuerdas de vida. */
+  base: number;
+  /** La línea de pintura va bajo la plataforma detenida (tramo bajo con rodillo extensible). */
+  lowReach: boolean;
   cableOut: number;
   /** false mientras el equipo está desarmado (a mitad de un cambio de fachada). */
   rigged: boolean;
@@ -121,6 +140,29 @@ export interface PaintPlan {
   /** Estado del balancín en t (null si el subcontrato aún no parte o ya se retiró). */
   state(t: number): PaintState | null;
   paintedArea(t: number): number;
+}
+
+/** Altura mínima del piso de la plataforma sobre el terreno (los largueros quedan sobre el suelo). */
+const FLOOR_MIN = 0.2;
+/** Holgura entre la plataforma y lo que tenga debajo cuando se detiene sobre un obstáculo. */
+const OVER = 0.3;
+
+/**
+ * Cara exterior de un muro de fachada: hacia afuera no hay losa encima (no es un balcón ni un
+ * muro interior). Lo usan la piel de pintura y structure.ts (fachada liviana sin pintar).
+ */
+export function exteriorFaces(poly: V2[], above: V2[]): { a: V2; b: V2; n: V2 }[] {
+  const out: { a: V2; b: V2; n: V2 }[] = [];
+  poly.forEach((a, i) => {
+    const b = poly[(i + 1) % poly.length];
+    if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.12) return;
+    const n = outward(poly, a, b);
+    if (!n) return;
+    const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
+    if (pointInPolygon(mx + n[0] * 0.12, mz + n[1] * 0.12, above)) return;
+    out.push({ a, b, n });
+  });
+  return out;
 }
 
 const dot = (p: V2, n: V2) => p[0] * n[0] + p[1] * n[1];
@@ -208,7 +250,7 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
         if (hiOut && !loOut) c = s1 - half;
         else if (loOut && !hiOut) c = s0 + half;
         else if (hiOut && loOut) line = lineIn(c - half, c + half);
-        mine.push({ i: 0, facade: f, k: 0, nOf: 0, s0, s1, c, line, roof, area: 0, down: [0, 0], up: [0, 0], move: [0, 0], days: [0, 0] });
+        mine.push({ i: 0, facade: f, k: 0, nOf: 0, s0, s1, c, line, roof, area: 0, yMin: gy + FLOOR_MIN, base: gy, stopBy: null, down: [0, 0], up: [0, 0], move: [0, 0], days: [0, 0] });
       }
     }
     if (f.dir < 0) mine.reverse();
@@ -219,6 +261,38 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
     panos.push(...mine);
   }
   panos.forEach((p, i) => (p.i = i));
+
+  // --- Obstáculos fijos de la faena al pie de la fachada ------------------------------------
+  // cajas en planta (x0, x1, z0, z1) con su altura sobre el terreno; si la huella de la plataforma
+  // (más una holgura) cae sobre alguna, la plataforma se detiene encima y no baja hasta el suelo
+  const cr = SITE.crane, FENCE = 2.95; // semiancho del cerco de OSB (equipment/crane.ts)
+  const pm = SITE.pump, pl = SITE.pipeline;
+  const obstacles = [
+    { name: 'el cerco de la base de la grúa', x0: cr.x - FENCE, x1: cr.x + FENCE, z0: cr.z - FENCE, z1: cr.z + FENCE, top: 2.05 },
+    // caseta de la bomba: huella 7,0 × 3,6 m girada con la bomba (equipment/stationaryPump.ts)
+    (() => {
+      const c = Math.abs(Math.cos(pm.heading)), sn = Math.abs(Math.sin(pm.heading));
+      const hx = (3.6 / 2) * c + (7.0 / 2) * sn, hz = (3.6 / 2) * sn + (7.0 / 2) * c;
+      return { name: 'la caseta de la bomba', x0: pm.x - hx, x1: pm.x + hx, z0: pm.z - hz, z1: pm.z + hz, top: 2.7 };
+    })(),
+    // puerta posterior del hall, por donde entra la tubería de la bomba: queda libre bajo el balancín
+    { name: 'la puerta posterior del hall (tubería de la bomba)', x0: pl.door.x0 - 0.15, x1: pl.door.x1 + 0.15, z0: pm.z, z1: pl.zDoor + 0.5, top: pl.door.h },
+  ];
+  {
+    const W = P.plataforma.ancho, half = P.plataforma.largo / 2 + 0.1;
+    for (const p of panos) {
+      const f = p.facade;
+      const o0 = p.line + P.holgura - 0.1, o1 = p.line + P.holgura + W + 0.1;
+      const [ta, tb] = [p.c - half, p.c + half];
+      const os = [o0 * (f.axis === 'x' ? f.n[1] : f.n[0]), o1 * (f.axis === 'x' ? f.n[1] : f.n[0])].sort((u, v) => u - v);
+      const [x0, x1, z0, z1] = f.axis === 'x' ? [ta, tb, os[0], os[1]] : [os[0], os[1], ta, tb];
+      for (const ob of obstacles) {
+        if (ob.x1 <= x0 || ob.x0 >= x1 || ob.z1 <= z0 || ob.z0 >= z1) continue;
+        const y = gy + ob.top + OVER;
+        if (y > p.yMin) [p.yMin, p.base, p.stopBy] = [y, gy + ob.top, ob.name];
+      }
+    }
+  }
   const panosOf = (f: Facade) => panos.filter((p) => p.facade === f);
   /** Paño de la fachada f que contiene la tangente s (o el más cercano). */
   const panoAt = (f: Facade, s: number) => {
@@ -233,7 +307,7 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
   // --- Caras a pintar: muros H.A. de fachada (cara exterior) y cantos de losa ---------------
   const pieces: FacadePiece[] = [];
   const door = SITE.pipeline.door;
-  const addFace = (a: V2, b: V2, y0: number, y1: number, n: V2, L: number) => {
+  const addFace = (a: V2, b: V2, y0: number, y1: number, n: V2, L: number, from = 0) => {
     const m: V2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     const f = facadeOf(n, m, B);
     // corte en los bordes de los paños de la fachada (y en el vano de la puerta posterior del hall)
@@ -255,24 +329,17 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
       let yy0 = y0;
       // sobre el vano de la puerta solo queda el dintel
       if (L === 0 && f.key === 'posterior' && sm > door.x0 && sm < door.x1 && Math.abs(dot(m, f.n) + SITE.pipeline.zDoor) < 0.6) yy0 = door.h;
-      if (y1 - yy0 > 0.01) pieces.push({ a: pa, b: pb, y0: yy0, y1, n, pano: panoAt(f, sm).i });
+      if (y1 - yy0 > 0.01) pieces.push({ a: pa, b: pb, y0: yy0, y1, n, pano: panoAt(f, sm).i, from });
     }
   };
   for (let L = 0; L < nWall; L++) {
     const above = levels[L + 1].slab.outer;
+    // la fachada liviana (no H.A.) aparece con las terminaciones de su piso, sin pintar: también
+    // la pinta el balancín (structure.ts la levanta en el color del hormigón visto)
+    const [f0, f1] = sched.finish[L];
     for (const w of levels[L].walls) {
-      if (!w.ha || w.cat !== 'fachada') continue;
-      const poly = w.poly;
-      poly.forEach((a, i) => {
-        const b = poly[(i + 1) % poly.length];
-        if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.12) return;
-        const n = outward(poly, a, b);
-        if (!n) return;
-        const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
-        // cara exterior: hacia afuera no hay losa encima (no es un balcón ni un muro interior)
-        if (pointInPolygon(mx + n[0] * 0.12, mz + n[1] * 0.12, above)) return;
-        addFace(a, b, w.y0, w.y1, n, L);
-      });
+      if (w.cat !== 'fachada') continue;
+      for (const { a, b, n } of exteriorFaces(w.poly, above)) addFace(a, b, w.y0, w.y1, n, L, w.ha ? 0 : f0 + (f1 - f0) * 0.7);
     }
   }
   for (let S = 1; S < levels.length; S++) {
@@ -328,7 +395,7 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
     const [x, z] = xz(p.facade, p.c, p.line + cableOff);
     return {
       phase, pano: p, next, x, z, y, heading: headingOf(p.facade), roofOut: p.roof, cableOut: p.line + cableOff,
-      rigged: true, onPlatform, progress, painted: paintedArea(t),
+      base: p.base, lowReach: false, rigged: true, onPlatform, progress, painted: paintedArea(t),
     };
   };
 
@@ -340,12 +407,15 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
       if (t <= p.down[1]) {
         const k = clamp01((t - p.down[0]) / (p.down[1] - p.down[0]));
         // la línea de pintura baja de la techumbre al terreno; el piso va bajo ella (alcance del rodillo)
+        // (si la plataforma se detuvo sobre un obstáculo, el tramo bajo sigue con rodillo extensible)
         const line = roofY - (roofY - gy) * k;
-        return rest(p, 'bajando', Math.max(line - P.alcance, gy + 0.02), true, k, t);
+        const s = rest(p, 'bajando', Math.max(line - P.alcance, p.yMin), true, k, t);
+        s.lowReach = line < s.y + 0.2;
+        return s;
       }
       if (t <= p.up[1]) {
         const k = smooth((t - p.up[0]) / Math.max(p.up[1] - p.up[0], 1e-6));
-        return rest(p, 'subiendo', gy + 0.02 + (topFloor - gy - 0.02) * k, true, 1, t);
+        return rest(p, 'subiendo', p.yMin + (topFloor - p.yMin) * k, true, 1, t);
       }
       const nx = p.i + 1 < panos.length ? panos[p.i + 1] : null;
       const k = clamp01((t - p.move[0]) / Math.max(p.move[1] - p.move[0], 1e-6));
@@ -368,7 +438,7 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
       const [x, z] = xz(f, sa + (sb - sa) * ks, o);
       return {
         phase: 'traslado', pano: p, next: nx, x, z, y: topFloor, heading: headingOf(f),
-        roofOut: p.roof + (nx.roof - p.roof) * ks, cableOut: o, rigged: true, onPlatform: false, progress: 1, painted: paintedArea(t),
+        roofOut: p.roof + (nx.roof - p.roof) * ks, cableOut: o, base: Math.max(p.base, nx.base), lowReach: false, rigged: true, onPlatform: false, progress: 1, painted: paintedArea(t),
       };
     }
     return rest(last, 'desmontaje', topFloor, false, 1, t);

@@ -12,6 +12,8 @@ import { BANDEJA_LIFT, bandejaSpan, buildBandeja } from './bandeja';
 import { NEVER, revealMaterial, revealMesh, type RevealMaterial } from './reveal';
 import { SITE } from '../config';
 import { concreteTexture, formPanelTexture, plywoodTexture } from './textures';
+import { FACADE_COLORS } from './facadePaint';
+import { exteriorFaces } from '../core/paintPlan';
 
 export interface Layer {
   mesh: THREE.Mesh;
@@ -52,7 +54,7 @@ const C = {
   beam: '#e2b11f',
   guard: '#f0c22a',
   edge: '#9a5530',
-  facade: '#e2dfd8',
+  facade: FACADE_COLORS.paint, // mismo látex que pinta el balancín (facadePaint.ts)
   pvc: '#f1f0ec',
   glass: '#3f5361',
   railing: '#4a2b27',
@@ -88,6 +90,8 @@ function makeSharedMaterials(clip: THREE.Plane[]) {
     edge: withClip(revealMaterial({ color: '#ffffff', map: ply, roughness: 0.7 }, { mode: 'drop', dropHeight: 0.8, outLift: new THREE.Vector3(0, 1.5, 0) })),
     guard: withClip(revealMaterial({ color: C.guard, roughness: 0.7 }, { mode: 'drop', dropHeight: 0.5, outLift: new THREE.Vector3(0, 0.6, 0) })),
     finishWall: withClip(revealMaterial({ color: C.facade, roughness: 0.9 }, { mode: 'rise' })),
+    // fachada liviana hacia el exterior: se levanta sin pintar y la pinta el balancín (piel de facadePaint)
+    finishRaw: withClip(revealMaterial({ color: FACADE_COLORS.raw, map: conc, roughness: 0.92 }, { mode: 'rise' })),
     pvc: withClip(revealMaterial({ color: C.pvc, roughness: 0.5 }, { mode: 'drop', dropHeight: 0.6 })),
     glass: withClip(revealMaterial({ color: C.glass, roughness: 0.12, metalness: 0.65 }, { mode: 'drop', dropHeight: 0.6 })),
     railing: withClip(revealMaterial({ color: C.railing, roughness: 0.5, metalness: 0.5 }, { mode: 'drop', dropHeight: 0.6 })),
@@ -403,16 +407,21 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
 
     // --- Terminaciones del piso: tabiquería, fachada liviana, ventanas, barandas -------
     const fw = new GeoBuilder();
+    const fr = new GeoBuilder();
+    fr.uvScale = 1 / 2.4;
     const light = lv.walls.filter((w) => !w.ha);
+    const above = levels[L + 1].slab.outer;
     const [f0, f1] = fin;
     light.forEach((w) => {
       const c = polyBounds(w.poly);
       const k = fx(c.cx, X0, X1);
       const s = f0 + k * (f1 - f0) * 0.45;
-      fw.timing(s, s + (f1 - f0) * 0.25, NEVER, NEVER, w.y0, w.y1 - w.y0);
-      fw.extrude(w.poly, wallHoles(w), w.y0, w.y1);
+      const g = w.cat === 'fachada' && exteriorFaces(w.poly, above).length ? fr : fw;
+      g.timing(s, s + (f1 - f0) * 0.25, NEVER, NEVER, w.y0, w.y1 - w.y0);
+      g.extrude(w.poly, wallHoles(w), w.y0, w.y1);
     });
     add(fw.build(), M.finishWall, 'tabiques', L, f0, NEVER, true);
+    add(fr.build(), M.finishRaw, 'tabiques', L, f0, NEVER, true);
     const mats = { window: M.pvc, plate: M.glass, railing: M.railing, door: M.door } as const;
     for (const grp of data.detail.groups.filter((g) => g.level === lv.name)) {
       const geo = detailGeometry(detail, grp.offset, grp.count, f0 + (f1 - f0) * 0.4, f1, X0, X1);

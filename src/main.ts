@@ -294,8 +294,9 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
         rows.push(
           ['Fachada actual', p.facade.name],
           ['Paño actual', `${p.k} de ${p.nOf} en esta fachada · ${p.i + 1} de ${plan.panos.length} en total`],
-          ['Estado', ps.phase === 'bajando' ? `${fase.bajando} · ${fmt(ps.progress * 100)} % del paño` : fase[ps.phase]],
+          ['Estado', ps.phase === 'bajando' ? `${fase.bajando} · ${fmt(ps.progress * 100)} % del paño${ps.lowReach && ps.pano.stopBy ? ' · tramo bajo con rodillo extensible' : ''}` : fase[ps.phase]],
         );
+        if (p.stopBy) rows.push(['Pie del paño', `La plataforma se detiene a ${fmt(p.yMin - plan.groundY, 1)} m del terreno, sobre ${p.stopBy}; abajo se pinta con rodillo extensible`]);
       } else rows.push(['Estado', T < plan.mount[0] ? 'Aún no llega a la obra (parte al terminar la obra gruesa)' : 'Fachada terminada, equipo retirado']);
       rows.push(
         ['Fachada pintada', `${fmt(plan.paintedArea(T))} de ${fmt(plan.area)} m²`],

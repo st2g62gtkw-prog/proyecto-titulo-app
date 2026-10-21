@@ -7,6 +7,7 @@
  * Cada vértice lleva:
  *   aPaint = (t0, t1)  bajada del balancín por su paño (s de simulación)
  *   aBox   = (y0, h)   tramo vertical que recorre la línea de pintura en esa bajada
+ *   aFrom  = t         desde cuándo existe la cara (fachada liviana: cuando la levantan)
  * La malla tiene matriz de mundo identidad (vértices en coordenadas de mundo), como las de reveal.
  */
 import * as THREE from 'three';
@@ -24,7 +25,7 @@ export const FACADE_COLORS = {
 };
 
 export function buildFacadePaint(plan: PaintPlan, clipping: THREE.Plane[]): THREE.Mesh {
-  const pos: number[] = [], nor: number[] = [], uv: number[] = [], tp: number[] = [], box: number[] = [], idx: number[] = [];
+  const pos: number[] = [], nor: number[] = [], uv: number[] = [], tp: number[] = [], box: number[] = [], from: number[] = [], idx: number[] = [];
   const yBot = plan.groundY, H = plan.roofY - plan.groundY;
   for (const pc of plan.pieces) {
     const p = plan.panos[pc.pano];
@@ -42,6 +43,7 @@ export function buildFacadePaint(plan: PaintPlan, clipping: THREE.Plane[]): THRE
       uv.push(u0 + s / 2.4, y / 2.4);
       tp.push(p.down[0], p.down[1]);
       box.push(yBot, H);
+      from.push(pc.from);
     }
     // sentido de las caras hacia afuera: (b − a) × arriba debe apuntar como n
     const cross = (pc.b[1] - pc.a[1]) * 1 * nx - (pc.b[0] - pc.a[0]) * nz;
@@ -54,6 +56,7 @@ export function buildFacadePaint(plan: PaintPlan, clipping: THREE.Plane[]): THRE
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.setAttribute('aPaint', new THREE.Float32BufferAttribute(tp, 2));
   g.setAttribute('aBox', new THREE.Float32BufferAttribute(box, 2));
+  g.setAttribute('aFrom', new THREE.Float32BufferAttribute(from, 1));
   g.setIndex(idx);
   g.computeBoundingSphere();
 
@@ -73,13 +76,14 @@ export function buildFacadePaint(plan: PaintPlan, clipping: THREE.Plane[]): THRE
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 aPaint;\nattribute vec2 aBox;\nvarying vec2 vPaint;\nvarying vec2 vBox;\nvarying float vY;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPaint = aPaint;\nvBox = aBox;\nvY = transformed.y;');
+      .replace('#include <common>', '#include <common>\nattribute vec2 aPaint;\nattribute vec2 aBox;\nattribute float aFrom;\nvarying vec2 vPaint;\nvarying vec2 vBox;\nvarying float vY;\nvarying float vFrom;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPaint = aPaint;\nvBox = aBox;\nvY = transformed.y;\nvFrom = aFrom;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uT;\nuniform vec3 uRaw;\nuniform vec3 uSeal;\nuniform vec3 uPaint;\nvarying vec2 vPaint;\nvarying vec2 vBox;\nvarying float vY;')
+      .replace('#include <common>', '#include <common>\nuniform float uT;\nuniform vec3 uRaw;\nuniform vec3 uSeal;\nuniform vec3 uPaint;\nvarying vec2 vPaint;\nvarying vec2 vBox;\nvarying float vY;\nvarying float vFrom;')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        if (uT < vFrom) discard;
         {
           float dur = max(vPaint.y - vPaint.x, 1e-4);
           float p = clamp((uT - vPaint.x) / dur, 0.0, 1.0);

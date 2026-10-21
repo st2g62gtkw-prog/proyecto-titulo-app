@@ -49,7 +49,7 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
     ev.push({ t: paint.mount[0] + 0.02, text: 'Parte el subcontrato de pintura: se montan pescantes y balancín en la techumbre', kind: 'info' });
     paint.panos.forEach((p, i) => {
       if (i === 0 || paint.panos[i - 1].facade !== p.facade) {
-        ev.push({ t: p.down[0], text: `Balancín de pintura ${i === 0 ? 'baja por el primer paño de la' : 'pasa a la'} ${p.facade.name.toLowerCase()} · ${p.nOf} paños`, kind: 'info' });
+        ev.push({ t: p.down[0], text: `Balancín de pintura ${i === 0 ? `baja por el primer paño ${p.facade.art === 'el' ? 'del' : 'de la'}` : `pasa ${p.facade.art === 'el' ? 'al' : 'a la'}`} ${p.facade.name.toLowerCase()} · ${p.nOf} paños`, kind: 'info' });
       }
     });
     ev.push({ t: paint.dismount[0], text: `Pintura de fachada terminada · ${fmt(Math.round(paint.area))} m², se retira el balancín`, kind: 'ok' });
