@@ -11,6 +11,7 @@
 import type { BuildingData, LevelData, WallData } from '../data/building';
 import { DAYS, PACE } from '../config';
 import { polyBounds } from '../scene/geom';
+import { buildFundPlan, type FundPlan } from './fundPlan';
 
 export type ActivityKind =
   | 'fundaciones'
@@ -107,9 +108,8 @@ export interface Schedule {
   wall: WallTiming[][];
   /** Tiempos por losa (índice de piso de la losa, 1..7 = 2P..Techumbre; 0 = radier). */
   slab: SlabTiming[];
-  foundations: [number, number];
-  /** Hormigonado de zapatas bajo cada muro HA del 1P (mismo índice que haWalls(1P)). */
-  footing: [number, number][];
+  /** Fundaciones (excavación, zapatas, moldaje, hormigón y relleno) por sectores, ver fundPlan. */
+  fund: FundPlan;
   /** Ventanas de terminaciones por piso. */
   finish: [number, number][];
   levelNames: string[];
@@ -174,18 +174,12 @@ export function buildSchedule(data: BuildingData): Schedule {
   const finish: [number, number][] = [];
 
   // --- Fundaciones y radier -------------------------------------------------------------
-  const fund = push('fundaciones', 0, PACE.fundaciones, DAYS.fundaciones, 'Fundaciones', 'Zapatas corridas G25 con capacho, sello en maicillo (−1,11 a −2,61 m)');
-  const walls0 = haWalls(levels[0]);
-  const gF = groups(wallOrder(walls0), 5);
-  const footing: [number, number][] = walls0.map(() => [0, 0]);
-  const leadF = 2.0;
-  const tripF = (PACE.fundaciones - leadF - 1.2) / gF.length;
-  fund.trips = gF.map((g, k) => {
-    const c = groupCenter(walls0, g);
-    const t0 = fund.t0 + leadF + k * tripF;
-    g.forEach((wi) => (footing[wi] = [t0 + tripF * 0.55, t0 + tripF * 0.86]));
-    return { t0, t1: t0 + tripF, walls: g, x: c.x, z: c.z, y: 0.9 };
-  });
+  // Excavación en zanjas, emplantillado, enfierradura, moldaje, hormigonado con la bomba y relleno,
+  // en 3 sectores en tren; los días duran según lo que pasa en ellos (FUND_PACE)
+  if (!data.fund) throw new Error('Faltan los datos de fundaciones (fundaciones-e.json)');
+  const fundPlan = buildFundPlan(data.fund, t, haWalls(levels[0]));
+  push('fundaciones', 0, fundPlan.t1 - fundPlan.t0, DAYS.fundaciones, 'Fundaciones',
+    'Zapatas corridas G25 B 1,5–2,1 m × 0,95 con bomba estacionaria; sello en maicillo (−1,11 a −2,61 m)');
   for (let L = 0; L < nWallLevels; L++) {
     const lv = levels[L];
     const walls = haWalls(lv);
@@ -340,8 +334,7 @@ export function buildSchedule(data: BuildingData): Schedule {
     totalDays: d,
     wall,
     slab,
-    foundations: [fund.t0 + 1, fund.t1 - 1],
-    footing,
+    fund: fundPlan,
     finish,
     levelNames: levels.map((l) => l.name),
     at(time: number) {
@@ -356,6 +349,8 @@ export function buildSchedule(data: BuildingData): Schedule {
     },
     dayAt(time: number) {
       const a = sched.at(time);
+      // en las fundaciones cada día dura distinto (ver fundPlan)
+      if (a.kind === 'fundaciones') return a.d0 + fundPlan.dayAt(time);
       const k = Math.min(Math.max((time - a.t0) / (a.t1 - a.t0), 0), 1);
       return a.d0 + k * (a.d1 - a.d0);
     },

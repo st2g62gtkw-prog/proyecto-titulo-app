@@ -87,11 +87,28 @@ export const SITE = {
    * bomba, capacho en reposo y, junto al portón, el estacionamiento y la cancha de lavado).
    */
   talud: { zStart: -25, zTop: -34, height: 6 },
+
+  /**
+   * Excavación de las fundaciones (días 1 a 13). La excavadora llega en cama baja y queda en el
+   * testero −x (park0); al terminar el sector 3 se estaciona en el testero +x (park1) y se retira.
+   * Los camiones tolva entran en retroceso por el portón y el camino posterior igual que los
+   * mixers, se apartan antes de la caseta de la bomba a una huella de carguío pegada a la
+   * fachada posterior (laneZ; frente a la caseta se corre a laneZPump para no topar su techo) y,
+   * para las zanjas del frente, entran a la plataforma por la franja de los peines posteriores
+   * (aún sin excavar) hasta innerZ, detrás de la excavadora. entryX = donde salen del camino.
+   */
+  excavacion: {
+    park0: { x: -29.5, z: -4.5 },
+    park1: { x: 29.8, z: -4.5 },
+    laneZ: -9.6,
+    laneZPump: -8.9,
+    innerZ: -3.0,
+    entryX: -27,
+  },
 };
 
 /** Duración visual (segundos de simulación a velocidad x1) de cada actividad. */
 export const PACE = {
-  fundaciones: 12,
   muroFierro: 9,
   muroMoldaje: 13,
   muroHormigon: 16,
@@ -105,6 +122,23 @@ export const PACE = {
    * bolsón de espera, el siguiente retrocede desde ahí hasta la tolva. Ver Logistics.
    */
   cambioMixer: 3.6,
+};
+
+/**
+ * Fundaciones (DAYS.fundaciones = 40 días hábiles): segundos de simulación de cada día según lo que
+ * pasa ese día (ver core/fundPlan, carta Gantt de 3 sectores en tren). Los días de excavación y de
+ * hormigonado llevan más tiempo para que se alcance a ver la excavadora, los camiones y la bomba.
+ */
+export const FUND_PACE = {
+  trazado: 1.2,
+  excavacion: 2.8,
+  /** Día con una serie de capachos (emplantillado, muros bajo NPT, V.S.C.). */
+  capacho: 4.6,
+  /** Día de hormigonado de un sector con la bomba estacionaria. */
+  bomba: 9,
+  dia: 1.0,
+  /** Compactación de la plataforma, replanteo y recepción (días 34 a 40). */
+  cierre: 0.7,
 };
 
 /**
