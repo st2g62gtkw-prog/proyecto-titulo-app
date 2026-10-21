@@ -48,10 +48,13 @@ export function bandejaSpan(y: number): [number, number] {
 
 /**
  * Agrega la bandeja alrededor del contorno `outline` (losa del piso en obra, cara superior en `y`).
- * `anchors` son las plantas de los muros del piso de abajo: cada ménsula se corre unos centímetros
- * para quedar contra un muro cuando lo hay cerca. La timing de cada GeoBuilder se fija afuera.
+ * `anchors` son las plantas de los muros del piso de abajo: cada ménsula se corre (hasta 1,2 m)
+ * para quedar contra un muro cuando lo hay cerca; si no hay muro, se toma del canto de la losa con
+ * un tornapunta corto, sin pie colgando frente a vanos. `avoid` marca tramos de fachada donde no
+ * puede ir ninguna ménsula (p. ej. la puerta por donde entra la tubería de la bomba).
+ * La timing de cada GeoBuilder se fija afuera.
  */
-export function buildBandeja(g: BandejaParts, outline: V2[], anchors: V2[][], y: number) {
+export function buildBandeja(g: BandejaParts, outline: V2[], anchors: V2[][], y: number, avoid?: (p: V2) => boolean) {
   const B = BANDEJA;
   const W = B.gap + B.ancho; // borde exterior de la plataforma, medido desde la fachada
   const dPost = W - 0.04; // eje de los pies derechos y de la baranda
@@ -85,18 +88,43 @@ export function buildBandeja(g: BandejaParts, outline: V2[], anchors: V2[][], y:
     posts.push(p);
     g.frame.barN(p[0], yArm - 0.035, p[1], p[0], yTop + B.pasamanos + 0.06, p[1], 0.05);
   };
-  const bracket = (p: V2, u: V2, nrm: V2, reach: number) => {
+  // distancia de p (en la envolvente) a la primera cara de `polys` hacia adentro (-nrm): donde la
+  // envolvente rellena un entrante, o la losa vuela sobre el muro, el pie y las placas se corren
+  // hasta la cara real del muro
+  const toFace = (p: V2, nrm: V2, polys: V2[][]): number => {
+    let best = 0.5;
+    for (const poly of polys) for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const ex = b[0] - a[0], ez = b[1] - a[1];
+      const den = -nrm[0] * ez + nrm[1] * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const wx = a[0] - p[0], wz = a[1] - p[1];
+      const t = (wx * ez - wz * ex) / den; // avance del rayo
+      const s = (nrm[0] * wz - nrm[1] * wx) / den; // posición en el lado
+      if (t > -0.01 && t < best && s >= 0 && s <= 1) best = t;
+    }
+    return best < 0.5 && best > 0.03 ? best : 0;
+  };
+  // `full` = ménsula completa con pie contra el muro de abajo; si no, tornapunta corto al canto de la losa
+  const bracket = (p0: V2, u: V2, nrm: V2, reach: number, full = true) => {
+    const back = (full && toFace(p0, nrm, anchors)) || toFace(p0, nrm, [outline]);
+    const p: V2 = [p0[0] - nrm[0] * back, p0[1] - nrm[1] * back];
+    reach += back;
     const at = (d: number): V2 => [p[0] + nrm[0] * d, p[1] + nrm[1] * d];
-    const [ax, az] = at(0.0), [bx, bz] = at(reach), [lx, lz] = at(0.045), [dx, dz] = at(reach - 0.14);
-    const yFoot = yArm - B.mensula;
+    const [ax, az] = at(0.0), [bx, bz] = at(reach), [lx, lz] = at(0.045);
+    const drop = full ? B.mensula : 0.32; // el corto no baja más allá del canto de la losa
+    const [dx, dz] = at(full ? reach - 0.14 : Math.min(reach - 0.14, 0.45));
+    const yFoot = yArm - drop;
     g.frame.barN(ax, yArm, az, bx, yArm, bz, 0.07);
     g.frame.barN(lx, yArm + 0.035, lz, lx, yFoot, lz, 0.07);
-    g.frame.barN(lx, yFoot + 0.1, lz, dx, yArm - 0.03, dz, 0.055);
+    g.frame.barN(lx, yFoot + (full ? 0.1 : 0.03), lz, dx, yArm - 0.03, dz, 0.055);
     // placas de anclaje contra el muro: arriba la pasada del perno, abajo el apoyo del pie
     const plate = (y0: number, w: number, h: number) =>
       g.frame.boxN(ax - u[0] * w / 2, y0, az - u[1] * w / 2, u[0], 0, u[1], 0, 1, 0, nrm[0], 0, nrm[1], w, h, 0.012);
-    plate(yArm - 0.34, 0.2, 0.3);
-    plate(yFoot, 0.14, 0.14);
+    if (full) {
+      plate(yArm - 0.34, 0.2, 0.3);
+      plate(yFoot, 0.14, 0.14);
+    } else plate(yFoot, 0.2, 0.28);
   };
   // ¿hay muro del piso de abajo detrás de este punto de la fachada?
   const onWall = (p: V2, nrm: V2) => [0.1, 0.25, 0.4].some((d) => {
@@ -123,16 +151,26 @@ export function buildBandeja(g: BandejaParts, outline: V2[], anchors: V2[][], y:
       const k = Math.ceil((hi - lo) / B.paso);
       for (let j = 0; j <= k; j++) ss.push(lo + (j * (hi - lo)) / k);
     } else if (hi >= lo) ss.push((lo + hi) / 2);
+    let prev = -Infinity; // última ménsula de este lado (para no dejar tramos de más de ~3 m)
     for (let s of ss) {
       const pt = (v: number): V2 => [a[0] + u[0] * v, a[1] + u[1] * v];
-      if (!onWall(pt(s), nrm)) {
-        // se corre hasta 0,6 m para tomarse de un muro si lo hay
-        for (let j = 1; j <= 4; j++) {
-          const hit = [s - 0.15 * j, s + 0.15 * j].find((v) => v >= lo && v <= hi && onWall(pt(v), nrm));
-          if (hit !== undefined) { s = hit; break; }
+      const ok = (v: number) => v >= lo && v <= hi && v - prev >= 0.5 && (prev === -Infinity || v - prev <= 3.0) && !avoid?.(pt(v));
+      let full = onWall(pt(s), nrm) && ok(s);
+      if (!full) {
+        // se corre hasta 1,2 m para tomarse de un muro si lo hay
+        for (let j = 1; j <= 8 && !full; j++) {
+          const hit = [s - 0.15 * j, s + 0.15 * j].find((v) => ok(v) && onWall(pt(v), nrm));
+          if (hit !== undefined) { s = hit; full = true; }
         }
       }
-      bracket(pt(s), u, nrm, W);
+      if (!full && avoid?.(pt(s))) {
+        // tramo prohibido (vano de la tubería): se corre fuera de él o se omite
+        const free = [...Array(12).keys()].flatMap((j) => [s - 0.15 * (j + 1), s + 0.15 * (j + 1)]).find((v) => v >= lo && v <= hi && v - prev >= 0.5 && !avoid(pt(v)));
+        if (free === undefined) continue;
+        s = free;
+      }
+      prev = s;
+      bracket(pt(s), u, nrm, W, full);
       if (s >= pLo && s <= pHi) post([pt(s)[0] + nrm[0] * dPost, pt(s)[1] + nrm[1] * dPost]);
     }
   }
@@ -142,7 +180,7 @@ export function buildBandeja(g: BandejaParts, outline: V2[], anchors: V2[][], y:
       const p = F[i], q = outer[i];
       const reach = Math.hypot(q[0] - p[0], q[1] - p[1]);
       const nrm: V2 = [(q[0] - p[0]) / reach, (q[1] - p[1]) / reach];
-      bracket(p, [-nrm[1], nrm[0]], nrm, reach * 0.98);
+      if (!avoid?.(p)) bracket(p, [-nrm[1], nrm[0]], nrm, reach * 0.98, onWall(p, nrm));
     }
     post(rail[i]);
   }

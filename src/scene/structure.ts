@@ -101,7 +101,7 @@ function makeSharedMaterials(clip: THREE.Plane[]) {
     scaffold: withClip(revealMaterial({ color: '#3b3e43', roughness: 0.55, metalness: 0.5 }, { mode: 'rise', outLift: new THREE.Vector3(0, BANDEJA_LIFT, 0) })),
     scaffoldRail: withClip(revealMaterial({ color: '#d6322b', roughness: 0.6 }, { mode: 'rise', outLift: new THREE.Vector3(0, BANDEJA_LIFT, 0) })),
     scaffoldDeck: withClip(revealMaterial({ color: '#b98e4f', roughness: 0.85 }, { mode: 'rise', outLift: new THREE.Vector3(0, BANDEJA_LIFT, 0) })),
-    scaffoldMesh: withClip(revealMaterial({ color: '#2b7a47', roughness: 0.9, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false }, { mode: 'rise', outLift: new THREE.Vector3(0, BANDEJA_LIFT, 0) })),
+    scaffoldMesh: withClip(revealMaterial({ color: '#2f9e5e', roughness: 0.9, transparent: true, opacity: 0.86, side: THREE.DoubleSide, depthWrite: true }, { mode: 'rise', outLift: new THREE.Vector3(0, BANDEJA_LIFT, 0) })),
   };
 }
 
@@ -432,7 +432,10 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     const in1 = in0 + (L === 1 ? 2.4 * (box / bh) : 0.04);
     const parts = { frame: new GeoBuilder(), rails: new GeoBuilder(), deck: new GeoBuilder(), mesh: new GeoBuilder() };
     for (const gb of Object.values(parts)) gb.timing(in0, in1, out0, out1, by, box);
-    buildBandeja(parts, levels[L].slab.outer, haWalls(levels[L - 1]).map((w) => w.poly), y);
+    // en la losa del 2P no va ménsula frente a la puerta posterior por donde entra la tubería
+    const door = SITE.pipeline.door;
+    const avoid = L === 1 ? (p: V2) => p[1] < -4 && p[0] > door.x0 - 0.2 && p[0] < door.x1 + 0.2 : undefined;
+    buildBandeja(parts, levels[L].slab.outer, haWalls(levels[L - 1]).map((w) => w.poly), y, avoid);
     add(parts.frame.build(), M.scaffold, 'andamio', L, in0, out1 + 0.1);
     add(parts.rails.build(), M.scaffoldRail, 'andamio-barandas', L, in0, out1 + 0.1, false, false);
     add(parts.deck.build(), M.scaffoldDeck, 'andamio-plataformas', L, in0, out1 + 0.1);
