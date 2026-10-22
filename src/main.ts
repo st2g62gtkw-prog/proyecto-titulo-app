@@ -217,7 +217,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
           ['Despachados a la fecha', fmt(prog.mixers)],
           ['Hormigón colocado', `${fmt(prog.hormigon)} m³`],
         ],
-        note: 'Llega por la calle, pasa el portón norponiente y entra en retroceso (la canaleta va atrás) por el único camino del costado posterior. Para muros se detiene antes de la bomba y llena el capacho que toma la grúa; para losas sigue hasta la tolva de la bomba, al final del camino. Descarga y sale de frente por el mismo camino y el mismo portón. En las losas el segundo mixer entra mientras descarga el primero y espera en el bolsón al costado del camino; cuando el primero sale y lo pasa, retrocede hasta la tolva.',
+        note: 'Llega por la calle, pasa el portón norponiente y entra en retroceso (la canaleta va atrás) por el único camino del costado posterior. Para muros se detiene antes de la bomba y llena el capacho que toma la grúa; para losas sigue hasta la tolva de la bomba, al final del camino. Descarga y sale de frente por el mismo camino y el mismo portón. En las losas el segundo mixer entra mientras descarga el primero y espera en el bolsón al costado del camino; cuando el primero sale y lo pasa, retrocede hasta la tolva. En el hormigonado de zapatas de cada sector (≈ 115 a 135 m³, unos 16 a 20 viajes de 7 m³) la animación muestra solo dos mixers con su cambio: cada uno representa unos 8 viajes, y el contador de despachados sube con el hormigón colocado.',
       };
     case 'pump': {
       const ps = w.log.pumpState(T);
@@ -232,7 +232,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
           ['Rendimiento', EQUIPMENT.bomba.caudal],
           ['Losas hormigonadas', `${prog.losas} de 7`],
         ],
-        note: 'Queda fija en su caseta toda la obra, al final del camino de mixers. Cada mixer llega en retroceso hasta la tolva y descarga con su canaleta; mientras uno sale y entra el siguiente, la bomba se detiene. La tubería entra por la puerta posterior del hall, sube por el shaft del ascensor hasta la losa y la cuadrilla reparte el hormigón con la manguera.',
+        note: 'Llega a la obra al terminar la excavación de las fundaciones (antes su lugar es la huella de carguío de los camiones tolva) y queda fija en su caseta toda la obra, al final del camino de mixers. En las zapatas la tubería cruza las zanjas sobre caballetes de madera. Cada mixer llega en retroceso hasta la tolva y descarga con su canaleta; mientras uno sale y entra el siguiente, la bomba se detiene. La tubería entra por la puerta posterior del hall, sube por el shaft del ascensor hasta la losa y la cuadrilla reparte el hormigón con la manguera.',
       };
     }
     case 'pipe':
@@ -365,6 +365,8 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
         zapatas: 'Se hormigonan en 3 sectores (juntas en x = −8,9 y x = 9,4) con la bomba estacionaria y la tubería tendida por el suelo; los muros bajo NPT de A-B, la V.S.C. del foso y sus muros van con capacho. Los "pollos" de 16 cm guían el moldaje de los muros del 1er piso.',
         fierro: 'Parrilla inferior de U transversales Ø12a20 con patas de 50 cm, barras superiores longitudinales Ø12a20 y esperas de doble malla Ø8a20 ancladas 85 cm en la zapata (barras de borde en las cabezas de muro). Recubrimiento 5 cm sobre calugas.',
         moldaje: 'Costados de terciado con costillas cada 0,6 m, tornapuntas y estacas contra la pared de la zanja y crucetas que fijan el ancho; tablas para el cuello del pollo y paneles de muro para los muros bajo NPT. Se descimbra a las 24–48 h.',
+        vibropison: 'Vibropisón ("canguro") a bencina, ~60 kg: compacta el relleno lateral en capas de 25 cm hasta el 95 % del Proctor Modificado, con control de densidad por capa. Lo opera la mitad de la cuadrilla de relleno; el resto palea y riega el material de empréstito.',
+        sello: 'Banderín de sello recibido: el mecánico de suelos revisó el fondo de las zanjas del sector (sello horizontal en U3, paredes verticales, limpieza) y lo dejó anotado en el libro de obra. Se retira al terminar el emplantillado.',
         excavacion: 'Zanjas de B + 2 × 0,38 m con paredes verticales (zona general, fondo −1,16) y con talud 3:1 en las zonas profundas (núcleo −1,45; eje A −1,63; escalón −1,91; A-B −2,66). Paredes de finos café rojizo (U2) y maicillo café claro (U3) en el fondo; sin napa. Tras descimbrar e impermeabilizar con Igol se rellena en capas de 25 cm compactadas al 95 % del Proctor Modificado.',
       };
       return { title: 'Fundaciones del Edificio E', subtitle: 'Planos E-01 / E-02 · rev. 3', badge: 'FUND', rows, note: notes[p.id ?? ''] ?? notes.zapatas };

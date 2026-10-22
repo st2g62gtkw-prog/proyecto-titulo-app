@@ -137,6 +137,8 @@ export interface CraneTripF {
   x: number;
   y: number;
   z: number;
+  /** Hasta cuándo queda el paquete en el suelo después de soltarlo (lo consume la cuadrilla). */
+  until: number;
   task: string;
 }
 
@@ -190,6 +192,8 @@ export interface SectorPlan {
   npt: { fierro: Win; cap: CapachoSeries; strip: Win } | null;
   igol: Win;
   relleno: Win;
+  /** Banderín de "sello recibido" que deja el mecánico de suelos (desde la recepción hasta el emplantillado). */
+  flag: { x: number; z: number };
   /** Hormigón de zapatas (m³) y fierro (kg con 5 %) del sector. */
   m3: number;
   kg: number;
@@ -201,6 +205,8 @@ export interface CrewFront {
   n: number;
   action: 'work' | 'walk' | 'idle' | 'carry';
   label: string;
+  /** Herramienta que lleva la mitad de la cuadrilla (los demás palean y riegan el material). */
+  tool?: 'vibropison';
 }
 
 export interface FundStep {
@@ -330,13 +336,16 @@ function seq<T>(items: T[], weight: (x: T) => number, [A, B]: Win, lap = 0): Win
 // ---------------------------------------------------------------------------------------
 
 const EX = SITE.excavacion;
-/** Eje z de la huella de carguío en x (se corre hacia el edificio frente a la caseta de la bomba). */
+/**
+ * Eje z de la huella de carguío en x. La caseta de la bomba todavía no está (se arma al terminar la
+ * excavación, ver pumpIn), así que la huella va derecho y deja la berma libre junto a las zanjas: el
+ * costado del camión queda a ≥ 0,3 m del borde de los peines posteriores (−8,13) y, frente a la zanja
+ * profunda de A-B (−2,66 con talud 3:1, borde a −8,77), a ≥ 1 m: se aparta 1,25 m más del edificio y
+ * vuelve en 8 m, para que el camión no se cruce en diagonal sobre el peine x = −10,48.
+ */
 export function laneZ(x: number) {
-  const P = SITE.pump.x;
-  const k = smooth((x - (P - 7.5)) / 2.5) * (1 - smooth((x - (P + 5.5)) / 2.5));
-  // frente a la zanja profunda de A-B (talud 3:1) se aparta 0,6 m más del edificio
-  const ab = 1 - smooth((x + 20.5) / 2.5);
-  return EX.laneZ + (EX.laneZPump - EX.laneZ) * k - 0.6 * ab;
+  const ab = 1 - smooth((x + 15.9) / 8);
+  return EX.laneZ - 1.25 * ab;
 }
 const laneLine = (xa: number, xb: number): P[] => {
   const n = Math.max(1, Math.ceil(Math.abs(xb - xa) / 1.5));
@@ -395,6 +404,8 @@ export interface FundPlan {
   replanteo: Win;
   /** Ventana de excavación de la excavadora en obra (llega y se retira). */
   excavatorOnSite: Win;
+  /** Instante en que se arma la bomba estacionaria y su caseta (cuando sale el último camión tolva). */
+  pumpIn: number;
   steps: FundStep[];
   excavator(t: number): ExcavatorState;
   truckStates(t: number): TruckState[];
@@ -570,10 +581,10 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
       const inner = ph === 'A';
       const xMin = inner ? xa + INNER_S + 0.3 : EX.entryX + 1;
       /** Camión para cargar desde (sx, sz): el anterior si su tolva queda al alcance, o uno corrido en x. */
-      const truckFor = (sx: number, sz: number, group: ExcCell[]): ExcStation['truck'] | null => {
+      const truckFor = (sx: number, sz: number, group: ExcCell[], open: ExcCell[] = dug): ExcStation['truck'] | null => {
         const prev = stations[stations.length - 1];
         const near = (bx: number, bz: number) => Math.hypot(bx - sx, bz - sz) <= R_DIG - 0.3;
-        const ok = (tx: number, tz: number) => truckClear(truckRect(tx, tz), [...dug, ...group]) && Math.hypot(tx - sx, tz - sz) > 3.6;
+        const ok = (tx: number, tz: number) => truckClear(truckRect(tx, tz), [...open, ...group]) && Math.hypot(tx - sx, tz - sz) > 3.6;
         if (prev && prev.sector === sn && prev.truck.kind === (inner ? 'inner' : 'lane') && near(prev.bed.x, prev.bed.z) && ok(prev.truck.x, prev.truck.z)) return prev.truck;
         for (const dx of [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5, 3, -3, 3.5, -3.5, 4, -4, 5, -5, 6, -6]) {
           const tx = Math.max(sx - TRUCK_BED + dx, xMin), tz = inner ? EX.innerZ : laneZ(tx);
@@ -581,17 +592,42 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
         }
         return null;
       };
-      /** Si después de abrir `open` cada trozo pendiente todavía tiene algún puesto posible. */
-      const feasible = (open: ExcCell[], rest: ExcCell[]) => rest.every((r) => {
+      /**
+       * Si el camión llega a su puesto sin acercarse a la excavadora en (sx, sz): cada pose de la
+       * entrada a la plataforma (la S desde la huella y el tramo hasta el puesto) queda a R_TAIL del
+       * eje de giro, que es el radio de la cola de la tornamesa más una holgura.
+       */
+      const R_TAIL = 2.9;
+      const truckPathOk = (sx: number, sz: number, tr: ExcStation['truck']) => {
+        const away = (p: Pose) => {
+          const c = Math.cos(p.heading), sn_ = Math.sin(p.heading);
+          const u = (sx - p.x) * c + (sz - p.z) * sn_, v = -(sx - p.x) * sn_ + (sz - p.z) * c;
+          return Math.hypot(Math.max(Math.abs(u) - 4.6, 0), Math.max(Math.abs(v) - 1.25, 0)) >= R_TAIL;
+        };
+        if (tr.kind !== 'inner') return away({ x: tr.x, z: tr.z, heading: tr.heading });
+        const r = R([...shift([xa, laneZ(xa)], [xa + INNER_S, EX.innerZ]), ...line([xa + INNER_S, EX.innerZ], [tr.x, tr.z], 1.5).slice(1)]);
+        for (let q = 0; q <= r.length; q += 0.4) if (!away(r.at(q))) return false;
+        return away(r.at(r.length));
+      };
+      /**
+       * Si después de abrir `open` (con la excavadora en `from`) cada trozo pendiente todavía tiene
+       * algún puesto posible y alcanzable por terreno firme (que la máquina no quede encerrada).
+       */
+      const feasible = (open: ExcCell[], rest: ExcCell[], from: P) => {
+        const fl2 = flood(from[0], from[1], open);
+        return rest.every((r) => {
         const near = open.filter((c) => Math.hypot(c.cx - r.cx, c.cz - r.cz) < R_DIG + 6);
         const i0 = Math.ceil((r.cx - R_DIG - GX0) / GS), j0 = Math.ceil((r.cz - R_DIG - GZ0) / GS);
         for (let i = i0; gX(i) <= r.cx + R_DIG; i++) for (let j = j0; gZ(j) <= r.cz + R_DIG; j++) {
           const x = gX(i), z = gZ(j);
-          if (Math.hypot(x - r.cx, z - r.cz) > R_DIG || !inPhase(ph, x, z)) continue;
-          if (cellDist(x, z, r) >= clearOf(r, CLR_ST) && stationOk(x, z, near)) return true;
+          if (Math.hypot(x - r.cx, z - r.cz) > R_DIG || !inPhase(ph, x, z) || fl2.par[i * NZ + j] === -2) continue;
+          if (cellDist(x, z, r) < clearOf(r, CLR_ST) || !stationOk(x, z, near)) continue;
+          const tr = truckFor(x, z, [r], open);
+          if (tr && truckPathOk(x, z, tr)) return true;
         }
         return false;
-      });
+        });
+      };
       while (pend.length) {
         const c0 = pend[0];
         const fl = flood(cur[0], cur[1], dug);
@@ -599,17 +635,17 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
         const pendAll = cells.filter((c) => c.sector === sn && !dug.includes(c) && !pend.includes(c));
         for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
           const x = gX(i), z = gZ(j);
-          if (Math.hypot(x - c0.cx, z - c0.cz) > R_DIG || !inPhase(ph, x, z) || fl.par[i * NZ + j] === -2) continue;
-          if (!stationOk(x, z, [...dug, c0])) continue;
+          if (Math.hypot(x - c0.cx, z - c0.cz) > R_DIG || !inPhase(ph, x, z)) continue;
+          if (fl.par[i * NZ + j] === -2 || !stationOk(x, z, [...dug, c0])) continue;
           const group = pend.filter((c) => c === c0 || (Math.hypot(c.cx - x, c.cz - z) <= R_DIG && cellDist(x, z, c) >= clearOf(c, CLR_ST) && Math.abs(c.cx - c0.cx) <= 9));
           const truck = truckFor(x, z, group);
-          if (!truck) continue;
+          if (!truck || !truckPathOk(x, z, truck)) continue;
           const vol = group.reduce((s, c) => s + c.vol, 0);
           const under = [...pend, ...pendAll].filter((c) => !group.includes(c) && cellDist(x, z, c) < CLR_ST).reduce((s, c) => s + c.vol, 0);
           cands.push({ x, z, group, truck, score: vol - 0.35 * Math.hypot(x - cur[0], z - cur[1]) - 0.25 * under });
         }
         cands.sort((a, b) => b.score - a.score);
-        let pick = cands.slice(0, 40).find((cd) => feasible([...dug, ...cd.group], pend.filter((c) => !cd.group.includes(c))));
+        let pick = cands.slice(0, 40).find((cd) => feasible([...dug, ...cd.group], pend.filter((c) => !cd.group.includes(c)), [cd.x, cd.z]));
         if (!pick) {
           console.warn(`Fundaciones: sin puesto libre para la excavadora en la celda ${c0.id} (sector ${sn} ${ph})`);
           pick = cands[0] ?? { x: c0.cx + DIR[ph] * (c0.x1 - c0.x0 + 5), z: ph === 'A' ? 2.8 : -4.6, group: [c0], truck: { x: Math.max(c0.cx - TRUCK_BED, xMin), z: inner ? EX.innerZ : laneZ(c0.cx), heading: Math.PI, kind: inner ? 'inner' : 'lane' }, score: 0 };
@@ -871,7 +907,7 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
       empl: null as unknown as CapachoSeries,
       fierro: span(g.fierro[0], g.fierro[1]), moldaje: span(g.moldaje[0], g.moldaje[1]),
       pour: { sector: sn, pour, pumpStop: [pm - PACE.cambioMixer / 2, pm + PACE.cambioMixer / 2] },
-      desc: span(g.desc[0], g.desc[1]), npt: null, igol: span(g.igol[0], g.igol[1]), relleno: span(g.relleno[0], g.relleno[1]),
+      desc: span(g.desc[0], g.desc[1]), npt: null, flag: { x: 0, z: 0 }, igol: span(g.igol[0], g.igol[1]), relleno: span(g.relleno[0], g.relleno[1]),
       m3: f.sectores[sn - 1]?.hormigonZapatas_m3 ?? 115, kg: (f.sectores[sn - 1]?.fierroZapatas_kg ?? 4000) * 1.05, moldajeM2: 0,
     });
   }
@@ -880,6 +916,9 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
   const parkAt = lastDig + 0.05 + stRoute[stations.length].length / V_EXC + 0.3;
   pushPath(stations.length, lastDig + 0.05, parkAt, 'Termina la excavación y se estaciona');
   const exOff = Math.max(T(12.7), parkAt + 0.6);
+  // la bomba estacionaria llega y se arma su caseta junto al camino cuando ya salió el último camión
+  // tolva (antes ocupaba la huella de carguío); queda lista mucho antes del hormigonado del sector 1
+  const pumpIn = Math.max(exOff, ...trucks.map((v) => v.leave[1])) + 0.3;
   exSegs.sort((a, b) => a.t[0] - b.t[0]);
   // rumbo del tren de orugas en cada puesto: el del último traslado
   {
@@ -1011,13 +1050,48 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     const busy: Win[] = capachos.map((c) => [c.t0 - 0.05, c.t1 + 0.05]);
     const want: (Omit<CraneTripF, 't0' | 't1'> & { at: number })[] = [];
     const D = 2.6;
+    // Punto de descarga: sobre terreno sin excavar (islas entre zanjas o el borde del sector), fuera
+    // de la berma libre de 1 m de las zanjas de más de 1,20 m y a 0,3 m de las demás, sin pisar los
+    // acopios ni el cerco de la grúa. La carga cuelga alineada con x (el gancho no gira): el paquete de
+    // fierro mide 6 × 0,8 m y el de tableros 2,4 × 0,9 m.
+    const HALF = { rebar: [3.1, 0.45], panel: [1.3, 0.5], flag: [0.25, 0.25] } as const;
+    const taken: Rect[] = [];
+    const dropAt = (kind: keyof typeof HALF, px: number, pz: number, xr: Win) => {
+      const [hx, hz] = HALF[kind];
+      let best: Rect | null = null, bd = Infinity;
+      for (let x = xr[0] + hx; x <= xr[1] - hx; x += 0.25) for (let z = -7.5; z <= 13.5; z += 0.25) {
+        const d = Math.hypot(x - px, z - pz);
+        if (d >= bd) continue;
+        const r: Rect = [x - hx, x + hx, z - hz, z + hz];
+        if (!cells.every((c) => rectGap(r, top(c)) >= (isDeep(c) ? 1.0 : 0.3))) continue;
+        if (!OBST.every((o) => rectGap(r, o) >= 0.5) || !taken.every((o) => rectGap(r, o) >= 0.4)) continue;
+        if (Math.hypot(x - SITE.crane.x, z - SITE.crane.z) > SITE.crane.jibLength - 2) continue;
+        best = r;
+        bd = d;
+      }
+      if (!best) {
+        console.warn(`Fundaciones: sin punto de descarga libre para ${kind} cerca de (${px}, ${pz})`);
+        best = [px - hx, px + hx, pz - hz, pz + hz];
+      }
+      taken.push(best);
+      return { x: (best[0] + best[1]) / 2, y: PLAT + 0.05, z: (best[2] + best[3]) / 2 };
+    };
     for (const S of sectors) {
       const cx = (Math.max(S.x0, -22) + Math.min(S.x1, 24)) / 2;
-      const drop = (dx: number) => ({ x: cx + dx, y: PLAT + 0.05, z: -4.2 });
-      want.push({ at: S.fierro[0] - 1.0, kind: 'rebar', ...drop(-3), task: `Paquete de fierro dimensionado al sector ${S.n} (1/2)` });
-      want.push({ at: S.fierro[0] + 1.6, kind: 'rebar', ...drop(3), task: `Paquete de fierro dimensionado al sector ${S.n} (2/2)` });
-      want.push({ at: S.moldaje[0] - 0.4, kind: 'panel', ...drop(0), task: `Tableros de moldaje al sector ${S.n}` });
-      if (S.npt) want.push({ at: S.npt.fierro[0] + 0.1, kind: 'panel', x: S.n === 1 ? -22.5 : -2.5, y: PLAT + 0.05, z: S.n === 1 ? -3.5 : -3.2, task: S.n === 1 ? 'Paneles de muro para los muros bajo NPT (A-B)' : 'Paneles para la V.S.C. y los muros del foso' });
+      const xr: Win = [Math.max(S.x0, -26), Math.min(S.x1, 28)];
+      const drop = (kind: 'rebar' | 'panel', dx: number) => dropAt(kind, cx + dx, -4.2, xr);
+      // banderín del sello recibido: en el borde de la plataforma frente al sector (lado de la grúa)
+      const fl = dropAt('flag', cx, 10.6, xr);
+      S.flag = { x: fl.x, z: fl.z };
+      // el fierro se consume durante la enfierradura y los tableros durante el moldaje del sector
+      want.push({ at: S.fierro[0] - 1.0, kind: 'rebar', ...drop('rebar', -3), until: S.fierro[1], task: `Paquete de fierro dimensionado al sector ${S.n} (1/2)` });
+      want.push({ at: S.fierro[0] + 1.6, kind: 'rebar', ...drop('rebar', 3), until: S.fierro[1], task: `Paquete de fierro dimensionado al sector ${S.n} (2/2)` });
+      want.push({ at: S.moldaje[0] - 0.4, kind: 'panel', ...drop('panel', 0), until: S.moldaje[1], task: `Tableros de moldaje al sector ${S.n}` });
+      if (S.npt) {
+        // A-B: lo más cerca posible del testero −x; foso y V.S.C.: en el frente, junto al cerco de la grúa
+        const p = dropAt('panel', S.n === 1 ? -22.5 : -2.5, S.n === 1 ? -3.5 : 10.5, [-26, 12]);
+        want.push({ at: S.npt.fierro[0] + 0.1, kind: 'panel', ...p, until: S.npt.fierro[1], task: S.n === 1 ? 'Paneles de muro para los muros bajo NPT (A-B)' : 'Paneles para la V.S.C. y los muros del foso' });
+      }
     }
     want.sort((a, b) => a.at - b.at);
     let free = t0 + 0.5;
@@ -1231,7 +1305,7 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
       if (inW(S.igol)) out.push({ pts: stripPts(list, bottomY, true), n: 2, action: 'work', label: 'Impermeabilización Igol' });
       if (inW(S.relleno)) {
         const k = k01(t, S.relleno);
-        out.push({ pts: stripPts(list, (s) => zoneOf(s.franja.sello).fondoY + (PLAT - zoneOf(s.franja.sello).fondoY) * k, true), n: 4, action: 'work', label: 'Relleno compactado con vibropisón' });
+        out.push({ pts: stripPts(list, (s) => zoneOf(s.franja.sello).fondoY + (PLAT - zoneOf(s.franja.sello).fondoY) * k, true), n: 4, action: 'work', label: 'Relleno compactado con vibropisón', tool: 'vibropison' });
       }
     }
     if (inW(compactacion) || inW(replanteo)) {
@@ -1301,7 +1375,7 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
 
   return {
     data: f, t0, t1, T, dayAt, zones, cells, stations, trucks, sectors, strips, pieces, capachos, craneTrips, pours,
-    trazado, compactacion, replanteo, excavatorOnSite: [t0, exOff], steps,
+    trazado, compactacion, replanteo, excavatorOnSite: [t0, exOff], pumpIn, steps,
     excavator, truckStates, pourPoint, fronts, describe, focus, quantities,
   };
 }

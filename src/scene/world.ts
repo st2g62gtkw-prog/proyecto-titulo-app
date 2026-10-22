@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { SITE } from '../config';
 import type { LoadedBuilding } from '../data/building';
-import { CranePlan, type PayloadKind } from '../core/cranePlan';
+import { CranePlan, LOAD_F, type PayloadKind } from '../core/cranePlan';
 import { Crews } from '../core/crews';
 import { Logistics } from '../core/logistics';
 import { buildPaintPlan, type PaintPlan, type PaintState } from '../core/paintPlan';
@@ -17,6 +17,7 @@ import { createCrane, type CraneRig } from './equipment/crane';
 import { createDumpTruck, type DumpTruckRig } from './equipment/dumpTruck';
 import { createExcavator, type ExcavatorRig } from './equipment/excavator';
 import { createMixer, type MixerRig } from './equipment/mixer';
+import { createRammer, type RammerRig } from './equipment/rammer';
 import { createPanelPack, createDeckPack, createPropBundle, createRebarBundle } from './equipment/payloads';
 import { createConcreteStream, type ConcreteStream } from './equipment/pour';
 import { createStationaryPump, type StationaryPumpRig } from './equipment/stationaryPump';
@@ -82,6 +83,10 @@ export class World {
   pickables: THREE.Object3D[] = [];
   labels: { obj: CSS2DObject; el: HTMLElement; key: string }[] = [];
   state: WorldState = { focus: new THREE.Vector3(0, 8, 0), craneTask: '', excavatorTask: '', trucksOnSite: 0, pumpBusy: false, mixersOnSite: 0, paint: null };
+  /** Paquetes de fierro y de tableros que la grúa dejó en el borde de cada sector (fundaciones). */
+  private grounded: { obj: THREE.Object3D; from: number; to: number }[] = [];
+  /** Vibropisones de la cuadrilla de relleno (fundaciones). */
+  private rammers: RammerRig[] = [];
   private capachoRest = new THREE.Vector3();
   private capachoFill = new THREE.Vector3();
   private pumpHopper = new THREE.Vector3();
@@ -124,6 +129,43 @@ export class World {
       props: hangOf(this.payloads.props),
     };
     this.pickables.push(...this.capacho.pickables);
+    // fundaciones: al soltarlo, cada paquete queda en el suelo (sin eslingas) hasta que la cuadrilla
+    // lo consume (enfierradura o moldaje del sector)
+    for (const c of this.sched.fund.craneTrips) {
+      const obj = c.kind === 'rebar' ? createRebarBundle(true) : createPanelPack(true);
+      obj.position.set(c.x, c.y + hang[c.kind], c.z);
+      obj.visible = false;
+      scene.add(obj);
+      this.pickables.push(obj);
+      this.grounded.push({ obj, from: c.t0 + LOAD_F[7] * (c.t1 - c.t0), to: c.until });
+    }
+    // banderín de "sello recibido" de cada sector: lo clava el mecánico de suelos al recibir los
+    // sellos y se retira al terminar el emplantillado
+    {
+      const pole = new THREE.CylinderGeometry(0.025, 0.025, 1.7, 6).translate(0, 0.85, 0);
+      const flagGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 1.68, 0), new THREE.Vector3(0.62, 1.5, 0), new THREE.Vector3(0, 1.3, 0)]);
+      flagGeo.computeVertexNormals();
+      const mPole = new THREE.MeshStandardMaterial({ color: '#e8e8e8', roughness: 0.6 });
+      const mFlag = new THREE.MeshStandardMaterial({ color: '#2e9e4f', roughness: 0.7, side: THREE.DoubleSide });
+      for (const S of this.sched.fund.sectors) {
+        const g = new THREE.Group();
+        g.add(new THREE.Mesh(pole, mPole), new THREE.Mesh(flagGeo, mFlag));
+        g.position.set(S.flag.x, SITE.groundY, S.flag.z);
+        g.rotation.y = 0.6;
+        g.visible = false;
+        g.traverse((o) => (o.userData.pick = { type: 'fund', id: 'sello' }));
+        scene.add(g);
+        this.pickables.push(g);
+        this.grounded.push({ obj: g, from: S.recep[0], to: S.empl.t1 });
+      }
+    }
+    for (let i = 0; i < 4; i++) {
+      const r = createRammer();
+      r.group.visible = false;
+      scene.add(r.group);
+      this.pickables.push(...r.pickables);
+      this.rammers.push(r);
+    }
 
     // mixers y bomba
     for (let i = 0; i < MIXER_POOL; i++) {
@@ -359,6 +401,7 @@ export class World {
       if (p !== want && p.parent === hook) hook.remove(p);
     }
     if (want && want.parent !== hook) hook.add(want);
+    for (const g of this.grounded) g.obj.visible = T >= g.from && T < g.to;
     // capacho en reposo junto al punto del mixer cuando no está colgado
     if (cs.payload !== 'capacho') {
       if (this.capacho.group.parent !== this.stage.scene) this.stage.scene.add(this.capacho.group);
@@ -437,6 +480,8 @@ export class World {
     const sHose = this.streams[2];
     const sHop = this.streams[3];
     this.state.pumpBusy = ps.pumping;
+    // la bomba y su caseta se arman cuando sale el último camión tolva de la excavación
+    this.pump.group.visible = T >= this.sched.fund.pumpIn;
     this.pump.setPumping(ps.pumping, clock);
     const sw = this.structure.sweeps[ps.slab];
     // durante el cambio de mixer la tubería y la manguera siguen armadas, pero no sale hormigón
@@ -497,7 +542,13 @@ export class World {
     // fuera del bombeo) para que el largo no cambie y nadie salte de puesto al empezar o terminar
     {
       const P = SITE.pump, H = this.pumpHopper, mode = ps.pour ? 'work' : 'idle';
-      ground.push(
+      // antes de que llegue la bomba (excavación) esperan en la faena, fuera de la huella de carguío
+      if (T < this.sched.fund.pumpIn) {
+        ground.push(
+          { x: SITE.faena.x + 4, z: SITE.faena.z - 6, r: 0.4, action: 'idle' },
+          { x: SITE.faena.x + 5.2, z: SITE.faena.z - 5.4, r: 0.4, action: 'idle' },
+        );
+      } else ground.push(
         { x: P.x + 0.4, z: P.z + 2.6, r: 0.15, spread: 0.35, action: mode },
         { x: H.x - 0.4, z: P.z + 2.25, r: 0.15, spread: 0.3, action: mode },
       );
@@ -520,6 +571,20 @@ export class World {
     }
     this.crews.update(T, act, ground);
     this.crews.members.forEach((m, i) => this.crowd.set(i, { ...m, t: clock + i * 0.37 }));
+    // vibropisón delante de cada trabajador que lo lleva
+    {
+      let k = 0;
+      for (const m of this.crews.members) {
+        if (k >= this.rammers.length) break;
+        if (!m.visible || m.tool !== 'vibropison') continue;
+        const r = this.rammers[k++];
+        r.group.visible = true;
+        r.group.position.set(m.x + Math.cos(m.heading) * 0.5, m.y, m.z + Math.sin(m.heading) * 0.5);
+        r.group.rotation.y = -m.heading;
+        r.pound(clock + k * 0.13);
+      }
+      for (; k < this.rammers.length; k++) this.rammers[k].group.visible = false;
+    }
     this.crowd.commit();
     if (!ps.pour) {
       const f = this.crews.focus(act, T);

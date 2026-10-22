@@ -52,9 +52,12 @@ function payload(key: string, pickId: string, build: (kit: PartKit, M: Record<Ma
   return proto.clone();
 }
 
-/** Paquete de 7 paneles de moldaje de muro (marco de acero gris, módulos 2,4 × 0,9 m). */
-export function createPanelPack(): THREE.Group {
-  return payload('panelPack', 'moldaje-muro', (kit, M) => {
+/**
+ * Paquete de 7 paneles de moldaje de muro (marco de acero gris, módulos 2,4 × 0,9 m). Con
+ * `grounded` es el mismo paquete ya soltado en el suelo (sin argolla ni eslingas), con el mismo origen.
+ */
+export function createPanelPack(grounded = false): THREE.Group {
+  return payload(grounded ? 'panelPack-suelo' : 'panelPack', 'moldaje-muro', (kit, M) => {
     const N = 7, T = 0.125, top = -2.3;
     for (let i = 0; i < N; i++) {
       const y = top - (N - i) * T;
@@ -68,13 +71,13 @@ export function createPanelPack(): THREE.Group {
       for (const x of [-0.6, 0, 0.6]) kit.box(M.panelFrame, x - 0.02 + dx, y + 0.008, z0 + 0.05, x + 0.02 + dx, y + 0.09, z1 - 0.05);
       kit.box(M.panelFrame, x0 + 0.05, y + 0.008, dz - 0.015, x1 - 0.05, y + 0.06, dz + 0.015);
     }
-    slings(kit, [[-1.12, top, -0.4], [1.12, top, -0.4], [1.12, top, 0.4], [-1.12, top, 0.4]]);
+    if (!grounded) slings(kit, [[-1.12, top, -0.4], [1.12, top, -0.4], [1.12, top, 0.4], [-1.12, top, 0.4]]);
   });
 }
 
-/** Dos paquetes de barras de 6 m (Ø25, color óxido) amarrados con alambre. */
-export function createRebarBundle(): THREE.Group {
-  return payload('rebar', 'fierro', (kit, M) => {
+/** Dos paquetes de barras de 6 m (Ø25, color óxido) amarrados con alambre (`grounded`: en el suelo). */
+export function createRebarBundle(grounded = false): THREE.Group {
+  return payload(grounded ? 'rebar-suelo' : 'rebar', 'fierro', (kit, M) => {
     const yC = -2.75, step = 0.027, rings = 4;
     const pts: [number, number][] = [[0, 0]];
     for (let k = 1; k <= rings; k++) {
@@ -93,9 +96,9 @@ export function createRebarBundle(): THREE.Group {
         kit.cyl(M.rebar, 0.0125, 0.0125, 6, [jit, yC + b, zc + a], 'x', 5, true);
       });
       for (const x of [-2.3, 0, 2.3]) kit.add(M.wire, new THREE.TorusGeometry(R + 0.006, 0.008, 4, 16), [x, yC, zc], [0, Math.PI / 2, 0]);
-      for (const x of [-1.8, 1.8]) kit.add(M.sling, new THREE.TorusGeometry(R + 0.014, 0.014, 4, 16), [x, yC, zc], [0, Math.PI / 2, 0]);
+      if (!grounded) for (const x of [-1.8, 1.8]) kit.add(M.sling, new THREE.TorusGeometry(R + 0.014, 0.014, 4, 16), [x, yC, zc], [0, Math.PI / 2, 0]);
     }
-    slings(kit, [[-1.8, yC + R, -0.2], [1.8, yC + R, -0.2], [1.8, yC + R, 0.2], [-1.8, yC + R, 0.2]]);
+    if (!grounded) slings(kit, [[-1.8, yC + R, -0.2], [1.8, yC + R, -0.2], [1.8, yC + R, 0.2], [-1.8, yC + R, 0.2]]);
   });
 }
 

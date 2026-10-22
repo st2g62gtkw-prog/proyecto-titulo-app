@@ -6,6 +6,7 @@
  * con tramos rígidos hasta una manguera que la cuadrilla mueve sobre el frente de vaciado.
  */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BuildingData } from '../data/building';
 import { haWalls, type Schedule } from '../core/schedule';
 import { SITE } from '../config';
@@ -114,8 +115,8 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
     g.barN(vx - 0.03, (yA + yB) / 2, vz - 0.03, vx + 0.03, (yA + yB) / 2, vz + 0.03, R * 2.6);
   }
   // fundaciones: mientras se hormigona cada sector de zapatas, la tubería va por el suelo de la caseta
-  // hasta el borde de la excavación frente a la puerta posterior (fundTap) y de ahí, sobre tablones,
-  // hasta la manguera
+  // hasta el borde de la excavación frente a la puerta posterior (fundTap) y de ahí, sobre caballetes
+  // que cruzan las zanjas (ver update), hasta la manguera
   const fundTap = new THREE.Vector3(P.xDoor, yG, -8.7);
   for (const fp of sched.fund.pours) {
     g.timing(fp.pour[0] - 3.2, fp.pour[0] - 2.6, fp.pour[1] + 0.6, fp.pour[1] + 1.0);
@@ -187,19 +188,82 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
   const tip = new THREE.Vector3();
   const shaftBase = new THREE.Vector3(vx, yG, vz);
 
+  // zapatas: desde fundTap la tubería sube a caballetes de madera (FUND_H sobre el terreno) para cruzar
+  // las zanjas sin apoyarse en el vacío; los caballetes van cada ≤ 2,4 m y nunca dentro del borde
+  // superior de una zanja (fondo + talud) ni a menos de 0,3 m de él
+  const FUND_H = 0.55;
+  const yF = SITE.groundY + FUND_H;
+  const segR = new THREE.Mesh(unit, steel);
+  const elbowR = new THREE.Mesh(elbow.geometry, steel);
+  for (const m of [segR, elbowR]) {
+    m.castShadow = true;
+    m.visible = false;
+    m.userData.pick = { type: 'pipe' };
+    group.add(m);
+  }
+  const trestleGeo = (() => {
+    // travesaño perpendicular a la tubería (eje x local) sobre dos pares de patas abiertas
+    const top = FUND_H - R;
+    const parts = [new THREE.BoxGeometry(0.7, 0.07, 0.09).translate(0, top - 0.035, 0)];
+    for (const sx of [-0.28, 0.28]) for (const sz of [-0.1, 0.1]) {
+      const leg = new THREE.BoxGeometry(0.05, top, 0.05);
+      leg.rotateX(sz * 1.2).translate(sx, top / 2, sz * 0.9);
+      parts.push(leg);
+    }
+    return mergeGeometries(parts);
+  })();
+  const MAX_TRESTLES = 48;
+  const trestles = new THREE.InstancedMesh(trestleGeo, new THREE.MeshStandardMaterial({ color: WOOD, roughness: 0.85 }), MAX_TRESTLES);
+  trestles.count = 0;
+  trestles.castShadow = true;
+  trestles.userData.pick = { type: 'pipe' };
+  group.add(trestles);
+  const tops = sched.fund.cells.map((c) => [c.x0 - c.talud - 0.3, c.x1 + c.talud + 0.3, c.z0 - c.talud - 0.3, c.z1 + c.talud + 0.3]);
+  const onFirm = (x: number, z: number) => tops.every(([x0, x1, z0, z1]) => x < x0 || x > x1 || z < z0 || z > z1);
+  const tm = new THREE.Matrix4(), tq = new THREE.Quaternion(), tpos = new THREE.Vector3(), tsc = new THREE.Vector3(1, 1, 1);
+  /** Caballetes a lo largo de a→b (horizontal), en terreno firme. */
+  const placeTrestles = (a: THREE.Vector3, b: THREE.Vector3, n0: number) => {
+    let n = n0;
+    const L = Math.hypot(b.x - a.x, b.z - a.z);
+    if (L < 0.3) return n;
+    tq.setFromAxisAngle(up, Math.atan2(b.x - a.x, b.z - a.z));
+    const at = (q: number) => [a.x + ((b.x - a.x) * q) / L, a.z + ((b.z - a.z) * q) / L] as const;
+    const firm = (q: number) => onFirm(...at(q));
+    let last = -2.0;
+    while (n < MAX_TRESTLES && last < L - 0.6) {
+      // el más lejano en terreno firme dentro de 2,4 m; si no hay, el primero más allá (vano mayor)
+      const target = Math.min(last + 2.4, L - 0.2);
+      let pick = -1;
+      for (let q = target; q > last + 0.6 && pick < 0; q -= 0.2) if (q >= 0.2 && firm(q)) pick = q;
+      for (let q = target + 0.2; q <= L - 0.2 && pick < 0; q += 0.2) if (firm(q)) pick = q;
+      if (pick < 0) break;
+      const [x, z] = at(pick);
+      tm.compose(tpos.set(x, SITE.groundY, z), tq, tsc);
+      trestles.setMatrixAt(n++, tm);
+      last = pick;
+    }
+    return n;
+  };
+
   return {
     group,
     shaftBase,
-    pickables: [fixed, blocks, segA, segB, hose],
+    pickables: [fixed, blocks, segA, segB, hose, segR, trestles],
     update(slab, active, pourPoint) {
       if (!active || !pourPoint) {
-        segA.visible = segB.visible = elbow.visible = hose.visible = false;
+        segA.visible = segB.visible = elbow.visible = hose.visible = segR.visible = elbowR.visible = false;
+        trestles.count = 0;
         return null;
       }
-      const y = slab < 0 ? yG : slab === 0 ? yIn : levels[slab].slab.y1 + 0.12;
+      const y = slab < 0 ? yF : slab === 0 ? yIn : levels[slab].slab.y1 + 0.12;
       // en la losa la tubería sale del shaft; para el radier, desde el tendido del suelo; en las
       // zapatas (slab < 0), desde el borde de la excavación frente a la puerta posterior
-      const A = slab < 0 ? fundTap.clone() : slab === 0 ? radierTap.clone().setY(y) : new THREE.Vector3(vx, y, vz);
+      const A = slab < 0 ? fundTap.clone().setY(y) : slab === 0 ? radierTap.clone().setY(y) : new THREE.Vector3(vx, y, vz);
+      // zapatas: tramo vertical desde el tendido del suelo hasta los caballetes
+      if (slab < 0) place(segR, fundTap, A);
+      else segR.visible = false;
+      elbowR.visible = segR.visible;
+      elbowR.position.copy(A);
       const P = pourPoint;
       const dx = P.x - A.x, dz = P.z - A.z;
       const dist = Math.hypot(dx, dz);
@@ -211,6 +275,12 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
       place(segB, C, E);
       elbow.visible = segA.visible && segB.visible;
       elbow.position.copy(C);
+      if (slab < 0) {
+        const n = placeTrestles(A, C, 0);
+        trestles.count = placeTrestles(C, E, n);
+        trestles.instanceMatrix.needsUpdate = true;
+        trestles.computeBoundingSphere();
+      } else trestles.count = 0;
       // manguera de goma con una curva suave hasta la punta, que la cuadrilla sostiene
       tip.set(P.x, P.y + 0.9, P.z);
       const mid = new THREE.Vector3().lerpVectors(E, tip, 0.5);

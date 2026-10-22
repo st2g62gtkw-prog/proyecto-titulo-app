@@ -97,6 +97,9 @@ export function capachoWindows(tr: { t0: number; t1: number }) {
   return w;
 }
 
+/** Fracciones de un viaje de carga (ver trip): el índice 7 es cuando se suelta la carga en destino. */
+export const LOAD_F = [0.05, 0.22, 0.3, 0.38, 0.46, 0.64, 0.72, 0.78, 0.86];
+
 export class CranePlan {
   keys: Key[] = [];
   carries: { t0: number; t1: number; kind: PayloadKind; task: string }[] = [];
@@ -258,7 +261,7 @@ export class CranePlan {
     const s = this.s;
     const A = s.anchors;
     const D0 = (tr: { t0: number; t1: number }) => tr.t1 - tr.t0;
-    const loadF = [0.05, 0.22, 0.3, 0.38, 0.46, 0.64, 0.72, 0.78, 0.86];
+    const loadF = LOAD_F;
     const formF = [0.04, 0.18, 0.25, 0.31, 0.38, 0.56, 0.62, 0.66, 0.74];
     switch (a.kind) {
       case 'fundaciones': {

@@ -20,6 +20,8 @@ export interface CrewMember {
   visible: boolean;
   vest: 0 | 1;
   helmet: 0 | 1 | 2 | 3;
+  /** Herramienta en las manos (fundaciones: vibropisón del relleno), que la escena dibuja aparte. */
+  tool?: 'vibropison';
 }
 
 /** Hash entero simple y estable. */
@@ -155,6 +157,7 @@ export class Crews {
   update(t: number, a: Activity, groundTargets: { x: number; z: number; r?: number; spread?: number; action: Action }[]) {
     const seg = 3.2; // cada cuánto un trabajador cambia de puesto (s de simulación)
     const speed = 1.4; // m/s al caminar
+    for (const m of this.members) m.tool = undefined;
     if (a.kind === 'fundaciones') this.fundFronts(t);
     else this.floorCrew(t, a, seg, speed);
     this.groundCrew(t, groundTargets);
@@ -181,6 +184,7 @@ export class Crews {
         m.action = fr.action === 'walk' ? 'walk' : fr.action;
         m.heading = ang + Math.PI + Math.sin(t * 0.3 + i) * 0.4;
         m.walk = t * 1.3 + i;
+        if (fr.tool && j % 2 === 0) m.tool = fr.tool;
       }
     }
     for (; i < FLOOR_SLOTS; i++) this.members[i].visible = false;

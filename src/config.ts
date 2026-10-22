@@ -92,17 +92,16 @@ export const SITE = {
    * Excavación de las fundaciones (días 1 a 13). La excavadora llega en cama baja y queda en el
    * testero −x (park0); al terminar el sector 3 se estaciona en el testero +x (park1) y se retira.
    * Los camiones tolva entran en retroceso por el portón y el camino posterior igual que los
-   * mixers, se apartan antes de la caseta de la bomba a una huella de carguío pegada a la
-   * fachada posterior (laneZ; frente a la caseta se corre a laneZPump para no topar su techo) y,
+   * mixers y se apartan a una huella de carguío pegada a la fachada posterior (laneZ; la caseta de la
+   * bomba se arma recién cuando sale el último camión, así que la huella va derecho) y,
    * para las zanjas del frente, entran a la plataforma por la franja de los peines posteriores
    * (aún sin excavar) hasta innerZ, detrás de la excavadora. entryX = donde salen del camino.
    */
   excavacion: {
     park0: { x: -29.5, z: -4.5 },
     park1: { x: 29.8, z: -4.5 },
-    laneZ: -9.45,
-    laneZPump: -8.9,
-    innerZ: -3.0,
+    laneZ: -9.8,
+    innerZ: -3.4,
     entryX: -27,
   },
 };

@@ -58,7 +58,7 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
       ev.push({ t: S.fierro[0] + 0.05, text: `Enfierradura de zapatas del sector ${n} · ≈ ${fmt(S.kg / 1000)} t Ø12`, kind: 'info' });
       ev.push({ t: S.moldaje[0] + 0.05, text: `Moldaje de costados y pollos del sector ${n}`, kind: 'info' });
       ev.push({ t: S.pour.pour[0] - 0.3, text: `Bomba estacionaria: se tiende la tubería por el suelo hasta el sector ${n}`, kind: 'pump' });
-      ev.push({ t: S.pour.pour[0], text: `Bomba estacionaria inicia el hormigonado de zapatas del sector ${n}`, kind: 'pump' });
+      ev.push({ t: S.pour.pour[0], text: `Bomba estacionaria inicia el hormigonado de zapatas del sector ${n}: ≈ ${Math.round(S.m3 / 7)} mixers de 7 m³ en cola (en pantalla, cada mixer representa unos ${Math.round(S.m3 / 7 / 2)} viajes)`, kind: 'pump' });
       ev.push({ t: S.pour.pumpStop[0] + 0.05, text: 'Bomba detenida: cambio de mixer (el camino es uno solo)', kind: 'pump' });
       ev.push({ t: S.pour.pour[1], text: `Zapatas del sector ${n} hormigonadas · ≈ ${fmt(Math.round(S.m3))} m³ G25`, kind: 'ok' });
       ev.push({ t: S.desc[0] + 0.05, text: `Descimbre de costados del sector ${n}`, kind: 'info' });
@@ -67,6 +67,7 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
       ev.push({ t: S.relleno[0] + 0.05, text: `Relleno lateral compactado en capas de 25 cm, sector ${n}`, kind: 'info' });
     }
     ev.push({ t: F.excavatorOnSite[1], text: 'Termina la excavación: se retira la excavadora', kind: 'info' });
+    ev.push({ t: F.pumpIn, text: 'Llega la bomba estacionaria: se arma su caseta junto al camino (la huella de carguío queda libre)', kind: 'pump' });
     ev.push({ t: F.compactacion[0] + 0.05, text: 'Compactación de la plataforma y ensayos de densidad', kind: 'info' });
     ev.push({ t: F.replanteo[1] - 0.2, text: 'Fundaciones recibidas por la ITO · replanteo de muros del 1er piso', kind: 'ok' });
   }
