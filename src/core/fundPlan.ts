@@ -20,6 +20,8 @@ import { polyBounds, type V2 } from '../scene/geom';
 
 export type Win = [number, number];
 type P3 = { x: number; y: number; z: number };
+/** Rectángulo en planta [x0, x1, z0, z1]. */
+type Rect = [number, number, number, number];
 
 /** Zona de excavación de cada sello (E-01): fondo, sobreancho por lado y talud 3:1 si pasa de 1,20 m. */
 export interface ExcZone {
@@ -458,55 +460,172 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
   }
 
   // --- puestos de la excavadora (por sector: frente, pasillo y peines posteriores) ---
+  // La excavadora trabaja siempre desde terreno sin excavar: el eje de giro de cada puesto queda a
+  // CLR_ST del borde superior de toda zanja abierta (orugas en cualquier rumbo y giro de la cola), más
+  // la berma libre en las de más de 1,20 m; excava en retroceso (deja atrás lo ya abierto) y se
+  // traslada entre puestos por terreno firme, con un camino buscado en una grilla de 0,5 m.
   const R_DIG = 8.2;
-  const STATION_Z = { A: 2.8, B: -4.2, C: -4.2 };
+  const CLR_ST = 2.5, CLR_TR = 1.9, BERMA_EXC = 0.8;
   const DIR = { A: 1, B: -1, C: 1 };
-  const FOOT = 2.35; // media huella de la excavadora (orugas y giro de la cola)
-  const hits = (sx: number, sz: number, c: ExcCell) =>
-    sx + FOOT > c.x0 - c.talud && sx - FOOT < c.x1 + c.talud && sz + FOOT > c.z0 - c.talud && sz - FOOT < c.z1 + c.talud;
+  const isDeep = (c: ExcCell) => PLAT - c.fondoY > 1.2;
+  const rectDist = (x: number, z: number, r: Rect) => Math.hypot(Math.max(r[0] - x, 0, x - r[1]), Math.max(r[2] - z, 0, z - r[3]));
+  /** Borde superior (fondo + talud) de un trozo de zanja. */
+  const top = (c: ExcCell): Rect => [c.x0 - c.talud, c.x1 + c.talud, c.z0 - c.talud, c.z1 + c.talud];
+  const cellDist = (x: number, z: number, c: ExcCell) => rectDist(x, z, top(c));
+  const clearOf = (c: ExcCell, base: number) => base + (isDeep(c) ? BERMA_EXC : 0);
+  /** Obstáculos fijos en planta: cerco de la grúa y acopios. */
+  const OBST: Rect[] = [
+    [SITE.crane.x - 2.95, SITE.crane.x + 2.95, SITE.crane.z - 2.95, SITE.crane.z + 2.95],
+    ...[SITE.acopioMoldajeMuro, SITE.acopioMoldajeLosa, SITE.acopioPuntales].map((a) => [a.x - a.w / 2, a.x + a.w / 2, a.z - a.d / 2, a.z + a.d / 2] as Rect),
+  ];
+  /** Cota z mínima por la que anda la excavadora (no invade la huella de los camiones tolva). */
+  const zMinTr = (x: number) => laneZ(x) + 2.9;
+  // grilla de traslado
+  const GS = 0.5, GX0 = -31, GZ0 = -7.6, NX = 125, NZ = 38;
+  const gX = (i: number) => GX0 + i * GS, gZ = (j: number) => GZ0 + j * GS;
+  const freeGrid = (open: ExcCell[]) => {
+    const g = new Uint8Array(NX * NZ);
+    for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
+      const x = gX(i), z = gZ(j);
+      g[i * NZ + j] = z >= zMinTr(x) && OBST.every((o) => rectDist(x, z, o) >= CLR_TR) ? 1 : 0;
+    }
+    for (const c of open) {
+      const [x0, x1, z0, z1] = top(c), m = clearOf(c, CLR_TR);
+      const i0 = Math.max(0, Math.floor((x0 - m - GX0) / GS)), i1 = Math.min(NX - 1, Math.ceil((x1 + m - GX0) / GS));
+      const j0 = Math.max(0, Math.floor((z0 - m - GZ0) / GS)), j1 = Math.min(NZ - 1, Math.ceil((z1 + m - GZ0) / GS));
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) if (cellDist(gX(i), gZ(j), c) < m) g[i * NZ + j] = 0;
+    }
+    return g;
+  };
+  const clearTr = (x: number, z: number, open: ExcCell[]) =>
+    z >= zMinTr(x) - 0.05 && OBST.every((o) => rectDist(x, z, o) >= CLR_TR - 0.05) && open.every((c) => cellDist(x, z, c) >= clearOf(c, CLR_TR) - 0.05);
+  /** Nodos alcanzables desde (x, z) por terreno firme (recorrido en anchura con 8 vecinos). */
+  const flood = (x: number, z: number, open: ExcCell[]) => {
+    const g = freeGrid(open);
+    const par = new Int32Array(NX * NZ).fill(-2);
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
+      const d = Math.hypot(gX(i) - x, gZ(j) - z);
+      if (g[i * NZ + j] && d < bd) { bd = d; best = i * NZ + j; }
+    }
+    if (best < 0) return { par, start: -1 };
+    par[best] = -1;
+    const q = [best];
+    for (let h = 0; h < q.length; h++) {
+      const n = q[h], i = Math.floor(n / NZ), j = n % NZ;
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+        const ii = i + di, jj = j + dj;
+        if ((di || dj) && ii >= 0 && ii < NX && jj >= 0 && jj < NZ) {
+          const m = ii * NZ + jj;
+          if (g[m] && par[m] === -2) { par[m] = n; q.push(m); }
+        }
+      }
+    }
+    return { par, start: best };
+  };
+  const nodeOf = (x: number, z: number) => Math.round((x - GX0) / GS) * NZ + Math.round((z - GZ0) / GS);
+  const losTr = (a: P, b: P, open: ExcCell[]) => {
+    const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.25));
+    for (let k = 1; k < n; k++) if (!clearTr(a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n, open)) return false;
+    return true;
+  };
+  /** Camino por terreno firme de a a b (b debe ser alcanzable en `fl`), con las esquinas recortadas. */
+  const pathTo = (a: P, b: P, fl: ReturnType<typeof flood>, open: ExcCell[]): P[] => {
+    const nodes: P[] = [];
+    let n = nodeOf(b[0], b[1]);
+    if (fl.par[n] === -2) return [a, b];
+    for (; n >= 0; n = fl.par[n]) nodes.push([gX(Math.floor(n / NZ)), gZ(n % NZ)]);
+    nodes.reverse();
+    const raw: P[] = [a, ...nodes.slice(1, -1), b];
+    const out: P[] = [a];
+    let k = 0;
+    while (k < raw.length - 1) {
+      let m = raw.length - 1;
+      while (m > k + 1 && !losTr(raw[k], raw[m], open)) m--;
+      out.push(raw[m]);
+      k = m;
+    }
+    return out.flatMap((p, i) => (i === 0 ? [p] : line(out[i - 1], p, 1.5).slice(1)));
+  };
+  /** Rectángulo en planta del camión tolva detenido (rumbo ±x). */
+  const truckRect = (x: number, z: number): Rect => [x - 4.6, x + 4.6, z - 1.25, z + 1.25];
+  const rectGap = (a: Rect, b: Rect) => Math.hypot(Math.max(b[0] - a[1], 0, a[0] - b[1]), Math.max(b[2] - a[3], 0, a[2] - b[3]));
+  /** Holgura del camión a una zanja: 1 m de berma en las de más de 1,20 m y 0,3 m en las demás. */
+  const truckClear = (r: Rect, cs: ExcCell[]) => cs.every((c) => rectGap(r, top(c)) >= (isDeep(c) ? 1.0 : 0.3));
+
+  type Cand = { x: number; z: number; group: ExcCell[]; truck: ExcStation['truck']; score: number };
   const stations: ExcStation[] = [];
+  /** Camino de la excavadora hasta cada puesto (desde el anterior) y del último al estacionamiento. */
+  const stPath: P[][] = [];
   const dug: ExcCell[] = [];
   const sectorRange = (n: number): Win => (n === 1 ? [-40, SECTOR_X[0]] : n === 2 ? [SECTOR_X[0], SECTOR_X[1]] : [SECTOR_X[1], 40]);
+  const inPhase = (ph: 'A' | 'B' | 'C', x: number, z: number) => (ph === 'A' ? z >= 0.8 && z <= 10.8 : z >= laneZ(x) + 3.9 && z <= -2.0);
+  const stationOk = (x: number, z: number, open: ExcCell[]) =>
+    OBST.every((o) => rectDist(x, z, o) >= CLR_ST) && open.every((c) => cellDist(x, z, c) >= clearOf(c, CLR_ST));
+  let cur: P = [-12, 4.2]; // fin del escarpe
   for (const sn of [1, 2, 3]) {
     const xa = sn === 1 ? EX.entryX : sectorRange(sn)[0];
     for (const ph of ['A', 'B', 'C'] as const) {
       const pend = cells.filter((c) => c.sector === sn && c.phase === ph).sort((a, b) => DIR[ph] * (a.cx - b.cx) || a.cz - b.cz);
+      const inner = ph === 'A';
+      const xMin = inner ? xa + INNER_S + 0.3 : EX.entryX + 1;
+      /** Camión para cargar desde (sx, sz): el anterior si su tolva queda al alcance, o uno corrido en x. */
+      const truckFor = (sx: number, sz: number, group: ExcCell[]): ExcStation['truck'] | null => {
+        const prev = stations[stations.length - 1];
+        const near = (bx: number, bz: number) => Math.hypot(bx - sx, bz - sz) <= R_DIG - 0.3;
+        const ok = (tx: number, tz: number) => truckClear(truckRect(tx, tz), [...dug, ...group]) && Math.hypot(tx - sx, tz - sz) > 3.6;
+        if (prev && prev.sector === sn && prev.truck.kind === (inner ? 'inner' : 'lane') && near(prev.bed.x, prev.bed.z) && ok(prev.truck.x, prev.truck.z)) return prev.truck;
+        for (const dx of [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5, 3, -3, 3.5, -3.5, 4, -4, 5, -5, 6, -6]) {
+          const tx = Math.max(sx - TRUCK_BED + dx, xMin), tz = inner ? EX.innerZ : laneZ(tx);
+          if (near(tx + TRUCK_BED, tz) && ok(tx, tz)) return { x: tx, z: tz, heading: Math.PI, kind: inner ? 'inner' : 'lane' };
+        }
+        return null;
+      };
+      /** Si después de abrir `open` cada trozo pendiente todavía tiene algún puesto posible. */
+      const feasible = (open: ExcCell[], rest: ExcCell[]) => rest.every((r) => {
+        const near = open.filter((c) => Math.hypot(c.cx - r.cx, c.cz - r.cz) < R_DIG + 6);
+        const i0 = Math.ceil((r.cx - R_DIG - GX0) / GS), j0 = Math.ceil((r.cz - R_DIG - GZ0) / GS);
+        for (let i = i0; gX(i) <= r.cx + R_DIG; i++) for (let j = j0; gZ(j) <= r.cz + R_DIG; j++) {
+          const x = gX(i), z = gZ(j);
+          if (Math.hypot(x - r.cx, z - r.cz) > R_DIG || !inPhase(ph, x, z)) continue;
+          if (cellDist(x, z, r) >= clearOf(r, CLR_ST) && stationOk(x, z, near)) return true;
+        }
+        return false;
+      });
       while (pend.length) {
         const c0 = pend[0];
-        let best: { x: number; z: number } | null = null;
-        const offs = [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5, 3, -3, 3.5, -3.5, 4, -4];
-        search: for (const dz of [0, 0.7, -0.7, 1.4, -1.4]) {
-          for (const dx of offs) {
-            const sx = c0.cx + DIR[ph] * 1.5 + dx, sz = STATION_Z[ph] + dz;
-            if (Math.hypot(c0.cx - sx, c0.cz - sz) > R_DIG) continue;
-            if (hits(sx, sz, c0) || dug.some((c) => hits(sx, sz, c))) continue;
-            best = { x: sx, z: sz };
-            break search;
-          }
+        const fl = flood(cur[0], cur[1], dug);
+        const cands: Cand[] = [];
+        const pendAll = cells.filter((c) => c.sector === sn && !dug.includes(c) && !pend.includes(c));
+        for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
+          const x = gX(i), z = gZ(j);
+          if (Math.hypot(x - c0.cx, z - c0.cz) > R_DIG || !inPhase(ph, x, z) || fl.par[i * NZ + j] === -2) continue;
+          if (!stationOk(x, z, [...dug, c0])) continue;
+          const group = pend.filter((c) => c === c0 || (Math.hypot(c.cx - x, c.cz - z) <= R_DIG && cellDist(x, z, c) >= clearOf(c, CLR_ST) && Math.abs(c.cx - c0.cx) <= 9));
+          const truck = truckFor(x, z, group);
+          if (!truck) continue;
+          const vol = group.reduce((s, c) => s + c.vol, 0);
+          const under = [...pend, ...pendAll].filter((c) => !group.includes(c) && cellDist(x, z, c) < CLR_ST).reduce((s, c) => s + c.vol, 0);
+          cands.push({ x, z, group, truck, score: vol - 0.35 * Math.hypot(x - cur[0], z - cur[1]) - 0.25 * under });
         }
-        best ??= { x: c0.cx + DIR[ph] * 1.5, z: STATION_Z[ph] };
-        const group = pend.filter((c) => c === c0 || (Math.hypot(c.cx - best!.x, c.cz - best!.z) <= R_DIG && !hits(best!.x, best!.z, c) && Math.abs(c.cx - c0.cx) <= 9));
-        for (const c of group) pend.splice(pend.indexOf(c), 1);
-        dug.push(...group);
-        // camión: en la plataforma (frente) o en la huella de carguío (pasillo y peines)
-        const inner = ph === 'A';
-        const xMin = inner ? xa + INNER_S + 0.3 : EX.entryX + 1;
-        let tx = Math.max(best.x - TRUCK_BED, xMin);
-        let tz = inner ? EX.innerZ : laneZ(tx);
-        // si la tolva del camión ya detenido queda al alcance del brazo, el camión no se mueve
-        const prev = stations[stations.length - 1];
-        if (prev && prev.sector === sn && prev.truck.kind === (inner ? 'inner' : 'lane') && Math.hypot(prev.bed.x - best.x, prev.bed.z - best.z) <= R_DIG) {
-          tx = prev.truck.x;
-          tz = prev.truck.z;
+        cands.sort((a, b) => b.score - a.score);
+        let pick = cands.slice(0, 40).find((cd) => feasible([...dug, ...cd.group], pend.filter((c) => !cd.group.includes(c))));
+        if (!pick) {
+          console.warn(`Fundaciones: sin puesto libre para la excavadora en la celda ${c0.id} (sector ${sn} ${ph})`);
+          pick = cands[0] ?? { x: c0.cx + DIR[ph] * (c0.x1 - c0.x0 + 5), z: ph === 'A' ? 2.8 : -4.6, group: [c0], truck: { x: Math.max(c0.cx - TRUCK_BED, xMin), z: inner ? EX.innerZ : laneZ(c0.cx), heading: Math.PI, kind: inner ? 'inner' : 'lane' }, score: 0 };
         }
-        stations.push({
-          x: best.x, z: best.z, sector: sn, phase: ph, cells: group, dig: [0, 0],
-          truck: { x: tx, z: tz, heading: Math.PI, kind: inner ? 'inner' : 'lane' },
-          bed: { x: tx + TRUCK_BED, z: tz },
-        });
-        group.forEach((c) => (c.station = stations.length - 1));
+        stPath.push(pathTo(cur, [pick.x, pick.z], fl, dug));
+        for (const c of pick.group) pend.splice(pend.indexOf(c), 1);
+        dug.push(...pick.group);
+        stations.push({ x: pick.x, z: pick.z, sector: sn, phase: ph, cells: pick.group, dig: [0, 0], truck: pick.truck, bed: { x: pick.truck.x + TRUCK_BED, z: pick.truck.z } });
+        pick.group.forEach((c) => (c.station = stations.length - 1));
+        cur = [pick.x, pick.z];
       }
     }
+  }
+  {
+    const P1 = EX.park1;
+    stPath.push(pathTo(cur, [P1.x, P1.z], flood(cur[0], cur[1], dug), dug));
   }
 
   // --- tiempos de la excavación: excavadora y camiones tolva ---
@@ -515,7 +634,7 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     | { t: Win; kind: 'travel'; route: Route; task: string; d0: number }
     | { t: Win; kind: 'dig'; st: ExcStation; heading: number; x: number; z: number };
   const exSegs: ExSeg[] = [];
-  const P0 = EX.park0, P1 = EX.park1;
+  const P0 = EX.park0;
   const excRoute = (a: { x: number; z: number }, b: { x: number; z: number }) => R(line([a.x, a.z], [b.x, b.z], 1.5));
   const V_EXC = 4.2;
   let exDist = 0;
@@ -525,13 +644,21 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     exSegs.push({ t: [tA, tB], kind: 'travel', route, task, d0: exDist });
     exDist += route.length;
   };
+  /** Traslado por el camino de terreno firme hasta el puesto k (k = stations.length: al estacionamiento). */
+  const stRoute = stPath.map((pts) => R(pts));
+  const pushPath = (k: number, tA: number, tB: number, task: string) => {
+    const route = stRoute[k];
+    if (route.length < 0.05) return;
+    exSegs.push({ t: [tA, tB], kind: 'travel', route, task, d0: exDist });
+    exDist += route.length;
+  };
+  const pathTime = (s: ExcStation) => stRoute[stations.indexOf(s)].length / V_EXC + 0.4;
   // trazado y escarpe (días 1 a 3): la excavadora deja la plataforma a −0,20 en el sector 1
-  const first = stations[0];
   exSegs.push({ t: [t0, T(1)], kind: 'park', x: P0.x, z: P0.z, heading: 0, task: 'Excavadora en obra (llegó en cama baja)' });
   const esc1 = { x: -21, z: 4.2 }, esc2 = { x: -12, z: 4.2 };
   pushTravel(P0, esc1, T(1), T(2), 'Escarpe y plataforma a −0,20 (retiro de capa vegetal)');
   pushTravel(esc1, esc2, T(2), T(2.6), 'Escarpe y plataforma a −0,20 (retiro de capa vegetal)');
-  pushTravel(esc2, first, T(2.6), T(3) - 0.05, 'Se instala en el sector 1');
+  pushPath(0, T(2.6), T(3) - 0.05, 'Se instala en el sector 1');
 
   // camiones: rutas de cada sector
   const trucks: TruckVisit[] = [];
@@ -621,7 +748,6 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     return best < 0 ? [sts] : [sts.slice(0, best), sts.slice(best)];
   };
   const LOADS = [2, 1, 1];
-  let exPos: { x: number; z: number } = first;
   /** Salida del último camión cargado (para que el siguiente espere a que pase). */
   let prevExit: { route: Route; t0: number } | null = null;
   const sectors: SectorPlan[] = [];
@@ -634,16 +760,15 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     const isFirst = (s: ExcStation) => loads.some((ld) => ld[0] === s);
     // duraciones fijas: traslados entre puestos (excavadora y camión) y cambios de camión
     const moves = sts.map((s, i) => (i === 0 || isFirst(s) ? [] : moveLegs(sts[i - 1].truck, s.truck, xa)));
-    const exTravel = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(b.x - a.x, b.z - a.z) / V_EXC + 0.4;
     const exitOf = (s: ExcStation) => exitRoute(s.truck);
     const trans = sts.map((s, i) => {
       if (i === 0) {
         // primer puesto del sector: el camión llega (de la calle o del bolsón) y la excavadora se traslada
         const truck = prevExit ? clearAfter(prevExit.route) + 0.15 + dur(fromLayby(s.truck, xa), V_BACK) : 0;
-        return Math.max(truck, sn > 1 ? exTravel(exPos, s) : 0);
+        return Math.max(truck, sn > 1 ? pathTime(s) : 0);
       }
-      if (isFirst(s)) return Math.max(clearAfter(exitOf(sts[i - 1])) + 0.15 + dur(fromLayby(s.truck, xa), V_BACK), exTravel(sts[i - 1], s));
-      return Math.max(Math.hypot(s.x - sts[i - 1].x, s.z - sts[i - 1].z) / V_EXC + 0.35, moves[i].reduce((acc, m) => acc + dur(m.route, V_SITE), 0) + 0.1);
+      if (isFirst(s)) return Math.max(clearAfter(exitOf(sts[i - 1])) + 0.15 + dur(fromLayby(s.truck, xa), V_BACK), pathTime(s));
+      return Math.max(pathTime(s) - 0.05, moves[i].reduce((acc, m) => acc + dur(m.route, V_SITE), 0) + 0.1);
     });
     // los cambios de camión no se acortan (el que llega espera en el bolsón a que pase el que sale);
     // si no alcanza el tiempo, se apuran los traslados entre puestos
@@ -705,11 +830,11 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
           waitFrom = atLb;
         }
         // la excavadora se traslada (al sector siguiente o al puesto del nuevo camión)
-        if (i === 0 && sn > 1) pushTravel(exPos, s, t, t + Math.min(tr, exTravel(exPos, s)), `Se traslada al sector ${sn}`);
-        else if (i > 0) pushTravel(sts[i - 1], s, t, t + Math.min(tr, exTravel(sts[i - 1], s)), 'Avanza al puesto siguiente');
+        if (i === 0 && sn > 1) pushPath(stations.indexOf(s), t, t + Math.min(tr, pathTime(s)), `Se traslada al sector ${sn}`);
+        else if (i > 0) pushPath(stations.indexOf(s), t, t + Math.min(tr, pathTime(s)), 'Avanza al puesto siguiente');
         t += i === 0 && !prevExit ? 0 : tr;
       } else {
-        pushTravel(sts[i - 1], s, t, t + tr * 0.9, 'Avanza al puesto siguiente');
+        pushPath(stations.indexOf(s), t, t + tr * 0.9, 'Avanza al puesto siguiente');
         // tramos del camión dentro del traslado
         const ms = moves[i];
         const tot = ms.reduce((acc, m) => acc + dur(m.route, V_SITE), 0) || 1;
@@ -732,7 +857,6 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
       visitCells.push(...s.cells);
       t = s.dig[1];
     });
-    exPos = sts[sts.length - 1];
     closeVisit(sts[sts.length - 1], Math.max(t, E[1]));
 
     // --- resto del sector ---
@@ -753,8 +877,8 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
   }
   // la excavadora termina el sector 3, se estaciona en el testero +x y se retira
   const lastDig = stations[stations.length - 1].dig[1];
-  const parkAt = lastDig + 0.05 + Math.hypot(P1.x - exPos.x, P1.z - exPos.z) / V_EXC + 0.3;
-  pushTravel(exPos, P1, lastDig + 0.05, parkAt, 'Termina la excavación y se estaciona');
+  const parkAt = lastDig + 0.05 + stRoute[stations.length].length / V_EXC + 0.3;
+  pushPath(stations.length, lastDig + 0.05, parkAt, 'Termina la excavación y se estaciona');
   const exOff = Math.max(T(12.7), parkAt + 0.6);
   exSegs.sort((a, b) => a.t[0] - b.t[0]);
   // rumbo del tren de orugas en cada puesto: el del último traslado
