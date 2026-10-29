@@ -3,7 +3,7 @@
  * Posiciones deterministas (función del tiempo) para que la línea de tiempo sea navegable.
  */
 import type { BuildingData } from '../data/building';
-import type { Activity, Schedule } from './schedule';
+import type { Activity, RoofLayer, Schedule } from './schedule';
 import { haWalls, pourFrac } from './schedule';
 import { offsetPolygon, pointInPolygon, polyBounds, type V2 } from '../scene/geom';
 import { SITE } from '../config';
@@ -58,9 +58,31 @@ const ACTIVE_ON_FLOOR: Record<Activity['kind'], number> = {
   losaMoldaje: 24,
   losaFierro: 22,
   losaHormigon: 18,
+  techoFierro: 14,
+  techoMoldaje: 16,
+  techoHormigon: 10,
+  techoDesmolde: 10,
+  salaLosa: 12,
   terminaciones: 0,
   instalaciones: 0,
+  // partidas de la techumbre en paralelo con las terminaciones (ver roofCrew)
+  estructuraTecho: 0,
+  aislacionTecho: 0,
+  cubiertaTecho: 0,
+  aguasLluvia: 0,
+  ascensor: 0,
 };
+
+/**
+ * Cuadrillas de la techumbre durante las terminaciones (cronograma: 2 personas cada una), en el
+ * frente de avance de su capa; las aguas lluvia trabajan en las esquinas.
+ */
+const ROOF_CREWS: { kind: Activity['kind']; layer?: RoofLayer; n: number }[] = [
+  { kind: 'estructuraTecho', layer: 'estructura', n: 2 },
+  { kind: 'aislacionTecho', layer: 'aislacion', n: 2 },
+  { kind: 'cubiertaTecho', layer: 'cubierta', n: 2 },
+  { kind: 'aguasLluvia', n: 2 },
+];
 
 const FLOOR_SLOTS = 26;
 const GROUND_SLOTS = 16;
@@ -72,10 +94,14 @@ export class Crews {
   constructor(private s: CrewSetup) {
     const lv = s.data.levels;
     // puntos caminables por piso: dentro de la losa, lejos de muros y del borde
+    const roofL = lv.length - 1;
     for (let L = 0; L < lv.length; L++) {
       const slab = lv[L].slab;
       const inner = offsetPolygon(slab.outer, 0.6);
-      const walls = haWalls(lv[L]).map((w) => offsetPolygon(w.poly, -0.35));
+      // en la techumbre nadie se para dentro de la caja de escala ni sobre sus muros
+      const walls = L === roofL
+        ? [offsetPolygon(s.sched.roof.geo.box.outline, -0.35)]
+        : haWalls(lv[L]).map((w) => offsetPolygon(w.poly, -0.35));
       const b = polyBounds(slab.outer);
       const pts: V2[] = [];
       for (let x = b.x0 + 0.8; x < b.x1; x += 1.1) {
@@ -159,8 +185,45 @@ export class Crews {
     const speed = 1.4; // m/s al caminar
     for (const m of this.members) m.tool = undefined;
     if (a.kind === 'fundaciones') this.fundFronts(t);
+    else if (a.kind === 'terminaciones') this.roofCrew(t);
     else this.floorCrew(t, a, seg, speed);
     this.groundCrew(t, groundTargets);
+  }
+
+  /**
+   * Durante las terminaciones: las cuadrillas de la techumbre (estructura, aislación, cubierta y
+   * aguas lluvia) en su frente de avance, de pie sobre lo que ya está construido en ese punto.
+   */
+  private roofCrew(t: number) {
+    const R = this.s.sched.roof;
+    const spots = this.spots[this.spots.length - 1];
+    let i = 0;
+    for (const c of ROOF_CREWS) {
+      const a = this.s.sched.parallel.find((p) => p.kind === c.kind);
+      if (!a || t < a.t0 || t > a.t1) continue;
+      // frente: a lo largo del edificio para las capas; las aguas lluvia, de esquina en esquina
+      const k = (t - a.t0) / Math.max(a.t1 - a.t0, 1e-6);
+      const o = R.geo.outlets[Math.min(R.geo.outlets.length - 1, Math.floor(k * R.geo.outlets.length))];
+      const fx = c.layer ? R.frontAt(c.layer, t) : o?.[0] ?? 0;
+      const fz = c.layer ? R.geo.ridgeZ + (c.layer === 'aislacion' ? 2.5 : c.layer === 'cubierta' ? -2.5 : 0) : o?.[1] ?? 0;
+      const near = spots
+        .map((p) => ({ p, d: Math.hypot(p[0] - fx, (p[1] - fz) * 0.8) }))
+        .sort((u, w) => u.d - w.d)
+        .slice(0, 6);
+      for (let j = 0; j < c.n && i < FLOOR_SLOTS && near.length; j++, i++) {
+        const m = this.members[i];
+        const seg = Math.floor(t / 2.6 + j * 0.5);
+        const p = near[Math.floor(hash(i, seg) * near.length)].p;
+        m.visible = true;
+        m.x = p[0] + Math.sin(t * 0.5 + i) * 0.15;
+        m.z = p[1];
+        m.y = R.topAt(m.x, m.z, t);
+        m.action = hash(i, seg + 5) < 0.8 ? 'work' : 'carry';
+        m.heading = Math.atan2(fz - p[1], fx - p[0]) + (hash(i, seg + 3) - 0.5) * 1.2;
+        m.walk = t * 1.3 + i;
+      }
+    }
+    for (; i < FLOOR_SLOTS; i++) this.members[i].visible = false;
   }
 
   /**

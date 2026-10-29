@@ -6,9 +6,9 @@ import './ui/hud.css';
 import './ui/app.css';
 import { PINTURA, SITE } from './config';
 import { loadBuilding } from './data/building';
-import { BUILDING_FACTS, EQUIPMENT, FLOOR_PROGRAM, PROJECT, RATIOS, SLAB_M3, TOTALS, WALL_M3 } from './data/project';
+import { BUILDING_FACTS, EQUIPMENT, FLOOR_PROGRAM, PROJECT, RATIOS, ROOF_FACTS, ROOF_WALL_M3, SALA_LOSA_M3, SLAB_M3, TOTALS, WALL_M3 } from './data/project';
 import { buildFeed, dayLabel, dayShort, type FeedEvent } from './core/feed';
-import { computeProgress, floorSteps, fundSteps } from './core/progress';
+import { computeProgress, floorSteps, fundSteps, roofSteps } from './core/progress';
 import { CREW_ROLES } from './core/crews';
 import { createStage } from './scene/stage';
 import { World } from './scene/world';
@@ -170,6 +170,13 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
       if (fp) rows.push(['Superficie útil / común', `${fmt(fp.util, 2)} / ${fmt(fp.comun, 2)} m²`]);
       if (wallM3) rows.push(['Hormigón muros', `${fmt(wallM3, 1)} m³ G25`], ['Acero muros (est.)', `${fmt((wallM3 * RATIOS.aceroMuroPorM3) / 1000, 1)} t`]);
       if (slabM3) rows.push([name === 'Techumbre' ? 'Losa de techumbre' : `Losa de piso ${name}`, `${fmt(slabM3, 1)} m³ · e = 16 cm`]);
+      if (name === 'Techumbre') {
+        rows.push(
+          ['Parapetos y caja de escala', `${fmt(ROOF_WALL_M3, 1)} m³ G25`],
+          ['Losa de la caja de escala', `${fmt(SALA_LOSA_M3, 2)} m³ · e = 16 cm`],
+          ['Cubierta', `${fmt(ROOF_FACTS.cubierta, 2)} m² de zincalum emballetado`],
+        );
+      }
       rows.push(['Losa (IFC)', `${fmt(w.b.data.levels[L].slab.area, 1)} m²`]);
       return {
         title: `Edificio E · ${name === 'Techumbre' ? 'Techumbre' : `Piso ${name.replace('P', '')}`}`,
@@ -261,12 +268,45 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
       };
       return info[p.id ?? ''] ?? { title: 'Acopio', rows: [] };
     }
+    case 'techumbre': {
+      // ficha de la techumbre: estado de cada partida y lo que se construye sobre la losa
+      const R = w.sched.roof;
+      const act = (kind: string) => [...w.sched.activities, ...w.sched.parallel].find((x) => x.kind === kind);
+      const stateOf = (kind: string) => {
+        const a = act(kind);
+        if (!a) return '—';
+        return T >= a.t1 ? `Terminada (${dayLabel(a.d1)})` : T >= a.t0 ? `En ejecución · ${fmt(((T - a.t0) / (a.t1 - a.t0)) * 100)} %` : `Desde ${dayLabel(a.d0)}`;
+      };
+      const roofFront = (['cubierta', 'aislacion', 'estructura'] as const).find((l) => T >= R[l][0] && T <= R[l][1]);
+      return {
+        title: 'Techumbre del Edificio E',
+        subtitle: 'Lámina L41 · itemizado cap. 3 "Techumbre y hojalatería"',
+        badge: 'TECHO',
+        rows: [
+          ['Parapetos y caja de escala', stateOf('techoHormigon')],
+          ['Estructura (pino impregnado y OSB)', stateOf('estructuraTecho')],
+          ['Aislación (Aislán)', stateOf('aislacionTecho')],
+          ['Cubierta y hojalatería', stateOf('cubiertaTecho')],
+          ['Aguas lluvia', stateOf('aguasLluvia')],
+          ...(roofFront ? [['Frente de trabajo', `x = ${fmt(R.frontAt(roofFront, T), 1)} m a lo largo del edificio`] as [string, string]] : []),
+          ['Cubierta', `${fmt(ROOF_FACTS.cubierta, 2)} m² · zincalum prepintado 0,5 mm emballetado · pendiente 1,5 %`],
+          ['Faldones', ROOF_FACTS.faldones],
+          ['Parapetos', ROOF_FACTS.parapetos],
+          ['Caja de escala y sala de máquinas', ROOF_FACTS.caja],
+          ['Bajadas', ROOF_FACTS.bajadas],
+          ['Ventilaciones', `${R.geo.vents.filter((v) => v.kind !== 'tubo').length} shafts con sombrerete o chimenea y ${R.geo.vents.filter((v) => v.kind === 'tubo').length} ventilaciones Ø110`],
+        ],
+        note: 'La estructura liviana sobre la losa es el supuesto de la cubicación (pendiente 6) para la cubierta emballetada con 1,5 % de L41. La estructura parte 5 días después de la última losa; la grúa sube madera, OSB, Aislán y planchas y se desmonta 5 días después de terminada la estructura; el ascensor se monta con la sala de máquinas y la cubierta terminadas.',
+      };
+    }
     case 'carga': {
       const cargas: Record<string, [string, string]> = {
         'moldaje-muro': ['Paquete de paneles de moldaje', 'Paneles metálicos para muros'],
         fierro: ['Paquete de fierro', 'Barras A630-420H de 6 m'],
         'moldaje-losa': ['Paquete de moldaje de losa', 'Vigas H20 y placas fenólicas'],
         puntales: ['Paquete de puntales', 'Alzaprimas metálicas'],
+        techumbre: ['Paquete de madera de techumbre', 'Pino impregnado (cerchas y costaneras) y tableros OSB'],
+        cubierta: ['Pallet de cubierta', 'Planchas de zincalum emballetado y rollos de Aislán'],
       };
       const [title, subtitle] = cargas[p.id ?? ''] ?? ['Carga de grúa', ''];
       return { title, subtitle, badge: 'GRÚA', rows: [['Tarea de la grúa', w.state.craneTask]] };
@@ -395,6 +435,7 @@ function hudState(): HudState {
     { key: 'dotacion', label: 'Trabajadores en obra', value: `${EQUIPMENT.dotacion}`, sub: 'según letrero de faena' },
   ];
   const k = Math.min(Math.max((T - a.t0) / (a.t1 - a.t0), 0), 1);
+  const roofGruesa = a.kind.startsWith('techo') || a.kind === 'salaLosa';
   let detail = a.detail;
   if (a.kind === 'fundaciones') {
     // qué pasa en cada sector, la excavadora y los camiones (o la grúa y los mixers)
@@ -405,8 +446,8 @@ function hudState(): HudState {
   } else if (a.kind === 'muroHormigon') detail = `${w.state.craneTask} · ${w.state.mixersOnSite} mixer${w.state.mixersOnSite === 1 ? '' : 's'} en faena`;
   else if (a.kind === 'losaHormigon') detail = `${a.detail} · ${fmt(k * 100)} %`;
   else if (a.kind !== 'terminaciones') detail = `${a.detail} · Grúa: ${w.state.craneTask}`;
-  const par = s.parallel.find((p) => T >= p.t0 && T <= p.t1);
-  if (par) detail += ` · En paralelo: ${par.title.toLowerCase()}`;
+  const par = s.parallel.filter((p) => T >= p.t0 && T <= p.t1);
+  if (par.length) detail += ` · En paralelo: ${par.map((p) => p.title.toLowerCase()).join(', ')}`;
   const ps = w.state.paint;
   if (ps && a.kind === 'terminaciones') detail += ` · Pintura (subcontrato): ${ps.pano.facade.name.toLowerCase()}, paño ${ps.pano.k}/${ps.pano.nOf}`;
   const lastIdx = feed.findIndex((e) => e.t > T);
@@ -419,15 +460,18 @@ function hudState(): HudState {
     playing,
     speed,
     dayLabel: dayLabel(s.dayAt(T)),
-    phaseTitle: a.kind === 'terminaciones' ? 'Terminaciones' : a.kind === 'fundaciones' || a.kind === 'radier' ? 'Fundaciones y radier' : `Piso ${(a.kind.startsWith('losa') ? a.level : a.level + 1)} · ${a.kind.startsWith('losa') ? 'Losa' : 'Muros'}`,
+    phaseTitle: a.kind === 'terminaciones' ? 'Terminaciones' : a.kind === 'fundaciones' || a.kind === 'radier' ? 'Fundaciones y radier' : roofGruesa ? 'Techumbre · Obra gruesa' : `Piso ${(a.kind.startsWith('losa') ? a.level : a.level + 1)} · ${a.kind.startsWith('losa') ? 'Losa' : 'Muros'}`,
     activityTitle: a.kind === 'fundaciones' ? 'Fundaciones: excavación, fierro, moldaje y hormigón' : a.kind === 'radier' ? 'Radier del 1er piso con bomba' : a.kind === 'terminaciones' ? `Fachada, ventanas y barandas ${a.levelName}` : a.title.split(' · ').pop() ?? a.title,
     activityDetail: detail,
-    levelLabel: a.kind === 'fundaciones' || a.kind === 'radier' ? 'FUND' : lvName === 'Techumbre' ? 'TECHO' : lvName,
+    levelLabel: a.kind === 'fundaciones' || a.kind === 'radier' ? 'FUND' : roofGruesa || lvName === 'Techumbre' ? 'TECHO' : lvName,
+    // en la obra gruesa de la techumbre y mientras se arma la cubierta, los pasos de la techumbre
     steps: a.kind === 'fundaciones'
       ? fundSteps(s, T)
-      : a.kind === 'radier' || a.kind === 'terminaciones'
-        ? floorSteps(s, s.activities.find((x) => x.kind === 'muroFierro' && x.level === 0)!, T)
-        : floorSteps(s, a, T),
+      : roofGruesa || (a.kind === 'terminaciones' && T < s.roof.aguas[1])
+        ? roofSteps(s, T)
+        : a.kind === 'radier' || a.kind === 'terminaciones'
+          ? floorSteps(s, s.activities.find((x) => x.kind === 'muroFierro' && x.level === 0)!, T)
+          : floorSteps(s, a, T),
     overall: prog.obraGruesa,
     floors: prog.floors.map((f) => ({ ...f, name: f.name === 'Techumbre' ? 'Techo' : f.name })),
     kpis,
@@ -445,8 +489,8 @@ async function start() {
   hud.setLoading(0.85, 'Preparando la faena…');
   feed = buildFeed(world.sched, world.log, world.paint);
   const markers = world.sched.activities
-    .filter((a) => a.kind === 'muroFierro' || a.kind === 'fundaciones' || (a.kind === 'terminaciones' && a.level === 0))
-    .map((a) => ({ t: a.t0, label: a.kind === 'fundaciones' ? 'Fund.' : a.kind === 'terminaciones' ? 'Term.' : a.levelName }));
+    .filter((a) => a.kind === 'muroFierro' || a.kind === 'techoFierro' || a.kind === 'fundaciones' || (a.kind === 'terminaciones' && a.level === 0))
+    .map((a) => ({ t: a.t0, label: a.kind === 'fundaciones' ? 'Fund.' : a.kind === 'terminaciones' ? 'Term.' : a.kind === 'techoFierro' ? 'Techo' : a.levelName }));
   hud.setMarkers(markers);
   const q = new URLSearchParams(location.search);
   if (q.has('t')) T = +q.get('t')!;

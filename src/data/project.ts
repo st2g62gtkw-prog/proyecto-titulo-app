@@ -48,7 +48,16 @@ export const FLOOR_PROGRAM: Record<string, { deptos: number; util: number; comun
   '5P': { deptos: 15, util: 594.0, comun: 89.93, uso: 'Departamentos' },
   '6P': { deptos: 15, util: 594.0, comun: 89.93, uso: 'Departamentos' },
   '7P': { deptos: 15, util: 594.0, comun: 89.93, uso: 'Departamentos' },
-  Techumbre: { deptos: 0, util: 0, comun: 21.32, uso: 'Cubierta plana 1,5 %, sala de máquinas' },
+  Techumbre: { deptos: 0, util: 0, comun: 21.32, uso: 'Cubierta de zincalum emballetado 1,5 % sobre techumbre liviana, parapetos y caja de escala con sala de máquinas' },
+};
+
+/** Techumbre (L41, itemizado cap. 3 y cubicación): superficies y cantidades que muestra la ficha. */
+export const ROOF_FACTS = {
+  cubierta: 666.94,
+  faldones: 'Norte 290,97 m² · central 283,98 m² · sur 57,96 m² · caja 34,03 m²',
+  parapetos: 'V.I. 15/80 en fachadas y testeros e = 20, de +17,50 a +18,14',
+  caja: 'Muros H.A. e = 20 hasta +19,93 y losa de cielo e = 16 (+20,09); 42,9 m² brutos, 21,32 m² de superficie común',
+  bajadas: '4 de PVC Ø160 con cubeta en las esquinas y 2 de PVC Ø110 desde la caja',
 };
 
 /** Totales de obra gruesa (cubicación NCh353:2018). */
@@ -90,8 +99,10 @@ export const SLAB_M3: Record<string, number> = {
   '5P': 105.2,
   '6P': 105.2,
   '7P': 105.2,
-  Techumbre: 105.2 + 5.77, // losa cielo 7P + losa sala de máquinas
+  Techumbre: 105.2, // losa cielo 7P
 };
+/** Losa de cielo de la caja de escala y sala de máquinas (losas 801–804), m³. */
+export const SALA_LOSA_M3 = 5.77;
 
 export const RATIOS = {
   aceroMuroPorM3: TOTALS.aceroElevaciones / TOTALS.hormigonElevaciones,

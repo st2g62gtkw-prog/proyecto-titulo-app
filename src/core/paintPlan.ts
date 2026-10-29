@@ -17,7 +17,7 @@
  */
 import type { BuildingData } from '../data/building';
 import { PINTURA, SITE } from '../config';
-import { pointInPolygon, polyBounds, samplePerimeter, type V2 } from '../scene/geom';
+import { offsetPolygon, pointInPolygon, polyBounds, samplePerimeter, type V2 } from '../scene/geom';
 import type { Schedule } from './schedule';
 
 export type FacadeKey = 'frente' | 'suroriente' | 'posterior' | 'norponiente';
@@ -114,6 +114,8 @@ export interface PaintState {
   cableOut: number;
   /** false mientras el equipo está desarmado (a mitad de un cambio de fachada). */
   rigged: boolean;
+  /** Cota donde se apoyan los pescantes y los pintores en la techumbre (losa, o techumbre ya construida). */
+  top: number;
   /** Pintores sobre la plataforma (si no, trabajan en la techumbre junto a los pescantes). */
   onPlatform: boolean;
   /** Avance de la bajada del paño actual (0…1). */
@@ -351,13 +353,22 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
       if (n) addFace(a, b, sl.y0, sl.y1, n, S);
     });
   }
+  // cara exterior de los parapetos de la techumbre (desde que se hormigonan): la pinta el balancín
+  // al comenzar cada paño, sobre la línea de la losa
+  {
+    const R = sched.roof;
+    const edge = offsetPolygon(R.geo.outer, 0.01);
+    R.geo.parapets.forEach((w, i) => {
+      for (const { a, b, n } of exteriorFaces(w.poly, edge)) addFace(a, b, w.y0, w.y1, n, levels.length - 1, R.wall[i].pour[1]);
+    });
+  }
   for (const pc of pieces) panos[pc.pano].area += Math.hypot(pc.b[0] - pc.a[0], pc.b[1] - pc.a[1]) * (pc.y1 - pc.y0);
   const area = panos.reduce((s, p) => s + p.area, 0);
 
   // --- Calendario del subcontrato --------------------------------------------------------
-  // parte cuando la obra gruesa terminó arriba: hormigonada la losa de techumbre y retirada la
-  // bandeja en ménsulas del último piso (structure.ts: fin del hormigonado + 2,5 s, dura 1 s)
-  const tGruesa = sched.slab[nWall].pour[1] + 3.6;
+  // parte cuando la obra gruesa terminó arriba: parapetos y caja de escala hormigonados, retirada la
+  // bandeja en ménsulas de la techumbre y hormigonada la losa de cielo de la caja
+  const tGruesa = sched.roof.gruesa[1] + 0.6;
   const dStart = sched.dayAt(tGruesa);
   const lastFinish = sched.finish[sched.finish.length - 1];
   const dLimit = sched.dayAt(lastFinish[1]) - 3;
@@ -379,6 +390,11 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
     p.move = [p.up[1], tOfDay(sched, m1)];
     d = m1;
   });
+  // la grúa (con el cerco de su base) se desmonta después de la estructura de techumbre: los paños
+  // que se pintan desde entonces bajan hasta el suelo
+  for (const p of panos) {
+    if (p.stopBy === obstacles[0].name && p.down[0] >= sched.roof.gruaOut) [p.yMin, p.base, p.stopBy] = [gy + FLOOR_MIN, gy, null];
+  }
   const last = panos[panos.length - 1];
   const dismount: [number, number] = [last.move[0], last.move[1]];
 
@@ -391,11 +407,16 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
 
   const paintedArea = (t: number) => panos.reduce((s, p) => s + p.area * clamp01((t - p.down[0]) / (p.down[1] - p.down[0])), 0);
 
+  /** Cota de apoyo de los pescantes: lo construido en la techumbre 1,6 m hacia adentro del borde. */
+  const topAt = (f: Facade, s: number, roof: number, t: number) => {
+    const [x, z] = xz(f, s, roof - 1.6);
+    return sched.roof.topAt(x, z, t);
+  };
   const rest = (p: Pano, phase: PaintPhase, y: number, onPlatform: boolean, progress: number, t: number, next: Pano | null = null): PaintState => {
     const [x, z] = xz(p.facade, p.c, p.line + cableOff);
     return {
       phase, pano: p, next, x, z, y, heading: headingOf(p.facade), roofOut: p.roof, cableOut: p.line + cableOff,
-      base: p.base, lowReach: false, rigged: true, onPlatform, progress, painted: paintedArea(t),
+      base: p.base, lowReach: false, rigged: true, onPlatform, progress, painted: paintedArea(t), top: topAt(p.facade, p.c, p.roof, t),
     };
   };
 
@@ -436,9 +457,11 @@ export function buildPaintPlan(data: BuildingData, sched: Schedule): PaintPlan {
       const ks = smooth((k - 0.3) / 0.4);
       const o = oa + (ob - oa) * ko;
       const [x, z] = xz(f, sa + (sb - sa) * ks, o);
+      const roofOut = p.roof + (nx.roof - p.roof) * ks;
       return {
         phase: 'traslado', pano: p, next: nx, x, z, y: topFloor, heading: headingOf(f),
-        roofOut: p.roof + (nx.roof - p.roof) * ks, cableOut: o, base: Math.max(p.base, nx.base), lowReach: false, rigged: true, onPlatform: false, progress: 1, painted: paintedArea(t),
+        roofOut, cableOut: o, base: Math.max(p.base, nx.base), lowReach: false, rigged: true, onPlatform: false, progress: 1, painted: paintedArea(t),
+        top: topAt(f, sa + (sb - sa) * ks, roofOut, t),
       };
     }
     return rest(last, 'desmontaje', topFloor, false, 1, t);

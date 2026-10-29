@@ -201,8 +201,10 @@ export class Logistics {
     // la despliega antes de que el capacho entre bajo ella y la repliega después del último llenado
     // (en las fundaciones, cada serie de capachos del plan: emplantillado, muros bajo NPT y V.S.C.)
     const series = [
-      ...sched.activities.filter((a) => a.kind === 'muroHormigon').map((a) => a.trips),
+      ...sched.activities.filter((a) => a.kind === 'muroHormigon' || a.kind === 'techoHormigon').map((a) => a.trips),
       ...sched.fund.capachos.map((c) => c.trips),
+      // losa de cielo de la caja de escala (techumbre)
+      sched.roof.slabCapacho,
     ];
     for (const trips of series) {
       const W = trips.map((x) => capachoWindows(x));

@@ -1,5 +1,5 @@
 /** Bitácora de obra: eventos fechados que se muestran en el tablero. */
-import { SLAB_M3, WALL_M3 } from '../data/project';
+import { ROOF_WALL_M3, SALA_LOSA_M3, SLAB_M3, WALL_M3 } from '../data/project';
 import { DAYS_PER_MONTH } from '../config';
 import type { Logistics } from './logistics';
 import type { PaintPlan } from './paintPlan';
@@ -29,6 +29,23 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
       const p = sched.slab[a.level].pour;
       ev.push({ t: p[1], text: `${a.levelName === 'Techumbre' ? 'Losa de techumbre' : `Losa de piso ${a.levelName}`} hormigonada · ${fmt(SLAB_M3[a.levelName] ?? 0)} m³`, kind: 'ok' });
     }
+    // obra gruesa sobre la losa de techumbre
+    if (a.kind === 'techoFierro') {
+      ev.push({ t: a.t0 + 0.1, text: 'Grúa trepa la bandeja perimetral a la techumbre para los parapetos', kind: 'crane' });
+      ev.push({ t: a.t0 + 0.4, text: 'Grúa sube fierro para los parapetos y la caja de escala', kind: 'crane' });
+    }
+    if (a.kind === 'techoHormigon') ev.push({ t: a.t1 - 0.5, text: `Parapetos y muros de la caja de escala hormigonados · ${fmt(ROOF_WALL_M3)} m³`, kind: 'ok' });
+    if (a.kind === 'techoDesmolde') ev.push({ t: a.t1, text: 'Se retira la bandeja perimetral: la baranda de seguridad queda sobre los parapetos', kind: 'info' });
+    if (a.kind === 'salaLosa') ev.push({ t: sched.roof.slab.pour[1], text: `Losa de cielo de la caja de escala hormigonada · ${fmt(SALA_LOSA_M3)} m³: termina la obra gruesa`, kind: 'ok' });
+  }
+  // techumbre en paralelo con las terminaciones (cronograma: capítulo 3, grúa torre y ascensores)
+  {
+    const R = sched.roof;
+    for (const ld of R.loads) ev.push({ t: ld.t0 + 0.2, text: `Grúa sube a la techumbre: ${ld.task.charAt(0).toLowerCase()}${ld.task.slice(1)}`, kind: 'crane' });
+    ev.push({ t: R.gruaOut, text: 'Desmontaje de la grúa torre (5 días después de terminada la estructura de techumbre)', kind: 'crane' });
+    ev.push({ t: R.cubierta[1], text: 'Término de techumbre: cubierta de zincalum, canales, forros y ventilaciones listos', kind: 'ok' });
+    ev.push({ t: R.aguas[1], text: 'Aguas lluvia: cubetas y bajadas conectadas', kind: 'ok' });
+    ev.push({ t: R.ascensor[1], text: 'Ascensor montado y probado por el fabricante', kind: 'ok' });
   }
   const rad = sched.slab[0].pour;
   ev.push({ t: rad[1], text: 'Radier del 1er piso hormigonado · 665,7 m²', kind: 'ok' });

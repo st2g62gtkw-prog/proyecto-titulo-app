@@ -8,7 +8,8 @@
  */
 import type { Activity, Schedule } from './schedule';
 
-export type PayloadKind = 'panel' | 'rebar' | 'deck' | 'props' | 'capacho';
+/** timber: madera de la techumbre (pino impregnado, OSB); sheets: Aislán y planchas de zincalum. */
+export type PayloadKind = 'panel' | 'rebar' | 'deck' | 'props' | 'capacho' | 'timber' | 'sheets';
 
 export interface P3 {
   x: number;
@@ -292,23 +293,7 @@ export class CranePlan {
         this.capachoSeries(a, (tr) => ({ x: tr.x, y: s.wallTopY(a.level), z: tr.z }), (k) => `Capacho ${k + 1}/${a.trips.length}: hormigón a muros`);
         break;
       case 'muroDesmolde':
-        a.trips.forEach((tr, k) => {
-          const D = D0(tr);
-          const T = (x: number) => tr.t0 + x * D;
-          const at = { x: tr.x, y: s.wallTopY(a.level) + 4.2, z: tr.z };
-          const safe = this.safeY(tr.t1, 'panel', at, A.acopioMoldajeMuro);
-          const h = s.hang.panel;
-          this.key(T(0.05), null, safe);
-          this.key(T(0.16), at, safe);
-          this.key(T(0.22), at, at.y + h);
-          this.key(T(0.7), at, at.y + h);
-          this.key(T(0.76), at, safe);
-          this.key(T(0.9), A.acopioMoldajeMuro, safe);
-          this.key(T(0.96), A.acopioMoldajeMuro, A.acopioMoldajeMuro.y + h);
-          this.key(T(0.99), A.acopioMoldajeMuro, A.acopioMoldajeMuro.y + h + 0.5);
-          this.carries.push({ t0: T(0.68), t1: T(0.97), kind: 'panel', task: '' });
-          this.tasks.push({ t0: tr.t0, t1: tr.t1, task: `Retiro de paneles, sector ${k + 1}/${a.trips.length}` });
-        });
+        a.trips.forEach((tr, k) => this.unload(tr, { x: tr.x, y: s.wallTopY(a.level) + 4.2, z: tr.z }, `Retiro de paneles, sector ${k + 1}/${a.trips.length}`));
         break;
       case 'losaMoldaje':
         a.trips.forEach((tr, k) => {
@@ -321,10 +306,62 @@ export class CranePlan {
       case 'losaFierro':
         a.trips.forEach((tr, k) => this.trip(tr.t0, D0(tr), A.acopioFierro, { x: tr.x, y: s.slabBottomY(a.level) + 0.1, z: tr.z }, 'rebar', `Fierro de losa (${k + 1}/${a.trips.length})`, loadF));
         break;
+      // --- obra gruesa sobre la losa de techumbre (los viajes traen su cota de trabajo) ---
+      case 'techoFierro':
+        a.trips.forEach((tr, k) => this.trip(tr.t0, D0(tr), A.acopioFierro, { x: tr.x, y: tr.y - 0.05, z: tr.z }, 'rebar', `Fierro de parapetos y caja de escala (${k + 1}/${a.trips.length})`, loadF));
+        break;
+      case 'techoMoldaje':
+        a.trips.forEach((tr, k) => this.trip(tr.t0, D0(tr), A.acopioMoldajeMuro, { x: tr.x, y: tr.y + 0.6, z: tr.z }, 'panel', `Paneles de moldaje a la techumbre (${k + 1}/${a.trips.length})`, formF));
+        break;
+      case 'techoHormigon':
+        this.capachoSeries(a, (tr) => ({ x: tr.x, y: tr.y, z: tr.z }), (k) => `Capacho ${k + 1}/${a.trips.length}: parapetos y caja de escala`);
+        break;
+      case 'techoDesmolde':
+        a.trips.forEach((tr, k) => this.unload(tr, { x: tr.x, y: tr.y + 4.2, z: tr.z }, `Retiro de paneles de la techumbre (${k + 1}/${a.trips.length})`));
+        break;
+      case 'salaLosa': {
+        // puntales, placas y fierro dentro de la caja; luego la serie de capachos de la losa
+        const kinds: PayloadKind[] = ['props', 'deck', 'rebar'];
+        const from = [A.acopioPuntales, A.acopioMoldajeLosa, A.acopioFierro];
+        const tasks = ['Puntales para la losa de la caja de escala', 'Vigas H20 y placas fenólicas para la losa de la caja', 'Fierro de la losa de la caja'];
+        a.trips.slice(0, 3).forEach((tr, k) => this.trip(tr.t0, D0(tr), from[k], { x: tr.x, y: tr.y, z: tr.z }, kinds[k], tasks[k], loadF));
+        const caps = a.trips.slice(3);
+        this.capachoSeriesAt(a.trips[2].t1, a.t1, caps, (tr) => ({ x: tr.x, y: tr.y, z: tr.z }), (k) => `Capacho ${k + 1}/${caps.length}: losa de la caja de escala`);
+        break;
+      }
       case 'terminaciones':
-        if (a.level === 0) this.park(a.t0, 'Grúa liberada: terminaciones', a.t1 + 1e6);
+        if (a.level === 0) {
+          // sube los materiales de la techumbre (madera, OSB, Aislán y zincalum) y queda libre hasta
+          // que la desmontan, 5 días después de terminada la estructura de techumbre
+          const R = this.sched.roof;
+          const first = R.loads[0], last = R.loads[R.loads.length - 1];
+          if (first.t0 - a.t0 > 2.4) this.park(a.t0, 'En espera: terminaciones', first.t0);
+          else this.tasks.push({ t0: a.t0, t1: first.t0, task: 'En espera: terminaciones' });
+          R.loads.forEach((ld) => this.trip(ld.t0, ld.t1 - ld.t0, A.acopioMoldajeLosa, { x: ld.x, y: ld.y, z: ld.z }, ld.kind, ld.task, loadF));
+          this.park(last.t1, 'Grúa liberada: terminaciones', R.gruaOut);
+          this.tasks.push({ t0: R.gruaOut, t1: R.gruaOut + 1e6, task: 'Grúa desmontada' });
+        }
         break;
     }
+  }
+
+  /** Retiro de un paquete de paneles desde `at` (gancho sobre el muro) hasta el acopio de moldajes. */
+  private unload(tr: { t0: number; t1: number }, at: P3, task: string) {
+    const A = this.s.anchors;
+    const D = tr.t1 - tr.t0;
+    const T = (x: number) => tr.t0 + x * D;
+    const safe = this.safeY(tr.t1, 'panel', at, A.acopioMoldajeMuro);
+    const h = this.s.hang.panel;
+    this.key(T(0.05), null, safe);
+    this.key(T(0.16), at, safe);
+    this.key(T(0.22), at, at.y + h);
+    this.key(T(0.7), at, at.y + h);
+    this.key(T(0.76), at, safe);
+    this.key(T(0.9), A.acopioMoldajeMuro, safe);
+    this.key(T(0.96), A.acopioMoldajeMuro, A.acopioMoldajeMuro.y + h);
+    this.key(T(0.99), A.acopioMoldajeMuro, A.acopioMoldajeMuro.y + h + 0.5);
+    this.carries.push({ t0: T(0.68), t1: T(0.97), kind: 'panel', task: '' });
+    this.tasks.push({ t0: tr.t0, t1: tr.t1, task });
   }
 
   at(t: number): CraneState {

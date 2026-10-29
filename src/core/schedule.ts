@@ -9,9 +9,10 @@
  * su duración real en días hábiles para mostrar el calendario.
  */
 import type { BuildingData, LevelData, WallData } from '../data/building';
-import { DAYS, PACE } from '../config';
-import { polyBounds } from '../scene/geom';
+import { DAYS, PACE, TECHO } from '../config';
+import { pointInPolygon, polyBounds } from '../scene/geom';
 import { buildFundPlan, type FundPlan } from './fundPlan';
+import { buildRoofGeometry, type RoofGeometry } from './roofPlan';
 
 export type ActivityKind =
   | 'fundaciones'
@@ -23,8 +24,23 @@ export type ActivityKind =
   | 'losaMoldaje'
   | 'losaFierro'
   | 'losaHormigon'
+  // obra gruesa sobre la losa de techumbre: parapetos y caja de escala / sala de máquinas
+  | 'techoFierro'
+  | 'techoMoldaje'
+  | 'techoHormigon'
+  | 'techoDesmolde'
+  | 'salaLosa'
   | 'terminaciones'
-  | 'instalaciones';
+  | 'instalaciones'
+  // en paralelo con las terminaciones (itemizado cap. 3, 14.5 y 2.24)
+  | 'estructuraTecho'
+  | 'aislacionTecho'
+  | 'cubiertaTecho'
+  | 'aguasLluvia'
+  | 'ascensor';
+
+/** Capas de la techumbre que avanzan a lo largo del edificio. */
+export type RoofLayer = 'estructura' | 'aislacion' | 'cubierta';
 
 export interface Trip {
   /** Ventana total del viaje de grúa. */
@@ -98,9 +114,39 @@ const pumpStopIn = (p0: number, p1: number): [number, number] => {
   return [m - PACE.cambioMixer / 2, m + PACE.cambioMixer / 2];
 };
 
+/** Obras sobre la losa de techumbre: geometría (core/roofPlan) y tiempos. */
+export interface RoofSchedule {
+  geo: RoofGeometry;
+  /** Parapetos y muros de la caja (en ese orden), con sus tiempos como los muros de piso. */
+  walls: WallData[];
+  wall: WallTiming[];
+  /** Losa de cielo de la caja: puntales, placas, fierro, hormigón con capacho y descimbre. */
+  slab: { props: [number, number]; deck: [number, number]; rebar: [number, number]; pour: [number, number]; out: [number, number] };
+  /** Viajes de capacho de la losa de la caja (el mixer los atiende como una serie de muros). */
+  slabCapacho: Trip[];
+  /** Obra gruesa sobre la losa (de la enfierradura de parapetos al hormigón de la losa de la caja). */
+  gruesa: [number, number];
+  /** Partidas en paralelo con las terminaciones (s de simulación). */
+  estructura: [number, number];
+  aislacion: [number, number];
+  cubierta: [number, number];
+  aguas: [number, number];
+  ascensor: [number, number];
+  /** Desmontaje de la grúa torre (3.1 FF+5). */
+  gruaOut: number;
+  /** Viajes de grúa con los materiales de la techumbre. */
+  loads: { t0: number; t1: number; kind: 'timber' | 'sheets'; x: number; z: number; y: number; task: string }[];
+  /** Instante en que una capa de la techumbre llega a la abscisa x. */
+  layerAt(layer: RoofLayer, x: number): number;
+  /** Frente de trabajo (x) de una capa en el instante t. */
+  frontAt(layer: RoofLayer, t: number): number;
+  /** Cota de lo construido en (x, z) en el instante t: losa, techumbre o losa de la caja. */
+  topAt(x: number, z: number, t: number): number;
+}
+
 export interface Schedule {
   activities: Activity[];
-  /** Actividades fuera de la ruta crítica que corren en paralelo (instalaciones bajo radier, radier). */
+  /** Actividades fuera de la ruta crítica que corren en paralelo (instalaciones bajo radier, radier, techumbre). */
   parallel: Activity[];
   duration: number;
   totalDays: number;
@@ -112,6 +158,7 @@ export interface Schedule {
   fund: FundPlan;
   /** Ventanas de terminaciones por piso. */
   finish: [number, number][];
+  roof: RoofSchedule;
   levelNames: string[];
   at(t: number): Activity;
   dayAt(t: number): number;
@@ -270,6 +317,87 @@ export function buildSchedule(data: BuildingData): Schedule {
     };
   }
 
+  // --- Obra gruesa sobre la losa de techumbre ----------------------------------------------
+  // Parapetos (V.I. 15/80 y testeros, +17,50 → +18,14) y muros de la caja de escala y sala de
+  // máquinas (+17,50 → +19,93) con el mismo ciclo que los muros de piso: la grúa sube fierro y
+  // paneles y hormigona con capacho. Después, la losa de cielo de la caja, también con capacho.
+  const geo = buildRoofGeometry(data);
+  const RL = levels.length - 1;
+  const roofWalls = [...geo.parapets, ...geo.box.walls];
+  // los parapetos en el orden del contorno (cada grupo queda en un mismo tramo de fachada) y la caja al final
+  const rOrder = roofWalls.map((_, i) => i);
+  const rWall: WallTiming[] = roofWalls.map(() => ({ rebar: [0, 0], form: [0, 0], pour: [0, 0], strip: [0, 0] }));
+  const topOf = (g: number[]) => Math.max(...g.map((i) => roofWalls[i].y1));
+  /** Punto de trabajo de un grupo: el centro del tramo del medio (queda sobre el muro, no al centro de la losa). */
+  const mid = (g: number[]) => {
+    const b = polyBounds(roofWalls[g[Math.floor(g.length / 2)]].poly);
+    return { x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2 };
+  };
+  const aRF = push('techoFierro', RL, PACE.techoFierro, DAYS.techoFierro, 'Techumbre · Enfierradura de parapetos y caja de escala',
+    'La grúa trepa la bandeja perimetral a la techumbre; mallas Ø8a20 de los parapetos y de los muros de la caja de escala y sala de máquinas sobre las esperas de la losa');
+  rOrder.forEach((wi, k) => {
+    const s = aRF.t0 + 0.6 + (k / rOrder.length) * (PACE.techoFierro - 2.2);
+    rWall[wi].rebar = [s, s + 1.4];
+  });
+  aRF.trips = groups(rOrder, 3).map((g, k) => {
+    // el paquete de fierro se deja sobre la losa, 1,6 m hacia adentro del tramo
+    const m = mid(g);
+    const dx = geo.box.cx - m.x, dz = geo.box.cz - m.z, dl = Math.hypot(dx, dz) || 1;
+    const c = { x: m.x + (dx / dl) * Math.min(1.6, dl), z: m.z + (dz / dl) * Math.min(1.6, dl) };
+    const t0 = aRF.t0 + k * (PACE.techoFierro / 3);
+    return { t0, t1: t0 + PACE.techoFierro / 3, walls: g, x: c.x, z: c.z, y: geo.y + 0.3 };
+  });
+  const aRM = push('techoMoldaje', RL, PACE.techoMoldaje, DAYS.techoMoldaje, 'Techumbre · Moldaje de parapetos y caja de escala',
+    'Paneles metálicos a ambas caras; la cara exterior de los parapetos se arma desde la bandeja perimetral');
+  const gRM = groups(rOrder, 4);
+  const tripRM = PACE.techoMoldaje / gRM.length;
+  aRM.trips = gRM.map((g, k) => {
+    const c = mid(g);
+    const t0 = aRM.t0 + k * tripRM;
+    const place = t0 + tripRM * 0.62;
+    g.forEach((wi, j) => (rWall[wi].form = [place + j * 0.04, place + j * 0.04 + 0.9]));
+    return { t0, t1: t0 + tripRM, walls: g, x: c.x, z: c.z, y: topOf(g) };
+  });
+  const aRH = push('techoHormigon', RL, PACE.techoHormigon, DAYS.techoHormigon, 'Techumbre · Hormigonado de parapetos y caja de escala',
+    'Hormigón G25 con capacho de 1 m³ desde el mixer');
+  const gRH = groups(rOrder, 6);
+  const leadR = 2.2, tailR = 1.4;
+  const tripRH = (PACE.techoHormigon - leadR - tailR) / gRH.length;
+  aRH.trips = gRH.map((g, k) => {
+    const c = mid(g);
+    const t0 = aRH.t0 + leadR + k * tripRH;
+    g.forEach((wi) => (rWall[wi].pour = [t0 + tripRH * 0.55, t0 + tripRH * 0.86]));
+    return { t0, t1: t0 + tripRH, walls: g, x: c.x, z: c.z, y: topOf(g) };
+  });
+  const aRD = push('techoDesmolde', RL, PACE.techoDesmolde, DAYS.techoDesmolde, 'Techumbre · Desmolde de parapetos y caja de escala',
+    'Retiro de paneles; la grúa baja la bandeja perimetral');
+  const gRD = groups(rOrder, 3);
+  const tripRD = PACE.techoDesmolde / gRD.length;
+  aRD.trips = gRD.map((g, k) => {
+    const c = mid(g);
+    const t0 = aRD.t0 + k * tripRD;
+    const lift = t0 + tripRD * 0.18;
+    g.forEach((wi, j) => (rWall[wi].strip = [lift + j * 0.03, lift + j * 0.03 + tripRD * 0.5]));
+    return { t0, t1: t0 + tripRD, walls: g, x: c.x, z: c.z, y: topOf(g) };
+  });
+  // losa de cielo de la caja (losas 801–804, e = 16): la grúa baja puntales, placas y fierro dentro de
+  // la caja y la hormigona con capacho (5,8 m³)
+  const aRS = push('salaLosa', RL, PACE.salaLosa, DAYS.salaLosa, 'Techumbre · Losa de cielo de la caja de escala',
+    'Puntales, placas fenólicas y malla Ø8–Ø10 sobre los muros de la caja; hormigón G25 con capacho');
+  const TS = (f: number) => aRS.t0 + f * PACE.salaLosa;
+  const bx = polyBounds(geo.box.outline);
+  // puntales, placas y fierro (0 a 45 %); la grúa engancha el capacho (45 a 60 %) y hormigona
+  aRS.trips = [0, 1, 2].map((k) => ({ t0: TS(k * 0.15), t1: TS((k + 1) * 0.15), walls: [], x: geo.box.cx, z: geo.box.cz, y: k < 2 ? geo.y + 0.3 : TECHO.caja.muroTop + 0.15 }));
+  const nCap = 3, cap0 = TS(0.6), dCap = (TS(0.97) - cap0) / nCap;
+  const slabCapacho: Trip[] = Array.from({ length: nCap }, (_, k) => ({
+    t0: cap0 + k * dCap, t1: cap0 + (k + 1) * dCap, walls: [], x: geo.box.cx, z: bx.z0 + ((k + 0.5) / nCap) * (bx.z1 - bx.z0), y: TECHO.caja.losaTop,
+  }));
+  aRS.trips.push(...slabCapacho);
+  const roofSlab: RoofSchedule['slab'] = {
+    props: [TS(0.1), TS(0.3)], deck: [TS(0.22), TS(0.45)], rebar: [TS(0.42), TS(0.58)],
+    pour: [slabCapacho[0].t0 + dCap * 0.55, slabCapacho[nCap - 1].t0 + dCap * 0.86], out: [1e7, 1e7],
+  };
+
   // Los puntales de una losa se retiran cuando ya hay dos losas más arriba (re-apuntalamiento simplificado).
   for (let S = 1; S < slab.length; S++) {
     const later = acts.find((a) => a.kind === 'muroDesmolde' && a.level === S + 1);
@@ -310,7 +438,7 @@ export function buildSchedule(data: BuildingData): Schedule {
     props: [rStart, rStart], deck: [rStart, rStart], rebar: [rStart, rStart + rDur * 0.32],
     pour: rPour, pumpStop: [rPour[1], rPour[1]], propsOut: [1e7, 1e7], deckOut: [1e7, 1e7],
   };
-  const parallel = [inst, radier];
+  const parallel: Activity[] = [inst, radier];
 
   // --- Terminaciones: tabiquería, ventanas, barandas, pintura de fachada, piso a piso ---
   const aT0 = t;
@@ -326,6 +454,65 @@ export function buildSchedule(data: BuildingData): Schedule {
     }
   }
 
+  // --- Techumbre (itemizado cap. 3) en paralelo con las terminaciones -----------------------
+  // Los días salen del cronograma detallado (TECHO.dias) contados desde el término de la losa de
+  // la caja; cada partida avanza a lo largo del edificio, de −x a +x, como el plan de la cubierta.
+  const tAtDay = (day: number) => {
+    for (const a of acts) if (day <= a.d1) return a.t0 + ((day - a.d0) / Math.max(a.d1 - a.d0, 1e-6)) * (a.t1 - a.t0);
+    return acts[acts.length - 1].t1;
+  };
+  const D = TECHO.dias;
+  const dR = aRS.d1 + D.desfase;
+  const win = (d0: number, n: number): [number, number] => [tAtDay(d0), tAtDay(d0 + n)];
+  const estructura = win(dR, D.estructura);
+  const aislacion = win(dR + D.aislacion[0], D.aislacion[1]);
+  const cubierta = win(dR + D.cubierta[0], D.cubierta[1]);
+  const aguas = win(dR + D.aguas[0], D.aguas[1]);
+  const ascensor = win(dR + D.cubierta[0] + D.cubierta[1], D.ascensor);
+  const gruaOut = tAtDay(dR + D.estructura + D.grua);
+  const roofPar = (kind: ActivityKind, w: [number, number], title: string, detail: string): Activity => ({
+    id: `${kind}-par`, kind, level: RL, levelName: levels[RL].name, t0: w[0], t1: w[1], d0: dayOf(w[0]), d1: dayOf(w[1]), title, detail, trips: [],
+  });
+  parallel.push(
+    roofPar('estructuraTecho', estructura, 'Estructura de techumbre',
+      'Cerchas y costaneras de pino impregnado con tapa OSB sobre la losa (666,94 m²; 1 carpintero + 1 ayudante, 22 m²/día)'),
+    roofPar('aislacionTecho', aislacion, 'Aislación bajo cubierta', 'Aislán sobre la tapa OSB (35 m²/día)'),
+    roofPar('cubiertaTecho', cubierta, 'Cubierta y hojalatería',
+      'Zincalum prepintado 0,5 mm emballetado, canales, forros de parapeto, cumbrera y ventilaciones (1 hojalatero + 1 ayudante, 20 m²/día)'),
+    roofPar('aguasLluvia', aguas, 'Aguas lluvia', 'Cubetas y bajadas de PVC Ø160 en las esquinas y Ø110 desde la caja de escala'),
+    roofPar('ascensor', ascensor, 'Subcontrato de ascensores', 'Montaje del ascensor de 7 paradas y 630 kg, con la sala de máquinas y la cubierta terminadas'),
+  );
+  // la losa de la caja se descimbra cuando parte la estructura de techumbre
+  roofSlab.out = [estructura[0], estructura[0] + 1.2];
+  const fxR = (x: number) => Math.min(Math.max((x - geo.x0) / Math.max(geo.x1 - geo.x0, 1e-3), 0), 1);
+  /** Ventana de cada capa y fracción de ella en que llega a cada x (la estructura deja atrás la tapa OSB). */
+  const LAYER: Record<RoofLayer, { w: [number, number]; a: number; b: number }> = {
+    estructura: { w: estructura, a: 0.07, b: 0.85 },
+    aislacion: { w: aislacion, a: 0.04, b: 0.9 },
+    cubierta: { w: cubierta, a: 0.05, b: 0.85 },
+  };
+  const layerAt = (layer: RoofLayer, x: number) => {
+    const L = LAYER[layer];
+    return L.w[0] + (L.a + L.b * fxR(x)) * (L.w[1] - L.w[0]);
+  };
+  const frontAt = (layer: RoofLayer, time: number) => {
+    const L = LAYER[layer];
+    const k = ((time - L.w[0]) / Math.max(L.w[1] - L.w[0], 1e-6) - L.a) / L.b;
+    return geo.x0 + Math.min(Math.max(k, 0), 1) * (geo.x1 - geo.x0);
+  };
+  // materiales de la techumbre: la grúa los sube antes de que la desmonten, delante del frente de trabajo
+  const loadSpec: [RoofSchedule['loads'][number]['kind'], string][] = [
+    ['timber', 'Paquete de cerchas y costaneras de pino impregnado'],
+    ['timber', 'Tableros OSB para la tapa de la techumbre'],
+    ['sheets', 'Rollos de Aislán para la aislación bajo cubierta'],
+    ['sheets', 'Planchas de zincalum emballetado'],
+  ];
+  const loads: RoofSchedule['loads'] = loadSpec.map(([kind, task], k) => {
+    const [t0, t1] = win(dR + k * 8, 7.5);
+    const x = Math.min(Math.max(frontAt('estructura', t1) + 7, geo.x0 + 3), geo.x1 - 3);
+    return { t0, t1, kind, x, z: geo.ridgeZ - 2.6, y: geo.y + 0.3, task };
+  });
+
   const duration = t + 4;
   const sched: Schedule = {
     activities: acts,
@@ -336,6 +523,15 @@ export function buildSchedule(data: BuildingData): Schedule {
     slab,
     fund: fundPlan,
     finish,
+    roof: {
+      geo, walls: roofWalls, wall: rWall, slab: roofSlab, slabCapacho, gruesa: [aRF.t0, aRS.t1],
+      estructura, aislacion, cubierta, aguas, ascensor, gruaOut, loads, layerAt, frontAt,
+      topAt(x, z, time) {
+        if (pointInPolygon(x, z, geo.box.outline)) return time >= roofSlab.pour[1] ? TECHO.caja.losaTop : geo.y;
+        if (time < layerAt('estructura', x)) return geo.y;
+        return geo.y + geo.rise(z) - (time < layerAt('cubierta', x) ? 0.012 : 0);
+      },
+    },
     levelNames: levels.map((l) => l.name),
     at(time: number) {
       let lo = 0, hi = acts.length - 1;

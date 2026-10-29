@@ -7,7 +7,8 @@
 import * as THREE from 'three';
 import { PartKit, markPickable, metal, paint, type Swatch, type XYZ } from './mixer';
 
-type MatKey = 'sling' | 'link' | 'panelFrame' | 'panelFace' | 'rebar' | 'wire' | 'ply' | 'plyDark' | 'h20' | 'h20End' | 'prop' | 'galv' | 'plate' | 'nut';
+type MatKey = 'sling' | 'link' | 'panelFrame' | 'panelFace' | 'rebar' | 'wire' | 'ply' | 'plyDark' | 'h20' | 'h20End' | 'prop' | 'galv' | 'plate' | 'nut'
+  | 'pine' | 'pineDark' | 'osb' | 'zinc' | 'foil' | 'strap';
 let surf: Record<MatKey, Swatch> | null = null;
 
 /** Colores de las cargas sobre los materiales compartidos (pintura / acero). */
@@ -27,6 +28,12 @@ function materials() {
     galv: metal('#b8bdc2'),
     plate: paint('#3d4146'),
     nut: paint('#e08a1e'),
+    pine: paint('#b3a46a'), // pino impregnado (CCA): madera con tinte verdoso
+    pineDark: paint('#9a8d55'),
+    osb: paint('#c9a362'),
+    zinc: metal('#8f9aa3'), // zincalum prepintado gris
+    foil: metal('#d4d8dc'),
+    strap: paint('#d23a2a'),
   };
   return surf;
 }
@@ -121,6 +128,49 @@ export function createDeckPack(): THREE.Group {
     }
     const ys = yb + 0.2;
     slings(kit, [[-1.8, ys, -0.45], [1.8, ys, -0.45], [1.8, ys, 0.45], [-1.8, ys, 0.45]]);
+  });
+}
+
+/** Techumbre: atado de piezas de pino impregnado (cerchas y costaneras) con tableros OSB encima. */
+export function createTimberPack(): THREE.Group {
+  return payload('timber', 'techumbre', (kit, M) => {
+    const yb = -2.7, X = 1.95;
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 7; c++) {
+        const z = -0.42 + c * 0.14, y = yb + r * 0.095;
+        const dx = (((r * 7 + c) * 5) % 9 - 4) * 0.02;
+        kit.box((r + c) % 2 ? M.pine : M.pineDark, -X + dx, y, z - 0.045, X + dx, y + 0.09, z + 0.045);
+      }
+    }
+    for (let i = 0; i < 6; i++) {
+      const y = yb + 0.38 + i * 0.016;
+      kit.box(M.osb, -1.22 + (i % 2) * 0.03, y, -0.61, 1.22 + (i % 2) * 0.03, y + 0.015, 0.61);
+    }
+    // zunchos
+    for (const x of [-1.3, 1.3]) kit.box(M.strap, x - 0.02, yb - 0.005, -0.63, x + 0.02, yb + 0.48, 0.63);
+    const ys = yb + 0.48;
+    slings(kit, [[-1.7, ys, -0.5], [1.7, ys, -0.5], [1.7, ys, 0.5], [-1.7, ys, 0.5]]);
+  });
+}
+
+/** Techumbre: planchas de zincalum emballetado (largas y angostas) sobre rollos de Aislán, en un pallet. */
+export function createSheetPack(): THREE.Group {
+  return payload('sheets', 'cubierta', (kit, M) => {
+    const yb = -2.75, X = 2.4;
+    // pallet de madera
+    for (const z of [-0.35, 0, 0.35]) kit.box(M.pineDark, -X, yb, z - 0.05, X, yb + 0.1, z + 0.05);
+    kit.box(M.pine, -X, yb + 0.1, -0.4, X, yb + 0.12, 0.4);
+    for (let i = 0; i < 14; i++) {
+      const y = yb + 0.12 + i * 0.012;
+      kit.box(M.zinc, -X + 0.05, y, -0.26, X - 0.05, y + 0.006, 0.26);
+      // pestañas de la emballetadura a los lados
+      for (const z of [-0.26, 0.25]) kit.box(M.zinc, -X + 0.05, y, z, X - 0.05, y + 0.03, z + 0.01);
+    }
+    // rollos de Aislán atravesados encima
+    for (const x of [-1.2, 0, 1.2]) kit.cyl(M.foil, 0.13, 0.13, 0.8, [x, yb + 0.46, 0], 'z', 12);
+    for (const x of [-1.8, 1.8]) kit.box(M.strap, x - 0.02, yb - 0.005, -0.42, x + 0.02, yb + 0.3, 0.42);
+    const ys = yb + 0.3;
+    slings(kit, [[-2, ys, -0.4], [2, ys, -0.4], [2, ys, 0.4], [-2, ys, 0.4]]);
   });
 }
 

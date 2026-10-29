@@ -115,7 +115,17 @@ export const PACE = {
   losaMoldaje: 11,
   losaFierro: 9,
   losaHormigon: 20,
-  terminacionesPorPiso: 2.5,
+  /** Obra gruesa sobre la losa de techumbre: parapetos y sala de máquinas (ver TECHO); viajes de grúa al ritmo de los pisos. */
+  techoFierro: 9,
+  techoMoldaje: 9,
+  techoHormigon: 16,
+  techoDesmolde: 7.5,
+  salaLosa: 18,
+  /**
+   * Cada piso de terminaciones. La techumbre (estructura, aislación y cubierta) y la pintura de
+   * fachada avanzan en paralelo con estas, así que el ritmo da tiempo para verlas.
+   */
+  terminacionesPorPiso: 6,
   /**
    * Bomba detenida en cada cambio de mixer: el que terminó sale por el camino y, apenas pasa el
    * bolsón de espera, el siguiente retrocede desde ahí hasta la tolva. Ver Logistics.
@@ -149,7 +159,7 @@ export const FUND_PACE = {
 /**
  * Duración real (días hábiles) de cada actividad, para el calendario. Calibrada para que la
  * obra completa dure poco más de un año, como en la programación de la constructora
- * (~290 días hábiles ≈ 13 meses de 22 días).
+ * (~300 días hábiles ≈ 13,6 meses de 22 días).
  */
 export const DAYS = {
   fundaciones: 40, // instalación de faena, excavación y zapatas
@@ -160,11 +170,79 @@ export const DAYS = {
   losaMoldaje: 3,
   losaFierro: 3,
   losaHormigon: 1,
+  /** Parapetos y muros de la sala de máquinas (+17,50 → +18,14 y +20,09) y su losa de cielo. */
+  techoFierro: 1,
+  techoMoldaje: 2,
+  techoHormigon: 1,
+  techoDesmolde: 1,
+  salaLosa: 2,
   terminacionesPorPiso: 21,
 };
 
 /** Días hábiles por mes, para mostrar el mes de obra. */
 export const DAYS_PER_MONTH = 22;
+
+/**
+ * Obras sobre la losa de techumbre (+17,50). Fuentes: lámina L41 (planta de techumbre y "SUP
+ * TECHOS"), elevaciones L42, cubicación (respaldos oct 2026), itemizado cap. 3 "Techumbre y
+ * hojalatería" y el cronograma detallado (oct 2026).
+ *  - Parapetos de H.A. en todo el borde (V.I. 15/80 y testeros e = 20) de +17,50 a +18,14.
+ *  - Caja de escala y sala de máquinas sobre el núcleo (ejes K.–M. / 3–7): muros H.A. e = 20 hasta
+ *    +19,93 y losa de cielo e = 16 hasta +20,09, con su propia cubierta.
+ *  - Techumbre liviana (supuesto de la cubicación, pendiente 6): cerchas y costaneras de pino
+ *    impregnado con tapa OSB, aislación (Aislán) y cubierta de zincalum prepintado 0,5 mm
+ *    emballetada con pendiente 1,5 % (L41): faldón norte (posterior), central y sur (franja frontal).
+ *  - Hojalatería: canales, forros de parapeto, cumbreras y ventilaciones de los shafts.
+ *  - Aguas lluvia: 4 bajadas de PVC Ø160 con cubeta en las esquinas (bajan por shafts interiores)
+ *    y 2 de PVC Ø110 desde la cubierta de la caja hasta la techumbre.
+ */
+export const TECHO = {
+  /** Alto sobre la losa, espesor y largo máximo de cada tramo que se hormigona por separado. */
+  parapeto: { alto: 0.64, espesor: 0.15, tramo: 6 },
+  caja: {
+    /**
+     * Contorno en planta (zonas A + B + C de "SUP TECHOS": sala de telecomunicaciones, shaft de
+     * los ascensores y llegada de la escalera con su vestíbulo), medido desde la esquina (x0, z0)
+     * del interior del shaft del ascensor del modelo.
+     */
+    contorno: [[-0.21, -2.24], [4.06, -2.24], [4.06, 0.01], [9.03, 0.01], [9.03, 3.53], [2.147, 3.53], [2.147, 3.8], [-0.21, 3.8]] as [number, number][],
+    espesor: 0.2,
+    /** Coronamiento de los muros (bajo la losa de cielo) y cara superior de la losa. */
+    muroTop: 19.93,
+    losaTop: 20.09,
+    /** Salida a la techumbre (cara +z del vestíbulo junto al eje M, vano 105 × 219): desde x0 del shaft. */
+    salida: { d: 3.42, ancho: 1.05, alto: 2.19 },
+    /** Puerta de la sala (eje M, cara +x de la zona A; dintel +19,69 → vano 105 × 219): desde z0 del shaft. */
+    puerta: { d: -1.66, ancho: 1.05, alto: 2.19 },
+    /** Pasada de despresurización 72 × 72 bajo la losa de cielo (cara −z de la zona C): desde x0 del shaft. */
+    pasada: { d: 4.96, lado: 0.72 },
+  },
+  cubierta: {
+    pendiente: 0.015,
+    /** Alto de la techumbre en la línea de canal (cercha + costanera + OSB + aislación + plancha). */
+    base: 0.14,
+    /** Separación de cerchas (a lo largo del edificio), de costaneras y ancho de plancha emballetada. */
+    cerchas: 1.0,
+    costaneras: 0.6,
+    plancha: 0.5,
+  },
+  /**
+   * Días hábiles del capítulo 3 y partidas ligadas, según el cronograma detallado: la estructura
+   * parte 5 días después de la última losa (2.14 FC+5); la aislación y la hojalatería se traslapan
+   * (CC+5 / FF+3 y CC+3 / FF+3); las aguas lluvia parten 10 días después de la hojalatería (CC+10);
+   * la grúa se desmonta 5 días después de la estructura (3.1 FF+5) y el subcontrato de ascensores
+   * entra con la sala de máquinas y la cubierta terminadas (3.3 FC).
+   */
+  dias: {
+    desfase: 5,
+    estructura: 33,
+    aislacion: [16, 21] as [number, number],
+    cubierta: [19, 36] as [number, number],
+    aguas: [29, 10] as [number, number],
+    grua: 5,
+    ascensor: 20,
+  },
+};
 
 /**
  * Pintura de fachada: subcontrato aparte que trabaja con un andamio colgante (balancín) desde la

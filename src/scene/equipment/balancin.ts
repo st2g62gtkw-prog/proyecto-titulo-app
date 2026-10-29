@@ -166,10 +166,12 @@ export function createBalancin(o: { roofY: number; groundY: number }): BalancinR
     platform.position.set(s.x, s.y, s.z);
     platform.rotation.set(0, h, 0);
     const d = s.cableOut - s.roofOut; // del borde de la losa a la línea de los cables
+    // los pescantes se apoyan en lo que haya en la techumbre: la losa o, ya construida, la cubierta
+    const roofY = s.top ?? o.roofY;
     pescantes.forEach((p, i) => {
       const sx = i ? CABLE_X : -CABLE_X;
       p.g.visible = show;
-      local(p.g.position, s.x, s.z, h, sx, o.roofY, 0);
+      local(p.g.position, s.x, s.z, h, sx, roofY, 0);
       p.g.rotation.set(0, h, 0);
       p.base.position.set(0, 0, -d);
       // viga del pie trasero a la punta, sobre el mástil
@@ -177,7 +179,7 @@ export function createBalancin(o: { roofY: number; groundY: number }): BalancinR
       p.beam.scale.set(1, 1, len);
       p.beam.position.set(0, BEAM_Y, -len / 2 + 0.05);
       // cable: de la polea de la punta al estribo, y la cola hasta el terreno
-      local(_a, s.x, s.z, h, sx, o.roofY + BEAM_Y - 0.12, 0);
+      local(_a, s.x, s.z, h, sx, roofY + BEAM_Y - 0.12, 0);
       local(_b, s.x, s.z, h, sx, s.y + STIRRUP_Y, 0);
       stretch(cables[i], _a, _b);
       cables[i].visible &&= show;
@@ -198,15 +200,15 @@ export function createBalancin(o: { roofY: number; groundY: number }): BalancinR
         pp.heading = faceWall;
       } else {
         // en la techumbre, entre el mástil y el contrapeso de cada pescante, mirando hacia afuera
-        local(_a, s.x, s.z, h, (i ? CABLE_X : -CABLE_X) - (i ? 0.75 : -0.75), o.roofY, -d - 1.5);
+        local(_a, s.x, s.z, h, (i ? CABLE_X : -CABLE_X) - (i ? 0.75 : -0.75), roofY, -d - 1.5);
         pp.heading = faceWall + Math.PI;
       }
       pp.x = _a.x;
       pp.y = _a.y;
       pp.z = _a.z;
       const [anchor, over, drop, lanyard] = ropes[i];
-      local(_a, s.x, s.z, h, lx + 0.25, o.roofY + 0.1, -d - 1.9);
-      // quiebre sobre la baranda de borde de la techumbre (1,1 m), con su protector de canto
+      local(_a, s.x, s.z, h, lx + 0.25, roofY + 0.1, -d - 1.9);
+      // quiebre sobre la baranda de borde de la techumbre (montada en los parapetos), con su protector de canto
       local(_b, s.x, s.z, h, lx + 0.25, o.roofY + 1.3, -d + 0.15);
       stretch(anchor, _a, _b);
       local(_a, s.x, s.z, h, lx + 0.25, o.roofY + 1.3, ropeOut);

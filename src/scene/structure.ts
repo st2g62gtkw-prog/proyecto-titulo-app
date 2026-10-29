@@ -10,11 +10,12 @@ import { haWalls } from '../core/schedule';
 import { GeoBuilder, offsetPolygon, pointInPolygon, polyBounds, samplePerimeter, scanlineLoops, signedArea, type V2 } from './geom';
 import { BANDEJA_LIFT, bandejaSpan, buildBandeja } from './bandeja';
 import { NEVER, revealMaterial, revealMesh, type RevealMaterial } from './reveal';
-import { SITE } from '../config';
+import { SITE, TECHO } from '../config';
 import { buildFoundations, type GroundMask } from './foundations';
 import { concreteTexture, formPanelTexture, plywoodTexture } from './textures';
 import { FACADE_COLORS } from './facadePaint';
 import { exteriorFaces } from '../core/paintPlan';
+import { buildRoof } from './roof';
 
 export interface Layer {
   mesh: THREE.Mesh;
@@ -208,14 +209,16 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     add(cam.build(), M.footing, 'camaras', 0, inst.t0, out + 0.3, false, false);
   }
 
-  // Bandeja de trabajo perimetral en ménsulas (piso L = 1..6, sobre la losa del piso L): se arma
-  // al comenzar los muros del 2P y, cuando parte el piso siguiente, la grúa la "trepa" un piso
-  // (se levanta 2,5 m y en ese instante aparece la del piso de arriba); la última se retira al
-  // terminar la obra gruesa. Solo el piso en obra tiene bandeja.
+  // Bandeja de trabajo perimetral en ménsulas (piso L = 1..7, sobre la losa del piso L; la 7 es la
+  // techumbre): se arma al comenzar los muros del 2P y, cuando parte el piso siguiente, la grúa la
+  // "trepa" un piso (se levanta 2,5 m y en ese instante aparece la del piso de arriba). En la
+  // techumbre sirve para moldear los parapetos y se retira después de su desmolde. Solo el piso en
+  // obra tiene bandeja.
   const startWalls = (lvl: number) => sched.activities.find((a) => a.kind === 'muroFierro' && a.level === lvl)!.t0;
-  /** Trepada de la bandeja del piso L al siguiente (o retiro final): [out0, out1]. */
+  const roofOut = sched.activities.find((a) => a.kind === 'techoDesmolde')!.t1 + 0.4;
+  /** Trepada de la bandeja del piso L al siguiente (o retiro final, en la techumbre): [out0, out1]. */
   const climb = (L: number): [number, number] => {
-    const o0 = L + 1 < nWall ? startWalls(L + 1) - 0.3 : sched.slab[L + 1].pour[1] + 2.5;
+    const o0 = L + 1 < nWall ? startWalls(L + 1) - 0.3 : L + 1 === nWall ? sched.roof.gruesa[0] - 0.3 : roofOut;
     return [o0, o0 + 1.0];
   };
   /** [llegada, out0, out1] de la bandeja del piso L (llega justo cuando termina de trepar la de abajo). */
@@ -273,7 +276,8 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     const wallsTight = haWalls(below).map((w) => offsetPolygon(w.poly, -0.05));
 
     // placa fenólica (barrido lineal) — fondo de losa
-    const deckMat = revealMaterial({ color: '#ffffff', map: M.plyTex, roughness: 0.65 }, { mode: 'sweep', sweep: { ...sweep, strips: 0 } });
+    // al descimbrar, las placas bajan y se retiran (no suben a través de la losa)
+    const deckMat = revealMaterial({ color: '#ffffff', map: M.plyTex, roughness: 0.65 }, { mode: 'sweep', sweep: { ...sweep, strips: 0 }, outLift: new THREE.Vector3(0, -0.4, 0) });
     deckMat.clippingPlanes = clipping;
     const gd = new GeoBuilder();
     gd.timing(st.deck[0], st.deck[1], st.deckOut[0], st.deckOut[1]);
@@ -341,23 +345,26 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
       ge.timing(tE, tE + 0.4, tR, tR + 0.4);
       for (let i = 0; i < hl.length; i++) ge.wallPanel(hl[i], hl[(i + 1) % hl.length], sl.y0 - 0.06, sl.y1 + 0.06, 0.035, voidSide(hl, true, 0.035));
     }
-    const rail = offsetPolygon(outer, 0.12);
     // mientras la bandeja en ménsulas está en esta losa, su baranda reemplaza a la de borde
-    // (se saca antes de que llegue la bandeja que trepa desde abajo y vuelve cuando esta se va)
+    // (se saca antes de que llegue la bandeja que trepa desde abajo y vuelve cuando esta se va). En
+    // la techumbre vuelve montada sobre los parapetos (0,64 m), hasta completar 1,14 m sobre la losa.
     let windows: [number, number][] = [[guardIn, guardOut]];
-    if (S < nWall) {
+    if (S <= nWall) {
       const arrive = S === 1 ? bandejaTime(S)[0] : climb(S - 1)[0];
       windows = [[guardIn, arrive - 0.7], [bandejaTime(S)[2] + 0.2, guardOut]];
     }
-    for (const [w0, w1] of windows.filter(([a, b]) => b > a + 0.5)) {
+    windows.filter(([a, b]) => b > a + 0.5).forEach(([w0, w1], k) => {
+      const onParapet = S === nWall && k === 1;
+      const rail = offsetPolygon(outer, onParapet ? TECHO.parapeto.espesor / 2 : 0.12);
+      const y0 = onParapet ? sl.y1 + TECHO.parapeto.alto : sl.y1;
       gg.timing(w0, w0 + 0.5, w1, w1 + 0.6);
-      for (const { p } of samplePerimeter(rail, 1.9)) gg.aabb(p[0] - 0.035, sl.y1, p[1] - 0.035, p[0] + 0.035, sl.y1 + 1.1, p[1] + 0.035);
+      for (const { p } of samplePerimeter(rail, 1.9)) gg.aabb(p[0] - 0.035, y0, p[1] - 0.035, p[0] + 0.035, sl.y1 + 1.14, p[1] + 0.035);
       for (let i = 0; i < rail.length; i++) {
         const a = rail[i], c = rail[(i + 1) % rail.length];
-        for (const h of [0.5, 1.02]) gg.bar(new THREE.Vector3(a[0], sl.y1 + h, a[1]), new THREE.Vector3(c[0], sl.y1 + h, c[1]), 0.05);
-        gg.bar(new THREE.Vector3(a[0], sl.y1 + 0.08, a[1]), new THREE.Vector3(c[0], sl.y1 + 0.08, c[1]), 0.15, false);
+        for (const h of onParapet ? [0.9, 1.12] : [0.5, 1.02]) gg.bar(new THREE.Vector3(a[0], sl.y1 + h, a[1]), new THREE.Vector3(c[0], sl.y1 + h, c[1]), 0.05);
+        if (!onParapet) gg.bar(new THREE.Vector3(a[0], sl.y1 + 0.08, a[1]), new THREE.Vector3(c[0], sl.y1 + 0.08, c[1]), 0.15, false);
       }
-    }
+    });
     add(ge.build(), M.edge, 'frontales', S, st.deck[0], st.pour[1] + 5.5);
     add(gg.build(), M.guard, 'barandas', S, guardIn, guardOut + 0.7, false, false);
   });
@@ -418,9 +425,15 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     }
   }
 
+  // --- Obras sobre la losa de techumbre: parapetos, caja de escala y techumbre (scene/roof.ts) ---
+  buildRoof(sched, {
+    add, clipping, pickables, wallRebar, wallForm,
+    mats: { concrete: M.wallConcrete, rebar: M.wallRebar, form: M.wallForm, props: M.props, beams: M.beams },
+  });
+
   // --- Bandeja de trabajo perimetral en ménsulas ------------------------------------------
-  // (los tiempos están en bandejaTime, más arriba)
-  for (let L = 1; L < nWall; L++) {
+  // (los tiempos están en bandejaTime, más arriba; la del nivel nWall es la de la techumbre)
+  for (let L = 1; L <= nWall; L++) {
     const y = levels[L].slab.y1;
     const [by, bh] = bandejaSpan(y);
     // la caja de aparición incluye el tramo que sube al trepar, para que no se recorte arriba

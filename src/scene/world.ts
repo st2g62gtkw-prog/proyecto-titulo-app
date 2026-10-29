@@ -18,7 +18,7 @@ import { createDumpTruck, type DumpTruckRig } from './equipment/dumpTruck';
 import { createExcavator, type ExcavatorRig } from './equipment/excavator';
 import { createMixer, type MixerRig } from './equipment/mixer';
 import { createRammer, type RammerRig } from './equipment/rammer';
-import { createPanelPack, createDeckPack, createPropBundle, createRebarBundle } from './equipment/payloads';
+import { createPanelPack, createDeckPack, createPropBundle, createRebarBundle, createSheetPack, createTimberPack } from './equipment/payloads';
 import { createConcreteStream, type ConcreteStream } from './equipment/pour';
 import { createStationaryPump, type StationaryPumpRig } from './equipment/stationaryPump';
 import { buildFacadePaint } from './facadePaint';
@@ -116,7 +116,10 @@ export class World {
 
     // cargas que cuelgan del gancho
     this.capacho = createCapacho();
-    this.payloads = { panel: createPanelPack(), rebar: createRebarBundle(), deck: createDeckPack(), props: createPropBundle() };
+    this.payloads = {
+      panel: createPanelPack(), rebar: createRebarBundle(), deck: createDeckPack(), props: createPropBundle(),
+      timber: createTimberPack(), sheets: createSheetPack(),
+    };
     const hangOf = (o: THREE.Object3D) => {
       const box = new THREE.Box3().setFromObject(o);
       return Math.max(0.5, -box.min.y);
@@ -127,6 +130,8 @@ export class World {
       rebar: hangOf(this.payloads.rebar),
       deck: hangOf(this.payloads.deck),
       props: hangOf(this.payloads.props),
+      timber: hangOf(this.payloads.timber),
+      sheets: hangOf(this.payloads.sheets),
     };
     this.pickables.push(...this.capacho.pickables);
     // fundaciones: al soltarlo, cada paquete queda en el suelo (sin eslingas) hasta que la cuadrilla
@@ -389,9 +394,10 @@ export class World {
     this.structure.update(T);
     this.site.update(clock, dt);
 
-    // --- grúa y carga ---
+    // --- grúa y carga (se desmonta 5 días después de terminada la estructura de techumbre) ---
     const cs = this.plan.at(T);
     const gy = SITE.groundY;
+    this.crane.group.visible = T < this.sched.roof.gruaOut;
     this.crane.setPose(cs.slew, cs.r, cs.hookY - gy);
     this.crane.update(clock, dt);
     this.state.craneTask = cs.task;
@@ -554,8 +560,9 @@ export class World {
       );
     }
     // trabajos en paralelo en el 1er piso (redes bajo radier, hormigonado del radier): cuatro puestos
-    // fijos; sin trabajo en paralelo esas personas apoyan en el taller de fierro y en la faena
-    const par = this.sched.parallel.find((x) => T >= x.t0 && T <= x.t1);
+    // fijos; sin trabajo en paralelo esas personas apoyan en el taller de fierro y en la faena (las
+    // cuadrillas de la techumbre van en la losa de trabajo, ver Crews)
+    const par = this.sched.parallel.find((x) => (x.kind === 'instalaciones' || x.kind === 'radier') && T >= x.t0 && T <= x.t1);
     const spare = [ground[1], ground[2], ground[6], ground[7]];
     for (let i = 0; i < 4; i++) {
       if (!par) {
@@ -600,6 +607,7 @@ export class World {
     const lb = this.labels.find((l) => l.key === 'balancin');
     if (lb && pst) lb.obj.position.set(pst.x, pst.y + 3.2, pst.z);
     for (const l of this.labels) {
+      if (l.key === 'crane') l.obj.visible = this.labelsOn && this.crane.group.visible;
       if (l.key === 'balancin') l.obj.visible = this.labelsOn && !!pst && pst.rigged;
       if (l.key.startsWith('mixer')) l.obj.visible = this.labelsOn && this.mixers[+l.key.slice(5)].group.visible;
       if (l.key.startsWith('truck')) l.obj.visible = this.labelsOn && this.trucks[+l.key.slice(5)].group.visible;
