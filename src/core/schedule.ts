@@ -238,7 +238,7 @@ export function buildSchedule(data: BuildingData): Schedule {
     // 1) Enfierradura de muros: avanza por sectores; la grúa sube paquetes de fierro.
     const aF = push('muroFierro', L, PACE.muroFierro, DAYS.muroFierro, `${piso} · Enfierradura de muros`,
       L > 0
-        ? `${L === 1 ? 'Se arma' : 'La grúa trepa'} la bandeja de trabajo perimetral en ménsulas; mallas Ø8–Ø12 A630-420H sobre los arranques`
+        ? 'Mallas Ø8–Ø12 A630-420H sobre los arranques, con la bandeja perimetral en ménsulas ya en el piso'
         : 'Mallas Ø8–Ø12 A630-420H amarradas sobre los arranques de las zapatas');
     order.forEach((wi, k) => {
       const s = aF.t0 + 0.5 + (k / order.length) * (PACE.muroFierro - 2.6);
@@ -291,7 +291,10 @@ export function buildSchedule(data: BuildingData): Schedule {
     // --- Losa que se apoya sobre estos muros (losa del piso L+1) ---
     const S = L + 1;
     const losaTxt = S === levels.length - 1 ? 'losa de techumbre' : `losa cielo ${lv.name}`;
-    const aLM = push('losaMoldaje', S, PACE.losaMoldaje, DAYS.losaMoldaje, `${piso} · Moldaje de ${losaTxt}`, 'Puntales, vigas H20 y placas fenólicas; frontales de borde');
+    // antes de cualquier trabajo en el piso de arriba, la bandeja perimetral ya está a la cota de su losa
+    const bandejaTxt = S === 1 ? 'Se arma la bandeja perimetral en ménsulas a la cota del 2P'
+      : `La grúa trepa la bandeja perimetral ${S === levels.length - 1 ? 'a la techumbre' : `al ${levels[S].name}`}`;
+    const aLM = push('losaMoldaje', S, PACE.losaMoldaje, DAYS.losaMoldaje, `${piso} · Moldaje de ${losaTxt}`, `${bandejaTxt}; puntales, vigas H20 y placas fenólicas; frontales de borde`);
     const aLF = push('losaFierro', S, PACE.losaFierro, DAYS.losaFierro, `${piso} · Enfierradura de ${losaTxt}`, 'Malla inferior y superior Ø8–Ø10, suples y separadores');
     const aLH = push('losaHormigon', S, PACE.losaHormigon, DAYS.losaHormigon, `${piso} · Hormigonado de ${losaTxt}`, 'Bomba estacionaria: la tubería sube por el shaft del ascensor; vibrado y platachado');
     const bx = polyBounds(levels[S].slab.outer);
@@ -334,7 +337,7 @@ export function buildSchedule(data: BuildingData): Schedule {
     return { x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2 };
   };
   const aRF = push('techoFierro', RL, PACE.techoFierro, DAYS.techoFierro, 'Techumbre · Enfierradura de parapetos y caja de escala',
-    'La grúa trepa la bandeja perimetral a la techumbre; mallas Ø8a20 de los parapetos y de los muros de la caja de escala y sala de máquinas sobre las esperas de la losa');
+    'Mallas Ø8a20 de los parapetos y de los muros de la caja de escala y sala de máquinas sobre las esperas de la losa, desde la bandeja perimetral');
   rOrder.forEach((wi, k) => {
     const s = aRF.t0 + 0.6 + (k / rOrder.length) * (PACE.techoFierro - 2.2);
     rWall[wi].rebar = [s, s + 1.4];

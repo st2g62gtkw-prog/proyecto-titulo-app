@@ -467,7 +467,7 @@ function hudState(): HudState {
     // en la obra gruesa de la techumbre y mientras se arma la cubierta, los pasos de la techumbre
     steps: a.kind === 'fundaciones'
       ? fundSteps(s, T)
-      : roofGruesa || (a.kind === 'terminaciones' && T < s.roof.aguas[1])
+      : roofGruesa || (a.kind === 'terminaciones' && T < Math.max(s.roof.cubierta[1], s.roof.aguas[1]))
         ? roofSteps(s, T)
         : a.kind === 'radier' || a.kind === 'terminaciones'
           ? floorSteps(s, s.activities.find((x) => x.kind === 'muroFierro' && x.level === 0)!, T)

@@ -20,20 +20,18 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
     if (a.kind === 'muroHormigon') ev.push({ t: a.t1 - 0.5, text: `Muros ${a.levelName} hormigonados · ${fmt(WALL_M3[a.levelName] ?? 0)} m³`, kind: 'ok' });
     if (a.kind === 'muroMoldaje') ev.push({ t: a.t0 + 0.3, text: `Grúa sube paneles de moldaje al ${a.levelName}`, kind: 'crane' });
     if (a.kind === 'muroFierro') ev.push({ t: a.t0 + 0.3, text: `Grúa sube paquetes de fierro al ${a.levelName}`, kind: 'crane' });
-    if (a.kind === 'muroFierro' && a.level > 0) {
+    // la bandeja llega a cada piso antes del moldaje de su losa (structure.ts)
+    if (a.kind === 'losaMoldaje') {
       ev.push(a.level === 1
-        ? { t: a.t0 + 0.1, text: `Bandeja perimetral en ménsulas armada en el ${a.levelName}`, kind: 'info' }
-        : { t: a.t0 + 0.7, text: `Grúa trepa la bandeja perimetral en ménsulas al ${a.levelName}`, kind: 'crane' });
+        ? { t: a.t0 - 0.2, text: `Bandeja perimetral en ménsulas armada en el ${a.levelName}, antes del moldaje de su losa`, kind: 'info' }
+        : { t: a.t0 - 0.5, text: `Grúa trepa la bandeja perimetral en ménsulas ${a.levelName === 'Techumbre' ? 'a la techumbre' : `al ${a.levelName}`}`, kind: 'crane' });
     }
     if (a.kind === 'losaHormigon') {
       const p = sched.slab[a.level].pour;
       ev.push({ t: p[1], text: `${a.levelName === 'Techumbre' ? 'Losa de techumbre' : `Losa de piso ${a.levelName}`} hormigonada · ${fmt(SLAB_M3[a.levelName] ?? 0)} m³`, kind: 'ok' });
     }
     // obra gruesa sobre la losa de techumbre
-    if (a.kind === 'techoFierro') {
-      ev.push({ t: a.t0 + 0.1, text: 'Grúa trepa la bandeja perimetral a la techumbre para los parapetos', kind: 'crane' });
-      ev.push({ t: a.t0 + 0.4, text: 'Grúa sube fierro para los parapetos y la caja de escala', kind: 'crane' });
-    }
+    if (a.kind === 'techoFierro') ev.push({ t: a.t0 + 0.4, text: 'Grúa sube fierro para los parapetos y la caja de escala', kind: 'crane' });
     if (a.kind === 'techoHormigon') ev.push({ t: a.t1 - 0.5, text: `Parapetos y muros de la caja de escala hormigonados · ${fmt(ROOF_WALL_M3)} m³`, kind: 'ok' });
     if (a.kind === 'techoDesmolde') ev.push({ t: a.t1, text: 'Se retira la bandeja perimetral: la baranda de seguridad queda sobre los parapetos', kind: 'info' });
     if (a.kind === 'salaLosa') ev.push({ t: sched.roof.slab.pour[1], text: `Losa de cielo de la caja de escala hormigonada · ${fmt(SALA_LOSA_M3)} m³: termina la obra gruesa`, kind: 'ok' });

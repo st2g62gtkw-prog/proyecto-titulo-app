@@ -209,20 +209,23 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     add(cam.build(), M.footing, 'camaras', 0, inst.t0, out + 0.3, false, false);
   }
 
-  // Bandeja de trabajo perimetral en ménsulas (piso L = 1..7, sobre la losa del piso L; la 7 es la
-  // techumbre): se arma al comenzar los muros del 2P y, cuando parte el piso siguiente, la grúa la
-  // "trepa" un piso (se levanta 2,5 m y en ese instante aparece la del piso de arriba). En la
-  // techumbre sirve para moldear los parapetos y se retira después de su desmolde. Solo el piso en
-  // obra tiene bandeja.
-  const startWalls = (lvl: number) => sched.activities.find((a) => a.kind === 'muroFierro' && a.level === lvl)!.t0;
+  // Bandeja de trabajo perimetral en ménsulas (piso L = 1..7, a la cota de la losa del piso L; la 7
+  // es la techumbre). Antes de cualquier trabajo en un piso ya está ahí: se arma al empezar el
+  // moldaje de la losa del 2P (con los muros del 1P desmoldados, donde se toman sus ménsulas) y,
+  // apenas se desmoldan los muros de cada piso, la grúa la "trepa" al siguiente (se levanta 2,5 m
+  // y en ese instante aparece la de arriba), antes del moldaje, la enfierradura y el hormigonado de
+  // su losa; ahí sigue durante los muros de ese piso. En la techumbre sirve también para los
+  // parapetos y se retira después de su desmolde. Solo el piso en obra tiene bandeja.
+  const startSlab = (S: number) => sched.activities.find((a) => a.kind === 'losaMoldaje' && a.level === S)!.t0;
   const roofOut = sched.activities.find((a) => a.kind === 'techoDesmolde')!.t1 + 0.4;
   /** Trepada de la bandeja del piso L al siguiente (o retiro final, en la techumbre): [out0, out1]. */
   const climb = (L: number): [number, number] => {
-    const o0 = L + 1 < nWall ? startWalls(L + 1) - 0.3 : L + 1 === nWall ? sched.roof.gruesa[0] - 0.3 : roofOut;
+    // termina de trepar justo cuando parte el moldaje de la losa de arriba
+    const o0 = L < nWall ? startSlab(L + 1) - 1.0 : roofOut;
     return [o0, o0 + 1.0];
   };
   /** [llegada, out0, out1] de la bandeja del piso L (llega justo cuando termina de trepar la de abajo). */
-  const bandejaTime = (L: number): [number, number, number] => [L === 1 ? startWalls(1) - 0.2 : climb(L - 1)[1] - 0.02, ...climb(L)];
+  const bandejaTime = (L: number): [number, number, number] => [L === 1 ? startSlab(1) - 2.6 : climb(L - 1)[1] - 0.02, ...climb(L)];
 
   // --- Losas: radier (0) y losas 2P…Techumbre (1..7) ------------------------------------
   levels.forEach((lv, S) => {
@@ -439,7 +442,8 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     // la caja de aparición incluye el tramo que sube al trepar, para que no se recorte arriba
     const box = bh + BANDEJA_LIFT + 0.1;
     const [in0, out0, out1] = bandejaTime(L);
-    // la del 2P se arma de abajo hacia arriba (~2,4 s); las demás aparecen cuando llega la que trepa
+    // la del 2P se arma de abajo hacia arriba (~2,4 s, al final del desmolde del 1P, antes del moldaje
+    // de su losa); las demás aparecen cuando llega la que trepa
     const in1 = in0 + (L === 1 ? 2.4 * (box / bh) : 0.04);
     const parts = { frame: new GeoBuilder(), rails: new GeoBuilder(), deck: new GeoBuilder(), mesh: new GeoBuilder() };
     for (const gb of Object.values(parts)) gb.timing(in0, in1, out0, out1, by, box);

@@ -25,11 +25,11 @@ export interface Progress {
 }
 
 export const FLOOR_STEPS: { kind: ActivityKind; label: string }[] = [
-  { kind: 'muroFierro', label: 'Bandeja y enfierradura de muros' },
+  { kind: 'muroFierro', label: 'Enfierradura de muros' },
   { kind: 'muroMoldaje', label: 'Moldaje de muros' },
   { kind: 'muroHormigon', label: 'Hormigonado con capacho' },
   { kind: 'muroDesmolde', label: 'Desmolde' },
-  { kind: 'losaMoldaje', label: 'Moldaje de losa' },
+  { kind: 'losaMoldaje', label: 'Bandeja y moldaje de losa' },
   { kind: 'losaFierro', label: 'Enfierradura de losa' },
   { kind: 'losaHormigon', label: 'Hormigonado con bomba estacionaria' },
 ];
@@ -116,7 +116,7 @@ export function computeProgress(sched: Schedule, t: number): Progress {
 
 /** Pasos de las obras sobre la losa de techumbre: obra gruesa (ruta crítica) y capítulo 3 (en paralelo). */
 export const ROOF_STEPS: { kind: ActivityKind; label: string }[] = [
-  { kind: 'techoFierro', label: 'Bandeja y enfierradura de parapetos y caja de escala' },
+  { kind: 'techoFierro', label: 'Enfierradura de parapetos y caja de escala' },
   { kind: 'techoMoldaje', label: 'Moldaje de parapetos y caja' },
   { kind: 'techoHormigon', label: 'Hormigonado con capacho' },
   { kind: 'techoDesmolde', label: 'Desmolde' },
