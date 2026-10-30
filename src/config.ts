@@ -19,7 +19,7 @@ export const SITE = {
   /** Grúa torre: al medio del edificio, en el frente (+z), opuesta al camino de mixers. */
   crane: {
     x: -1.0,
-    z: 12.6,
+    z: 16.5,
     mastHeight: 30.5, // altura de la base del giro sobre el terreno
     jibLength: 45,
     counterJibLength: 13,
@@ -91,7 +91,7 @@ export const SITE = {
   tallerFierro: { x: 36, z: 0.5, w: 9, d: 9, rot: 0 },
   acopioPuntales: { x: -30, z: 8, w: 5, d: 8, rot: 0 },
   /** Instalación de faena: arriba del talud del frente, en la explanada a la cota terreno.faena. */
-  faena: { x: 6, z: 32, w: 18, d: 18, rot: 0 },
+  faena: { x: 6, z: 35, w: 18, d: 18, rot: 0 },
 
   /**
    * Movimiento de tierra (fotos de la visita a terreno y bosquejo de la distribución real):
@@ -116,9 +116,9 @@ export const SITE = {
     corte: 1.5,
     plataformaX: -37,
     ensancheZ: -2,
-    pieTalud: 18.5,
-    coronaTalud: 22.5,
-    frenteZ: 42,
+    pieTalud: 24,
+    coronaTalud: 28,
+    frenteZ: 46,
     bajada: { x: -43.5, ancho: 5, zArriba: 34, zAbajo: -16 },
     subida: { x: 44, r: 7, ancho: 6 },
     salida: { x0: -32, x1: -52, ancho: 6 },

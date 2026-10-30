@@ -54,7 +54,7 @@ const RZ = SITE.road.z;
 /** Estacionamiento de autos de los trabajadores, junto al portón (detrás del bolsón de espera, en el sector bajo). */
 const PARK = { x: SITE.gate.x + 21, z: RZ - 9.6 };
 /** Barrio: calles a lo largo de x (z = cte) y de z (x = cte), y su extensión plana. */
-const TOWN = { xSt: [56, 100, 144, 188], zSt: [-118, ST_W, 82, 160], x0: -170, x1: 230, z1: 205 };
+const TOWN = { xSt: [62, 100, 144, 188], zSt: [-118, ST_W, 82, 160], x0: -170, x1: 230, z1: 205 };
 
 // ---------------------------------------------------------------------------------------
 // Ruido y utilidades
@@ -1780,7 +1780,7 @@ function buildSurroundings(M: Mats, group: THREE.Group) {
       roundTree(k.b(M.foliage), tx, tz, 4 + r() * 3, r);
     }
   };
-  // filas a ambos lados de las calles en x (la primera fila de la calle 56 sería la obra)
+  // filas a ambos lados de las calles en x (la primera fila de la calle 62 sería la obra)
   for (const zc of TOWN.xSt) for (const side of [-1, 1]) {
     const zr = zc + side * 15;
     if (zr < FENCE.z1 + 6) continue;
