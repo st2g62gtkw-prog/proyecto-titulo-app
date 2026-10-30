@@ -51,7 +51,7 @@ export function calleY(z: number) {
   return Y_CAMINO + (Y_PLAT - Y_CAMINO) * smooth01((z - (RZ + 3)) / 16);
 }
 /** Cota del barrio junto a la faena (a la de la plataforma, salvo detrás, donde sube el cerro). */
-const barrioY = (z: number) => (z < TR.fondoBajo[1] ? Math.max(Y_PLAT, natural(z)) : Y_PLAT);
+const barrioY = (z: number) => (z < TR.fondoBajo[1] ? Math.max(Y_PLAT, natural(z)) : z > TR.frenteZ ? natural(z) : Y_PLAT);
 
 /**
  * Corte típico a lo ancho (lo que no cubre ninguna explanada, como el costado +x): cerro con bosque
@@ -65,7 +65,12 @@ function natural(z: number) {
   if (z < zb) return Y_CAMINO + ((Y_PLAT - Y_CAMINO) * (z - toe)) / TR.corte;
   if (z < TR.pieTalud) return Y_PLAT;
   if (z < TR.frenteZ) return Math.min(Y_FAENA, Y_PLAT + S_PLAT * (z - TR.pieTalud));
-  return Y_FAENA + (Y_PLAT - Y_FAENA) * smooth01((z - TR.frenteZ) / 10);
+  // detrás de la faena el cerro sigue subiendo hasta la terraza de los edificios ya construidos del
+  // condominio y, más allá, baja al barrio
+  const C = SITE.condominio;
+  if (z < C.z0) return Y_FAENA + (C.y - Y_FAENA) * smooth01((z - TR.frenteZ) / (C.z0 - TR.frenteZ));
+  if (z < C.z1) return C.y;
+  return C.y + (Y_PLAT - C.y) * smooth01((z - C.z1) / 30);
 }
 
 /** Distancia en planta a un rectángulo [x0, x1] × [z0, z1] (0 adentro). */
@@ -138,7 +143,7 @@ function graded(x: number, z: number) {
 }
 
 /** Cierros de la faena (el portón va en el cierro −x). */
-export const FENCE = { x0: SITE.gate.x, x1: 46, z0: TR.cierroZ, z1: 50 };
+export const FENCE = { x0: SITE.gate.x, x1: 72, z0: TR.cierroZ, z1: 50 };
 
 /**
  * Cota del suelo en (x, z): movimiento de tierra dentro de la faena; afuera, la calle del portón

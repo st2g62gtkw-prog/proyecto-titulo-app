@@ -341,7 +341,8 @@ export function buildFoundations(sched: Schedule, add: AddLayer, clipping: THREE
         for (const y of [V.y0 + 0.06, V.y1 - 0.06]) g.barN(xa, y, z, xb, y, z, 0.02, false);
       }
     }
-    const mr = add(g.build(), M.rebar, 'fund-fierro', 0, F.t0, NEVER);
+    // (las esperas quedan ahogadas en los muros y el radier del 1er piso: no se ven en la obra terminada)
+  const mr = add(g.build(), M.rebar, 'fund-fierro', 0, F.t0, sched.slab[0].pour[1]);
     if (mr) {
       mr.userData.pick = { type: 'fund', id: 'fierro' };
       picks.push(mr);

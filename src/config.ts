@@ -90,6 +90,11 @@ export const SITE = {
   acopioFierro: { x: 34, z: 15, w: 7, d: 10, rot: 0 },
   tallerFierro: { x: 36, z: 0.5, w: 9, d: 9, rot: 0 },
   acopioPuntales: { x: -30, z: 8, w: 5, d: 8, rot: 0 },
+  /**
+   * Edificios ya construidos del condominio, al frente y más arriba (iguales al Edificio E): terraza
+   * a la cota y entre z0 y z1, y centro en planta de cada edificio (misma orientación que el E).
+   */
+  condominio: { y: 9.5, z0: 64, z1: 115, centros: [[42, 86], [-16, 82], [-74, 88]] as [number, number][] },
   /** Instalación de faena: arriba del talud del frente, en la explanada a la cota terreno.faena. */
   faena: { x: -6, z: 35, w: 18, d: 18, rot: 0 },
 
@@ -120,7 +125,7 @@ export const SITE = {
     coronaTalud: 28,
     frenteZ: 46,
     bajada: { x: -43.5, ancho: 5, zArriba: 34, zAbajo: -16 },
-    finCamino: 38,
+    finCamino: 44,
     salida: { x0: -32, x1: -52, ancho: 6 },
     /** Fondo del sector bajo junto al portón (estacionamiento y cancha de lavado) y del resto. */
     fondoBajo: [-33.5, -25] as [number, number],

@@ -29,6 +29,7 @@ import { uTime } from './reveal';
 import type { SiteRig } from './site';
 import type { Stage } from './stage';
 import { buildStructure, type Structure } from './structure';
+import { createCondominio } from './condominio';
 import type { createTag } from '../ui/hud';
 
 /** Fábricas de las partes que viven en otros módulos (permite probar el mundo por partes). */
@@ -107,6 +108,8 @@ export class World {
   private tmp2 = new THREE.Vector3();
   private labelsOn = true;
   private highlight: THREE.LineSegments;
+  /** Pavimento y jardín alrededor del edificio terminado (tapa la excavación rellenada y los pollos). */
+  private apron: THREE.Mesh;
 
   constructor(private stage: Stage, readonly b: LoadedBuilding, private deps: WorldDeps) {
     const { data, detail } = b;
@@ -118,6 +121,8 @@ export class World {
 
     this.site = deps.createSite();
     scene.add(this.site.group);
+    // edificios ya construidos del condominio (iguales al E), al frente y más arriba
+    scene.add(createCondominio(data, detail));
     this.pickables.push(...this.site.pickables);
 
     // grúa torre
@@ -250,6 +255,39 @@ export class World {
     }
     // la excavación de las zapatas recorta el terreno de la faena
     this.site.setGroundMask?.(this.structure.groundMask);
+    {
+      // obras exteriores al final (cuando ya se desmontó la grúa): vereda perimetral de hormigón y
+      // césped sobre la zona excavada y rellenada, al nivel del 1er piso
+      const m = this.structure.groundMask, w = m.x1 - m.x0, d = m.z1 - m.z0;
+      const geo = new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2);
+      const tex = (() => {
+        const c = document.createElement('canvas');
+        c.width = 256;
+        c.height = Math.round((256 * d) / w);
+        const g = c.getContext('2d')!;
+        g.fillStyle = '#8fae5c';
+        g.fillRect(0, 0, c.width, c.height);
+        // vereda de 2 m alrededor de la huella del edificio
+        const k = c.width / w, ring = this.b.data.levels[1].slab.outer;
+        g.strokeStyle = '#d3cfc6';
+        g.lineWidth = 4.2 * k;
+        g.lineJoin = 'round';
+        g.beginPath();
+        ring.forEach(([x, z], i) => (i ? g.lineTo((x - m.x0) * k, (z - m.z0) * k) : g.moveTo((x - m.x0) * k, (z - m.z0) * k)));
+        g.closePath();
+        g.stroke();
+        g.fillStyle = '#d3cfc6';
+        g.fill();
+        const t = new THREE.CanvasTexture(c);
+        t.colorSpace = THREE.SRGBColorSpace;
+        return t;
+      })();
+      this.apron = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
+      this.apron.position.set((m.x0 + m.x1) / 2, 0.03, (m.z0 + m.z1) / 2);
+      this.apron.receiveShadow = true;
+      this.apron.visible = false;
+      scene.add(this.apron);
+    }
 
     for (let i = 0; i < 4; i++) {
       const s = createConcreteStream();
@@ -413,6 +451,7 @@ export class World {
     const cs = this.plan.at(T);
     const gy = SITE.groundY;
     this.crane.group.visible = T < this.sched.roof.gruaOut;
+    this.apron.visible = T >= this.sched.roof.gruaOut;
     this.crane.setPose(cs.slew, cs.r, cs.hookY - gy);
     this.crane.update(clock, dt);
     this.state.craneTask = cs.task;

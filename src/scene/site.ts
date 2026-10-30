@@ -76,8 +76,8 @@ const STREETS: { pts: V2[]; w: number; r?: number }[] = [
 ];
 /** Eje del cauce del estero Las Tablas, detrás del cierro posterior. */
 const ESTERO_Z = -41.5;
-/** Edificios ya construidos del condominio, al frente (centro, ancho en x, fondo en z, pisos). */
-const CONDO: [number, number, number, number, number][] = [[19, 86, 38, 16, 6], [-20, 80, 34, 20, 6], [-60, 84, 34, 17, 6]];
+/** Huella de los edificios ya construidos del condominio (iguales al E; los arma world.ts): centro, ancho en x, fondo en z. */
+const CONDO: [number, number, number, number][] = SITE.condominio.centros.map(([x, z]) => [x, z, 52, 19]);
 /** Hasta donde llega el entorno con detalle (más allá, lomas y bosques lejanos). */
 const TOWN = { x0: -210, x1: 220, z1: 170 };
 
@@ -1628,7 +1628,7 @@ function buildMisc(k: Kit, M: Mats) {
   }
   // bodega en contenedor marítimo (en la explanada de faena)
   {
-    const cx = 28, cz = 40.5, cy = groundAt(cx, cz);
+    const cx = 60, cz = 37.5, cy = groundAt(cx, cz);
     part(k.b(M.sheet), GEO.box, cx, cy + 1.3, cz, 6.06, 2.59, 2.44, '#3f6b88', { uv: [1.1, 2.6] });
     box(p, cx - 3.04, cy + 0.06, cz, 0.04, 2.47, 2.32, '#355a73');
     for (const s of [-0.55, -0.15, 0.15, 0.55]) box(k.b(M.metal), cx - 3.08, cy + 0.2, cz + s, 0.05, 2.2, 0.05, '#9aa4ad');
@@ -1650,7 +1650,7 @@ function buildMisc(k: Kit, M: Mats) {
   }
   // acopio de áridos y excedentes de excavación (en el ensanche +x y al final del camino, abajo)
   const mounds: [number, number, number, number, number, string][] = [
-    [42, -7.5, 6, 2.0, 5, '#cfae82'], [42.5, 14.5, 5, 1.7, 4, '#9e968a'],
+    [42, -7.5, 6, 2.0, 5, '#cfae82'], [57, 5, 9, 2.6, 7, '#cfae82'], [63, 14, 7, 2.0, 6, '#9e968a'], [64, -8, 8, 2.2, 6, '#c99266'],
   ];
   mounds.forEach(([mx, mz, sx, sy, sz, c], i) => part(k.b(M.ground), heapGeometry(i + 3), mx, groundAt(mx, mz) - 0.05, mz, sx, sy, sz, c, { ry: i, uv: 10 }));
   // postes de iluminación en las esquinas
@@ -1776,22 +1776,6 @@ function roundTree(b: Batch, x: number, z: number, H: number, r: () => number) {
   }
 }
 
-/** Edificio de departamentos ya construido del condominio: pisos con franjas de ventanas y techo plano. */
-function condoBlock(b: Batch, x: number, z: number, w: number, d: number, floors: number) {
-  const y0 = Math.min(heightAt(x - w / 2, z - d / 2), heightAt(x + w / 2, z + d / 2), heightAt(x, z)) - 0.3;
-  const H = floors * 2.6 + 0.4;
-  box(b, x, y0, z, w, H, d, '#eceae4');
-  for (let f = 0; f < floors; f++) {
-    const y = y0 + 0.5 + f * 2.6;
-    box(b, x, y + 0.8, z, w + 0.06, 1.15, d + 0.06, '#56616b');
-    box(b, x, y + 2.45, z, w + 0.2, 0.18, d + 0.2, '#d6d3cb');
-  }
-  box(b, x, y0 + H, z, w + 0.3, 0.5, d + 0.3, '#c9c7c1');
-  box(b, x, y0 + H + 0.02, z, w - 0.6, 0.5, d - 0.6, '#9da3a8');
-  // caja de escala sobre la cubierta
-  box(b, x - w * 0.15, y0 + H + 0.5, z, 5, 2.4, 4, '#e3e1da');
-}
-
 /**
  * Entorno según la vista satelital: barrio de casas del lado del portón y al otro lado de la avenida,
  * edificios del condominio al frente, estero con árboles detrás de la obra y bosque hacia +x. Lo
@@ -1823,10 +1807,9 @@ function buildSurroundings(M: Mats, group: THREE.Group) {
       }
     }
   }
-  // edificios del condominio ya construidos, al frente, con algunos árboles
-  for (const [cx, cz, w, d, n] of CONDO) condoBlock(near.b(M.paint), cx, cz, w, d, n);
+  // alrededor de los edificios del condominio ya construidos, al frente, algunos árboles
   for (let i = 0; i < 26; i++) {
-    const x = -90 + r() * 140, z = 58 + r() * 60;
+    const x = -110 + r() * 190, z = 60 + r() * 60;
     if (nearCondo(x, z, 3) || nearestStreet(x, z).d < 3 || inSite(x, z, 4)) continue;
     roundTree(near.b(M.foliage), x, z, 4 + r() * 4, r);
   }

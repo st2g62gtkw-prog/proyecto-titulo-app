@@ -21,7 +21,7 @@ const SKIN = 0.012;
 export const FACADE_COLORS = {
   raw: '#c9c6bf', // mismo hormigón de los muros (structure.ts)
   seal: '#f7f6f1', // empaste y sellador
-  paint: '#eee6d4', // látex de fachada (crema, distinto del hormigón visto)
+  paint: '#cfb895', // látex de fachada: café claro
 };
 
 export function buildFacadePaint(plan: PaintPlan, clipping: THREE.Plane[]): THREE.Mesh {

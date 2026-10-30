@@ -1,4 +1,5 @@
 /** Datos del Edificio E exportados desde el IFC (ver tools/ifc_to_json.py). */
+import { applyPlanFixes } from './planFixes';
 import type { V2 } from '../scene/geom';
 
 export interface WallData {
@@ -111,5 +112,6 @@ export async function loadBuilding(base = import.meta.env.BASE_URL + 'data/'): P
     fetch(base + 'fundaciones-e.json').then((r) => (r.ok ? (r.json() as Promise<FundData>) : undefined)).catch(() => undefined),
   ]);
   data.fund = fund;
-  return { data, detail };
+  // correcciones del IFC según los planos (hall de acceso a doble altura)
+  return { data, detail: applyPlanFixes(data, detail) };
 }

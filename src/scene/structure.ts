@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import type { BuildingData, LevelData, WallData } from '../data/building';
 import type { Schedule } from '../core/schedule';
 import { haWalls } from '../core/schedule';
+import { railingsFromIfc, windowsFromIfc, type Center } from './facadeDetail';
 import { GeoBuilder, offsetPolygon, pointInPolygon, polyBounds, samplePerimeter, scanlineLoops, signedArea, type V2 } from './geom';
 import { BANDEJA_LIFT, bandejaSpan, buildBandeja } from './bandeja';
 import { NEVER, revealMaterial, revealMesh, type RevealMaterial } from './reveal';
@@ -59,10 +60,17 @@ const C = {
   guard: '#f0c22a',
   edge: '#9a5530',
   facade: FACADE_COLORS.paint, // mismo látex que pinta el balancín (facadePaint.ts)
-  pvc: '#f1f0ec',
-  glass: '#3f5361',
-  railing: '#4a2b27',
+  pvc: '#efeee9', // marcos de PVC blancos (elevaciones)
+  // vidrio oscuro de las ventanas y barandas metálicas oscuras de los balcones (imagen de referencia
+  // del modelo)
+  glass: '#43525f',
+  railing: '#aeb4ba', // barandas de barras de acero galvanizado
   door: '#7a5232',
+};
+
+/** Paleta del edificio terminado (la usan también los edificios ya construidos del condominio). */
+export const FINISH = {
+  facade: C.facade, slab: '#d9d5cc', roof: '#9aa3a9', pvc: C.pvc, glass: C.glass, railing: C.railing, door: C.door,
 };
 
 type Mats = ReturnType<typeof makeSharedMaterials>;
@@ -93,12 +101,14 @@ function makeSharedMaterials(clip: THREE.Plane[]) {
     beams: withClip(revealMaterial({ color: C.beam, roughness: 0.75 }, { mode: 'drop', dropHeight: 0.6, outLift: new THREE.Vector3(0, -0.4, 0) })),
     edge: withClip(revealMaterial({ color: '#ffffff', map: ply, roughness: 0.7 }, { mode: 'drop', dropHeight: 0.8, outLift: new THREE.Vector3(0, 1.5, 0) })),
     guard: withClip(revealMaterial({ color: C.guard, roughness: 0.7 }, { mode: 'drop', dropHeight: 0.5, outLift: new THREE.Vector3(0, 0.6, 0) })),
+    // tabiques interiores: gris azulado medio, así por los vanos las ventanas se leen como vidrio
     finishWall: withClip(revealMaterial({ color: C.facade, roughness: 0.9 }, { mode: 'rise' })),
     // fachada liviana hacia el exterior: se levanta sin pintar y la pinta el balancín (piel de facadePaint)
     finishRaw: withClip(revealMaterial({ color: FACADE_COLORS.raw, map: conc, roughness: 0.92 }, { mode: 'rise' })),
     pvc: withClip(revealMaterial({ color: C.pvc, roughness: 0.5 }, { mode: 'drop', dropHeight: 0.6 })),
-    glass: withClip(revealMaterial({ color: C.glass, roughness: 0.12, metalness: 0.65 }, { mode: 'drop', dropHeight: 0.6 })),
-    railing: withClip(revealMaterial({ color: C.railing, roughness: 0.5, metalness: 0.5 }, { mode: 'drop', dropHeight: 0.6 })),
+    glass: withClip(revealMaterial({ color: C.glass, roughness: 0.25, metalness: 0.15 }, { mode: 'drop', dropHeight: 0.6 })),
+    // barandas de los balcones: perfiles oscuros que dejan ver la terraza (semitransparentes)
+    railing: withClip(revealMaterial({ color: C.railing, roughness: 0.45, metalness: 0.4 }, { mode: 'drop', dropHeight: 0.6 })),
     door: withClip(revealMaterial({ color: C.door, roughness: 0.6 }, { mode: 'drop', dropHeight: 0.6 })),
     excavation: withClip(revealMaterial({ color: '#7d5b3b', roughness: 1 }, { mode: 'pop' })),
     trench: withClip(revealMaterial({ color: '#4c3523', roughness: 1 }, { mode: 'pop' })),
@@ -422,9 +432,20 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     add(fw.build(), M.finishWall, 'tabiques', L, f0, NEVER, true);
     add(fr.build(), M.finishRaw, 'tabiques', L, f0, NEVER, true);
     const mats = { window: M.pvc, plate: M.glass, railing: M.railing, door: M.door } as const;
+    // ventanas y barandas según las elevaciones (facadeDetail): a ras del muro y de barras delgadas
+    const center: Center = [(bboxAll.x0 + bboxAll.x1) / 2, (bboxAll.z0 + bboxAll.z1) / 2, (bboxAll.x1 - bboxAll.x0) / 2, (bboxAll.z1 - bboxAll.z0) / 2];
+    const tw0 = f0 + (f1 - f0) * 0.4;
     for (const grp of data.detail.groups.filter((g) => g.level === lv.name)) {
-      const geo = detailGeometry(detail, grp.offset, grp.count, f0 + (f1 - f0) * 0.4, f1, X0, X1);
-      add(geo, mats[grp.kind], grp.kind, L, f0, NEVER, false, grp.kind !== 'plate');
+      const src = new Float32Array(detail, grp.offset, grp.count * 3);
+      if (grp.kind === 'window') {
+        const w = windowsFromIfc(src, lv.walls, center);
+        add(timedGeometry(w.frame, tw0, f1, X0, X1), M.pvc, 'window', L, f0, NEVER, false, true);
+        add(timedGeometry(w.glass, tw0, f1, X0, X1), M.glass, 'plate', L, f0, NEVER, false, false);
+      } else if (grp.kind === 'railing') {
+        add(timedGeometry(railingsFromIfc(src, center), tw0, f1, X0, X1), M.railing, 'railing', L, f0, NEVER, false, true);
+      } else {
+        add(detailGeometry(detail, grp.offset, grp.count, tw0, f1, X0, X1), mats[grp.kind], grp.kind, L, f0, NEVER, false, grp.kind !== 'plate');
+      }
     }
   }
 
@@ -544,7 +565,7 @@ function doorCut(w: WallData) {
 }
 
 /** Vanos que se descuentan del hormigón (se ignoran los de área despreciable). */
-function wallHoles(w: WallData) {
+export function wallHoles(w: WallData) {
   return w.holes.filter((h) => Math.abs(signedArea(h)) >= 0.02);
 }
 
@@ -597,8 +618,12 @@ function wallForm(g: GeoBuilder, w: WallData, [in0, in1]: [number, number], [out
 }
 
 /** Malla de ventanas/vidrios/barandas/puertas del IFC con tiempos de instalación por posición. */
-function detailGeometry(buf: ArrayBuffer, offset: number, count: number, t0: number, t1: number, x0: number, x1: number) {
-  const pos = new Float32Array(buf, offset, count * 3);
+export function detailGeometry(buf: ArrayBuffer, offset: number, count: number, t0: number, t1: number, x0: number, x1: number) {
+  return timedGeometry(new Float32Array(buf, offset, count * 3), t0, t1, x0, x1);
+}
+
+export function timedGeometry(pos: Float32Array, t0: number, t1: number, x0: number, x1: number) {
+  const count = pos.length / 3;
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.computeVertexNormals();

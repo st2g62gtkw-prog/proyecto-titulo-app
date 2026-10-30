@@ -38,7 +38,8 @@ Todo viene de la carpeta **Proyecto de titulo 07-10** en Drive:
 | Partidas y plazos de la techumbre (cap. 3, 14.5, 2.23 y 2.24) | *Itemizado / Presupuesto (APU)* y *Cronograma Edificio E – versión detallada con cuadrillas (oct 2026)* |
 | Programa por piso, superficies y deptos | *CATALOGO.md* (láminas L38–L40) |
 | Grúa, mixer, faena, acopios, 85 trabajadores | fotos de la visita a terreno del 09-10-2026 |
-| Entorno: estero Las Tablas y avenida detrás de la obra, pasaje del portón y barrio, edificios del condominio al frente, bosque; tamaño del sitio | vista satelital (Av. Las Tablas 230, Curauma) |
+| Entorno: estero Las Tablas y avenida detrás de la obra, pasaje del portón y barrio, edificios del condominio al frente (iguales al E, en una terraza más alta), bosque; tamaño del sitio | vista satelital (Av. Las Tablas 230, Curauma) |
+| Hall de acceso a doble altura (vacío del 2P), ventanas y barandas de fachada | plantas 1P y 2P y elevaciones (L38, L39, L42): correcciones sobre el IFC en `src/data/planFixes.ts` y `src/scene/facadeDetail.ts` |
 | Desniveles, camino, bajada y rampa, ubicación de la bomba, orden de excavación | fotos de la visita y bosquejo de la distribución real de la faena |
 
 Los tiempos de cada actividad (días hábiles) son típicos del método y se ajustan en `src/config.ts` (`DAYS` y `PACE`). Ahí también se definen las ubicaciones de la grúa, la bomba, los acopios, los caminos y el portón, y las cotas del terreno (`SITE.terreno`).
@@ -82,6 +83,8 @@ src/
     site.ts            terreno, talud del frente, camino posterior y portón, faena y acopios
     pipeline.ts        tubería de la bomba por el suelo y el shaft del ascensor
     equipment/         grúa, mixer, bomba estacionaria, capacho, cargas, trabajadores
+    facadeDetail.ts    ventanas a ras del muro y barandas de barras, según las elevaciones (L42)
+    condominio.ts      edificios ya construidos del condominio (réplicas del E) al frente
     world.ts           arma la escena y la sincroniza con el tiempo
   ui/                  tablero (HUD) y estilos
 ```
