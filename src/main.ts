@@ -59,12 +59,12 @@ const MIN_POLAR = THREE.MathUtils.degToRad(12);
 
 /**
  * Planta (en pantalla +x a la derecha y −z hacia arriba): encuadra el recorrido de los camiones
- * (la calle del portón, el camino posterior, la bomba y la subida), el edificio, los acopios y el
+ * (la calle del portón, el camino posterior y la bomba), el edificio, los acopios y el
  * talud del frente con la faena, en el espacio libre entre las columnas del tablero. Devuelve el
  * objetivo y el zoom de la cámara.
  */
 function topFit() {
-  const x0 = SITE.street.x - SITE.street.width / 2 - 2, x1 = SITE.terreno.subida.x + SITE.terreno.subida.r + 4;
+  const x0 = SITE.street.x - SITE.street.width / 2 - 2, x1 = SITE.terreno.finCamino + 10;
   // (desde el estacionamiento, detrás del camino, hasta la faena arriba del talud del frente)
   const z0 = SITE.road.z - 10, z1 = SITE.faena.z + SITE.faena.d / 2 + 2;
   const c = stage.renderer.domElement.getBoundingClientRect();

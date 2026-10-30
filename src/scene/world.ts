@@ -46,8 +46,8 @@ const TRUCK_POOL = 3;
 const toP3 = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
 
 /**
- * Apoya un camión en el terreno (la calle del portón, el camino de abajo, la subida y la rampa de
- * salida tienen pendiente): a la cota media de sus ejes y con el cabeceo de la pendiente a lo
+ * Apoya un camión en el terreno (la calle del portón, el camino de abajo y la rampa de los
+ * camiones tolva tienen pendiente): a la cota media de sus ejes y con el cabeceo de la pendiente a lo
  * largo del rumbo (half = medio largo entre ejes).
  */
 function onGround(g: THREE.Object3D, x: number, z: number, heading: number, half = 2.4) {

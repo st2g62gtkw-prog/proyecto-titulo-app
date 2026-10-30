@@ -1,8 +1,8 @@
 /**
  * Cotas del movimiento de tierra de la faena (sin el ruido decorativo del terreno dibujado):
  * plataforma plana del edificio, camino posterior más abajo con el ensanche de la bomba, talud del
- * frente con la explanada de faena arriba, la bajada de la faena al camino, la subida del camino a
- * la plataforma, la rampa de salida de los camiones tolva y la calle del portón. Lo usan el terreno
+ * frente con la explanada de faena arriba, la bajada de la faena al camino, la rampa entre el camino
+ * y la plataforma (la de los camiones tolva) y la calle del portón. Lo usan el terreno
  * dibujado (scene/site) y todo lo que se apoya en el suelo: camiones, cuadrillas, capacho, bomba y
  * tubería.
  *
@@ -10,7 +10,7 @@
  * s (alto por metro): en orden, cada una corta o rellena lo anterior hasta empalmar.
  */
 import { SITE } from '../config';
-import { RZ, salidaPath, subidaPath, type P } from './roads';
+import { RZ, salidaPath, type P } from './roads';
 
 const TR = SITE.terreno;
 /** Cotas: plataforma del edificio, camino posterior y explanada de faena. */
@@ -99,13 +99,7 @@ function rampAlong(path: P[], ys: number[]) {
 /** Largo acumulado de un eje. */
 const lengths = (path: P[]) => path.map((_, i) => path.slice(1, i + 1).reduce((s, p, k) => s + Math.hypot(p[0] - path[k][0], p[1] - path[k][1]), 0));
 
-/** Subida: del camino a la plataforma a lo largo de la vuelta (solo la curva, los tramos rectos van a su cota). */
-const SUB = (() => {
-  const path = subidaPath(), s = lengths(path), L = s[s.length - 1];
-  const [s0, s1] = [6, L - 6];
-  return { at: rampAlong(path, s.map((v) => Y_CAMINO + (Y_PLAT - Y_CAMINO) * ramp((v - s0) / (s1 - s0), 0.25))), half: TR.subida.ancho / 2 };
-})();
-/** Rampa de salida: de la plataforma (extremo −x de la huella) al camino. */
+/** Rampa entre el camino, junto al portón, y la plataforma (extremo −x de la huella de carguío). */
 const SAL = (() => {
   const path = salidaPath(), s = lengths(path), L = s[s.length - 1];
   const [s0, s1] = [1.5, L - 2.5];
@@ -135,10 +129,10 @@ function graded(x: number, z: number) {
     const d = Math.min(rectD(x, z, -120, -12, TR.fondoBajo[0], zt), rectD(x, z, -12, 90, TR.fondoBajo[1], Math.min(zt, TR.ensancheZ - TR.corte)));
     h = grade(h, d, Y_CAMINO, S_PLAT);
   }
-  // subida y rampa de salida
-  for (const R of [SUB, SAL]) {
-    const [dist, y] = R.at(x, z);
-    h = grade(h, dist - R.half, y, S_PLAT);
+  // rampa entre el camino y la plataforma
+  {
+    const [dist, y] = SAL.at(x, z);
+    h = grade(h, dist - SAL.half, y, S_PLAT);
   }
   return h;
 }

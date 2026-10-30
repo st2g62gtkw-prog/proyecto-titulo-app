@@ -65,7 +65,7 @@ export const SITE = {
    * norponiente, abajo, al inicio del camino (en el cierro −x que da a la calle, junto al costado
    * posterior; arriba a la izquierda en la vista principal). El camino posterior es uno solo (eje
    * z = road.z, ancho road.width) y va a la cota del camino (terreno.camino), más abajo que la
-   * plataforma del edificio: pasa por la bomba y en el extremo +x sube a la plataforma (la subida).
+   * plataforma del edificio: pasa por la bomba y termina antes del extremo +x (terreno.finCamino).
    * El mixer llega por la calle, pasa el portón, retrocede por el portón y por el camino hasta el
    * punto de descarga (capacho o tolva) y sale hacia adelante por el mismo camino y el mismo portón.
    */
@@ -98,16 +98,16 @@ export const SITE = {
    *  - plataforma plana del edificio a groundY (lo encerrado en azul en el bosquejo), del borde
    *    posterior (bordePosterior, que en el tramo −x se corre hacia atrás para la huella de los
    *    camiones tolva) al pie del talud del frente y de plataformaX[0] al cierro +x (desde ensancheZ
-   *    hacia el frente; más atrás queda la subida);
+   *    hacia el frente);
    *  - camino posterior, bolsón, ensanche de la bomba y estacionamiento más abajo, a la cota del
    *    camino, con un corte de ~2 m (corte, horizontal) desde el borde posterior de la plataforma;
    *  - talud del frente bastante inclinado, de pieTalud a coronaTalud, hasta la explanada de la
    *    faena, unos 5 m más arriba (hasta frenteZ; más allá baja al barrio);
    *  - la bajada: de la explanada de faena al camino por el costado del portón (eje x, de zArriba a
    *    zAbajo), con el resto del costado −x en ladera a la misma cota;
-   *  - la subida: del camino a la plataforma en el extremo +x, en una curva de radio r que da la
-   *    vuelta (centro en x, a r del eje del camino) y llega a la plataforma mirando hacia −x;
-   *  - la salida de los camiones tolva: rampa del extremo −x de la huella de carguío al camino.
+   *  - el camino termina en finCamino, antes del extremo +x (por ahí no suben camiones);
+   *  - la rampa de los camiones tolva: del camino, junto al portón (x1), sube con una S al extremo −x
+   *    de la huella de carguío (x0); por ella entran y salen.
    */
   terreno: {
     camino: -2.2,
@@ -120,7 +120,7 @@ export const SITE = {
     coronaTalud: 28,
     frenteZ: 46,
     bajada: { x: -43.5, ancho: 5, zArriba: 34, zAbajo: -16 },
-    subida: { x: 44, r: 7, ancho: 6 },
+    finCamino: 44,
     salida: { x0: -32, x1: -52, ancho: 6 },
     /** Fondo del sector bajo junto al portón (estacionamiento y cancha de lavado) y del resto. */
     fondoBajo: [-33.5, -25] as [number, number],
@@ -129,14 +129,15 @@ export const SITE = {
   },
 
   /**
-   * Excavación de las fundaciones (días 1 a 13). La excavadora llega en cama baja y queda en el
-   * testero −x (park0); al terminar el sector 3 se estaciona en el testero +x (park1) y se retira.
-   * Los camiones tolva entran de frente por el portón, recorren el camino posterior, suben por la
-   * subida y avanzan por una huella de carguío pegada a la fachada posterior (laneZ; la caseta de la
+   * Excavación de las fundaciones (días 1 a 13), desde el testero +x (sector 3) hacia la rampa
+   * (sector 1), así los camiones nunca pasan por donde ya se excavó. La excavadora llega en cama baja
+   * y queda en el testero −x (park0), adonde vuelve al terminar el sector 1 antes de retirarse.
+   * Los camiones tolva entran en retroceso por el portón, suben la rampa (terreno.salida) y siguen
+   * en retroceso por una huella de carguío pegada a la fachada posterior (laneZ; la caseta de la
    * bomba se arma recién cuando sale el último camión) hasta el puesto de carga; para las zanjas del
    * frente entran a la plataforma por la franja de los peines posteriores (aún sin excavar) hasta
-   * innerZ, detrás de la excavadora, en retroceso desde entryX. Cargados, siguen de frente por la
-   * huella hasta la rampa de salida (terreno.salida), bajan al camino y salen por el portón.
+   * innerZ, detrás de la excavadora. Cargados, salen de frente por la huella, bajan la misma rampa y
+   * salen por el portón; el siguiente espera en la calle, pasado el portón.
    */
   excavacion: {
     park0: { x: -29.5, z: -4.5 },
@@ -180,9 +181,9 @@ export const PACE = {
  * hormigonado llevan más tiempo para que se alcance a ver la excavadora, los camiones y la bomba.
  */
 export const FUND_PACE = {
-  /** Trazado y escarpe (días 1 a 3); alcanza para que el primer camión tolva llegue por el camino y la subida. */
+  /** Trazado y escarpe (días 1 a 3). */
   trazado: 4.6,
-  /** Excavación del sector 1 (días 4 a 6: zona profunda A-B y cambio de camión tolva). */
+  /** Excavación del sector 1 (el último, días 10 a 12: zona profunda A-B y cambio de camión tolva). */
   excavacionS1: 4.2,
   excavacion: 3.0,
   /**

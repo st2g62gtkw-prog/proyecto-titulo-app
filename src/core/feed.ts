@@ -61,9 +61,9 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
     const tot = vol(F.cells);
     let acc = 0;
     for (const v of F.trucks) {
-      ev.push({ t: v.gateIn + 0.2, text: `Camión tolva N° ${v.id} entra por el portón, recorre el camino y sube por la subida a la plataforma${v.waitFrom !== null ? '; espera en la huella detrás del que se carga' : ''}`, kind: 'mixer' });
+      ev.push({ t: v.gateIn + 0.2, text: `Camión tolva N° ${v.id} ${v.waitFrom !== null ? 'esperó en la calle a que saliera el anterior y ' : ''}entra en retroceso por el portón y sube por la rampa a la huella de carguío`, kind: 'mixer' });
       acc += vol(v.cells);
-      ev.push({ t: v.leave[0] + 0.1, text: `Camión tolva N° ${v.id} baja por la rampa de salida y sale a botadero · ${fmt(Math.round((acc / tot) * 627))} de 627 m³ excavados`, kind: 'mixer' });
+      ev.push({ t: v.leave[0] + 0.1, text: `Camión tolva N° ${v.id} baja por la rampa y sale a botadero · ${fmt(Math.round((acc / tot) * 627))} de 627 m³ excavados`, kind: 'mixer' });
     }
     for (const S of F.sectors) {
       const n = S.n;

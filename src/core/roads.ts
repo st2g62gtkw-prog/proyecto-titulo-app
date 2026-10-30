@@ -1,8 +1,8 @@
 /**
  * Caminos de la faena para los camiones (mixers y camiones tolva): la calle del portón, el giro en
- * retroceso (o de frente) por el portón norponiente, el camino posterior (uno solo, a la cota del
- * camino), el ensanche de la bomba, el bolsón de espera, la subida a la plataforma y la rampa de
- * salida de la huella de carguío. Solo geometría en planta (rutas Route); los horarios los arma
+ * retroceso por el portón norponiente, el camino posterior (uno solo, a la cota del camino, que
+ * termina antes del extremo +x), el ensanche de la bomba, el bolsón de espera y la rampa entre el
+ * camino, junto al portón, y la huella de carguío. Solo geometría en planta (rutas Route); los horarios los arma
  * cada logística.
  */
 import { SITE } from '../config';
@@ -84,7 +84,7 @@ export const exitFrom = (xStop: number, zStop = RZ) => new Route().add([
 ]);
 
 // ---------------------------------------------------------------------------------------
-// Camiones tolva (excavación): entran de frente, suben por la subida y salen por la rampa de salida
+// Camiones tolva (excavación): entran en retroceso por el portón y la rampa, salen de frente por ella
 // ---------------------------------------------------------------------------------------
 
 /** Cuánto se corre hacia atrás la huella de carguío en el tramo −x (zona profunda A-B). */
@@ -98,35 +98,19 @@ export function laneZ(x: number) {
   return SITE.excavacion.laneZ - LANE_DIP * (1 - smooth01((x + 15.9) / 8));
 }
 
-/** Curva de la subida: centro y radio (da la vuelta desde el camino y llega a la plataforma hacia −x). */
-export const SUBIDA = { c: [TR.subida.x, RZ + TR.subida.r] as P, r: TR.subida.r };
-/** Punto de la plataforma donde termina la subida (mirando hacia −x). */
-export const SUBIDA_TOP: P = [TR.subida.x, RZ + 2 * TR.subida.r];
-/** Eje de la subida: del camino (x − 6) a la vuelta y a la plataforma (x − 6). */
-export function subidaPath(): P[] {
-  const [cx, cz] = SUBIDA.c;
-  return [
-    ...line([cx - 6, RZ], [cx, RZ], 2),
-    ...arc(SUBIDA.c, SUBIDA.r, -Math.PI / 2, Math.PI / 2).slice(1),
-    ...line(SUBIDA_TOP, [cx - 6, cz + SUBIDA.r], 2).slice(1),
-  ];
-}
-/** Eje de la rampa de salida: del extremo −x de la huella baja con una S al camino. */
+/** Eje de la rampa (sube y baja de la plataforma): del extremo −x de la huella baja con una S al camino. */
 export function salidaPath(): P[] {
   const S = TR.salida;
   return shift([S.x0, laneZ(S.x0)], [S.x1, RZ], 1);
 }
-/** Llegada de frente por la calle hasta antes del portón (ahí se detiene a que le abran). */
-export const streetToGate = (): P[] => line([LANE_IN, FAR], [LANE_IN, RZ + R_IN], 6);
-/** De frente: dobla al portón, sigue por el camino y sube por la subida; queda en la plataforma mirando hacia −x. */
-export const gateToSubida = (): P[] => {
-  const [cx] = SUBIDA.c;
-  return [
-    ...arc([LANE_IN + R_IN, RZ + R_IN], R_IN, Math.PI, 1.5 * Math.PI),
-    ...line([LANE_IN + R_IN, RZ], [cx, RZ]).slice(1),
-    ...arc(SUBIDA.c, SUBIDA.r, -Math.PI / 2, Math.PI / 2).slice(1),
-  ];
-};
+/**
+ * Entrada en retroceso: desde la calle (pasado el portón, en WAIT) gira por el portón, sube la rampa
+ * hasta la huella y queda en su extremo −x (x = salida.x0), con la cabina hacia la rampa.
+ */
+export const backUpRamp = (): P[] => [
+  ...arc([LANE_IN + R_IN, RZ - R_IN], R_IN, Math.PI, Math.PI / 2),
+  ...salidaPath().reverse(),
+];
 /** Rampa de salida y camino hasta el portón, la calle y el barrio. */
 export const salidaToStreet = (): P[] => [
   ...salidaPath(),

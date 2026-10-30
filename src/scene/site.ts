@@ -2,7 +2,7 @@
  * Faena de obra alrededor del Edificio E (Condominio Espacio Las Tablas, Curauma), según las fotos
  * de la visita y el bosquejo de la distribución real: plataforma plana del edificio, camino de
  * mixers más abajo por el costado posterior (uno solo, desde el portón norponiente, pasando por la
- * caseta de la bomba y el punto del capacho, hasta la subida a la plataforma), talud del frente
+ * caseta de la bomba y el punto del capacho, hasta antes del extremo +x), talud del frente
  * con la instalación de faena arriba y la bajada al camino, cierros, acopios al alcance de la
  * grúa, taller de fierro y el barrio. Las cotas del movimiento de tierra vienen de core/terrain.
  *
@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SITE } from '../config';
-import { SUBIDA, SUBIDA_TOP, salidaPath } from '../core/roads';
+import { salidaPath } from '../core/roads';
 import { FENCE, Y_CAMINO, Y_FAENA, groundAt, piePosterior } from '../core/terrain';
 import { BUILDING_FACTS, PROJECT } from '../data/project';
 import { formPanelTexture, plywoodTexture } from './textures';
@@ -48,7 +48,7 @@ const TR = SITE.terreno;
 const GATE = { z0: SITE.gate.z - 4.3, z1: SITE.gate.z + 4.3 };
 /** Calle exterior del portón (eje x = cte). */
 const ST_W = SITE.street.x;
-/** Camino posterior (uno solo, del portón a la subida): eje z = cte. */
+/** Camino posterior (uno solo, del portón hasta antes del extremo +x): eje z = cte. */
 const RZ = SITE.road.z;
 /** Estacionamiento de autos de los trabajadores, junto al portón (detrás del bolsón de espera, en el sector bajo). */
 const PARK = { x: SITE.gate.x + 21, z: RZ - 9.6 };
@@ -219,7 +219,7 @@ function terrainColor(x: number, z: number, h: number, ny: number, out: THREE.Co
 
 function buildTerrain(mat: THREE.Material) {
   // más fino en la faena y en los cortes: costado de la bajada, rampas, corte posterior y talud del frente
-  const xs = axis(-130, 170, 3, 900, [[FENCE.x0 - 8, FENCE.x1 + 6, 1.5], [-48, -34, 0.5], [TR.salida.x1 - 2, TR.salida.x0 + 2, 0.75], [SUBIDA.c[0] - 2, SUBIDA.c[0] + SUBIDA.r + 6, 0.5], [-62, -55, 0.5]]);
+  const xs = axis(-130, 170, 3, 900, [[FENCE.x0 - 8, FENCE.x1 + 6, 1.5], [-48, -34, 0.5], [TR.salida.x1 - 2, TR.salida.x0 + 2, 0.75], [-62, -55, 0.5]]);
   const zs = axis(-120, 150, 3, 900, [[FENCE.z0 - 4, FENCE.z1 + 8, 1.5], [-15, -11.2, 0.25], [TR.pieTalud - 0.5, TR.coronaTalud + 0.5, 0.4], [RZ - 4, TR.ensancheZ + 1, 0.75]]);
   const nx = xs.length, nz = zs.length;
   const pos = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2), col = new Float32Array(nx * nz * 3);
@@ -1622,7 +1622,7 @@ function buildMisc(k: Kit, M: Mats) {
     box(p, cx, G + 0.15, cz, 0.95, 0.95, 1.12, '#dcd9d2');
     box(p, cx, G + 1.1, cz, 0.85, 0.02, 1.0, '#c8c4bb');
   }
-  // acopio de áridos y excedentes de excavación (en el ensanche +x y junto a la subida, abajo)
+  // acopio de áridos y excedentes de excavación (en el ensanche +x y al final del camino, abajo)
   const mounds: [number, number, number, number, number, string][] = [
     [57, 5, 9, 2.6, 7, '#cfae82'], [63, 13, 7, 2.0, 6, '#9e968a'], [64, -9, 8, 2.2, 6, '#c99266'],
   ];
@@ -1841,19 +1841,11 @@ export function createSite(): SiteRig {
   for (const A of [SITE.acopioMoldajeMuro, SITE.acopioMoldajeLosa, SITE.acopioFierro, SITE.tallerFierro, SITE.acopioPuntales]) padAt(A.x, A.z, A.w + 1.5, A.d + 1.5, 0.75);
   // camino posterior (uno solo): boca ancha en el portón, para el giro desde la calle (parte en el
   // borde de la calzada: no se pinta ripio sobre el asfalto), y de ahí derecho por detrás del
-  // edificio, abajo, pasando por la bomba hasta la subida, que da la vuelta y sube a la plataforma
+  // edificio, abajo, pasando por la bomba; termina antes del extremo +x
   const W = SITE.road.width, endX = SITE.pump.x + 2;
   ribbon(roads, [[ST_W + 4.3, RZ], [SITE.gate.x + 5, RZ]], { width: 9, texLen: 12, uRep: 2, fade: 0.6, step: 2, lift: 0.036 });
-  {
-    const [cx, cz] = SUBIDA.c, r = SUBIDA.r;
-    const arcPts: V2[] = [];
-    for (let i = 1; i <= 18; i++) {
-      const a = -Math.PI / 2 + (Math.PI * i) / 18;
-      arcPts.push([cx + r * Math.cos(a), cz + r * Math.sin(a)]);
-    }
-    ribbon(roads, [[SITE.gate.x + 2, RZ], [cx, RZ], ...arcPts, [SUBIDA_TOP[0] - 7, SUBIDA_TOP[1]]], { width: TR.subida.ancho - 0.5, texLen: 12, fade: 0.6, step: 1.5, lift: 0.035 });
-  }
-  // rampa de salida de los camiones tolva (excavación): del extremo −x de la huella al camino
+  ribbon(roads, [[SITE.gate.x + 2, RZ], [TR.finCamino, RZ]], { width: W + 0.5, texLen: 12, fade: 0.6, step: 1.5, lift: 0.035 });
+  // rampa de los camiones tolva (excavación): del camino, junto al portón, al extremo −x de la huella
   ribbon(roads, salidaPath(), { width: TR.salida.ancho - 0.8, texLen: 12, fade: 0.7, step: 1.5, lift: 0.034 });
   // bajada de la explanada de faena al camino, por el costado del portón
   {
