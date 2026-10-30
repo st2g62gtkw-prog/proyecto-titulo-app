@@ -58,19 +58,27 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
   const yIn = levels[0].slab.y1 + R + 0.02;
   const d = new THREE.Vector2(dir.x, dir.z).normalize();
   const drop = { x: outlet.x + d.x * 0.5, z: outlet.z + d.y * 0.5 };
-  /** Tramo por el terreno, de la bomba hasta frente a la puerta posterior (detrás de las zanjas, z = −8,7). */
-  const zRun = -8.7;
+  /**
+   * Tramo por el terreno: de la bomba sale junto a la caseta hasta el pie del corte y de ahí va derecho
+   * (en diagonal, subiendo el corte) hasta frente a la puerta posterior, hacia el ascensor. fundTap es
+   * donde ese tramo pasa detrás de las zanjas (z = −8,7).
+   */
   const onSoil = (x: number, z: number): [number, number, number] => [x, groundAt(x, z) + 0.1, z];
-  const soil: [number, number, number][] = [
+  const toe = piePosterior(drop.x) - 0.1, door: [number, number] = [P.xDoor, P.zDoor - 0.9];
+  const onLine = (z: number): [number, number, number] => {
+    const k = (z - toe) / (door[1] - toe);
+    return onSoil(drop.x + (door[0] - drop.x) * k, z);
+  };
+  const crest = bordePosterior(onLine(-12)[0]) + 0.1;
+  const soil = ([
     onSoil(drop.x, drop.z),
-    onSoil(drop.x, piePosterior(drop.x) - 0.1),
-    [drop.x, yG, bordePosterior(drop.x) + 0.1],
-    [drop.x, yG, zRun],
-    [P.xDoor, yG, zRun],
-  ];
+    onSoil(drop.x, toe),
+    [onLine(crest)[0], yG, crest],
+    [onLine(-8.7)[0], yG, -8.7],
+  ] as [number, number, number][]).filter((p, i, a) => i === 0 || Math.hypot(p[0] - a[i - 1][0], p[2] - a[i - 1][2]) > 0.05);
   const route = ([
     ...soil,
-    [P.xDoor, yG, P.zDoor - 0.9],
+    [door[0], yG, door[1]],
     [P.xDoor, yIn, P.zDoor - 0.3],
     [P.xDoor, yIn, P.zHall],
     [P.xLobby, yIn, P.zHall],

@@ -13,9 +13,8 @@ import * as THREE from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SITE } from '../config';
 import { SUBIDA, SUBIDA_TOP, salidaPath } from '../core/roads';
-import { FENCE, Y_CAMINO, Y_FAENA, bordePosterior, groundAt, piePosterior } from '../core/terrain';
+import { FENCE, Y_CAMINO, Y_FAENA, groundAt, piePosterior } from '../core/terrain';
 import { BUILDING_FACTS, PROJECT } from '../data/project';
-import { pumpOutletXZ } from './equipment/stationaryPump';
 import { formPanelTexture, plywoodTexture } from './textures';
 
 type AnchorKey = 'acopioMoldajeMuro' | 'acopioMoldajeLosa' | 'acopioFierro' | 'acopioPuntales';
@@ -680,6 +679,7 @@ function cutTexture() {
 }
 
 /** Ripio compactado; con huellas de neumáticos si `tracks`. u = través del camino, v = largo. */
+/** Tierra compactada de los caminos y explanadas (con huellas de neumáticos en los caminos). */
 function gravelTexture(tracks: boolean) {
   const W = tracks ? 128 : 256, H = tracks ? 512 : 256;
   const N = noiseField(W, H, 4, tracks ? 16 : 4, 3, 11);
@@ -698,7 +698,8 @@ function gravelTexture(tracks: boolean) {
           val = lerp(val, (0.44 + 0.05 * n) * tread, t * 0.7);
         }
       }
-      o[0] = val; o[1] = val * 0.93; o[2] = val * 0.82;
+      // tierra café rojiza (maicillo), como el suelo de la obra en las fotos
+      o[0] = val * 1.5; o[1] = val * 1.17; o[2] = val * 0.82;
     });
   });
 }
@@ -1059,17 +1060,7 @@ function buildFences(k: Kit, M: Mats) {
   clothFence(k, M, [x0, z1], [x1, z1]);
   // coronamiento del talud del frente, al borde de la explanada de faena
   crestFence(k, M, [-38.5, TR.coronaTalud + 0.5], [x1 - 0.3, TR.coronaTalud + 0.5]);
-  // borde del corte posterior (sobre el camino y la bomba): entre la rampa de salida y la subida,
-  // con un paso donde sube la tubería de la bomba (0,5 m más allá de su salida, ver pipeline.ts)
-  const out = pumpOutletXZ(SITE.pump.x, SITE.pump.z, SITE.pump.heading);
-  const xp = out.x + out.dx * 0.5;
-  for (const [a, b] of [[-25, xp - 0.7], [xp + 0.7, SUBIDA.c[0] - 3.5]]) {
-    const n = Math.max(1, Math.round((b - a) / 10));
-    for (let i = 0; i < n; i++) {
-      const xa = a + ((b - a) * i) / n, xb = a + ((b - a) * (i + 1)) / n;
-      crestFence(k, M, [xa, bordePosterior(xa) + 0.15], [xb, bordePosterior(xb) + 0.15]);
-    }
-  }
+  // (el borde del corte posterior, sobre el camino y la bomba, no tiene baranda en la obra)
 }
 
 /** Portón de dos hojas (abiertas hacia adentro) con balizas sobre los pilares. */
