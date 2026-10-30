@@ -53,7 +53,33 @@ const RZ = SITE.road.z;
 /** Estacionamiento de autos de los trabajadores, junto al portón (detrás del bolsón de espera, en el sector bajo). */
 const PARK = { x: SITE.gate.x + 21, z: RZ - 9.6 };
 /** Barrio: calles a lo largo de x (z = cte) y de z (x = cte), y su extensión plana. */
-const TOWN = { xSt: [62, 100, 144, 188], zSt: [-118, ST_W, 82, 160], x0: -170, x1: 230, z1: 205 };
+/**
+ * Entorno según la vista satelital (Av. Las Tablas 230, Curauma): detrás de la obra corre el estero
+ * Las Tablas con árboles y, más allá, la avenida; del lado del portón, el pasaje de acceso y el barrio
+ * de casas; al frente, los edificios ya construidos del condominio; hacia +x, bosque.
+ * Calles: eje (planta), ancho y radio de las curvas.
+ */
+const STREETS: { pts: V2[]; w: number; r?: number }[] = [
+  // pasaje del portón, que dobla hacia el barrio al llegar a la altura del frente de la obra
+  { pts: [[ST_W, -50], [ST_W, 26], [-200, 26]], w: 8, r: 10 },
+  // Av. Las Tablas, detrás del estero
+  { pts: [[200, -50], [ST_W, -50], [-200, -66]], w: 12 },
+  // calles del barrio
+  { pts: [[-110, 26], [-110, 150]], w: 8 },
+  { pts: [[-84, 26], [-84, 2], [-100, -14], [-128, -14], [-142, 2], [-142, 26]], w: 7, r: 9 },
+  { pts: [[-160, 26], [-160, 150]], w: 8 },
+  { pts: [[-110, 80], [-200, 80]], w: 7 },
+  { pts: [[-150, -57], [-150, -170]], w: 8 },
+  { pts: [[-30, -50], [-30, -170]], w: 8 },
+  { pts: [[70, -50], [70, -170]], w: 8 },
+  { pts: [[200, -110], [-200, -116]], w: 8 },
+];
+/** Eje del cauce del estero Las Tablas, detrás del cierro posterior. */
+const ESTERO_Z = -41.5;
+/** Edificios ya construidos del condominio, al frente (centro, ancho en x, fondo en z, pisos). */
+const CONDO: [number, number, number, number, number][] = [[19, 86, 38, 16, 6], [-20, 80, 34, 20, 6], [-60, 84, 34, 17, 6]];
+/** Hasta donde llega el entorno con detalle (más allá, lomas y bosques lejanos). */
+const TOWN = { x0: -210, x1: 220, z1: 170 };
 
 // ---------------------------------------------------------------------------------------
 // Ruido y utilidades
@@ -162,9 +188,8 @@ function heightAt(x: number, z: number) {
   // cárcavas suaves en las caras de los cortes y taludes (no en las explanadas ni en las rampas)
   const steep = smooth(0.6, 1.0, slopeAt(x, z));
   if (steep > 0) h += (vnoise(x * 0.35, z * 0.6, 9) - 0.5) * 0.4 * steep;
-  // detrás del cierro posterior: cerro con bosque
-  const behind = FENCE.z0 - 2 - z;
-  if (behind > 0) h += behind * 0.06 * smooth(0, 50, behind) + (fbm(x * 0.03, z * 0.03, 3, 5) - 0.5) * 2.5 * smooth(0, 25, behind);
+  // detrás del cierro posterior: el cauce del estero Las Tablas (con árboles), antes de la avenida
+  if (x > FENCE.x0 - 4) h -= 1.3 * (1 - smooth(0, 4.5, Math.abs(z - ESTERO_Z)));
   const far = Math.max(TOWN.x0 - 5 - x, x - TOWN.x1 - 5, z - TOWN.z1 - 5, 0);
   if (far > 0) h += smooth(0, 90, far) * fbm(x * 0.01, z * 0.01, 3, 11) * 16;
   const r = Math.hypot(x - 10, z - 10);
@@ -947,6 +972,7 @@ function createMaterials() {
     road: std({ map: gravelTexture(true), vertexColors: true, roughness: 1, ...decal }),
     pad: std({ map: gravelTexture(false), vertexColors: true, roughness: 1, ...decal }),
     asphalt: std({ map: asphaltTexture(), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
+    walk: std({ color: '#cfcbc2', roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
     paint: std({ vertexColors: true, roughness: 0.55, metalness: 0.05 }),
     rough: std({ vertexColors: true, roughness: 0.9 }),
     metal: std({ vertexColors: true, roughness: 0.45, metalness: 0.35 }),
@@ -1573,7 +1599,7 @@ function buildMisc(k: Kit, M: Mats) {
   const W = SITE.road.width;
   const coils: [number, number, string, number][] = [
     [SITE.pump.x + 5.3, SITE.pump.z + 0.4, COL.orange, 3], [SITE.pump.x + 6.8, SITE.pump.z + 0.9, COL.blue, 2], [SITE.pump.x + 6.4, SITE.pump.z - 0.6, COL.orange, 1],
-    [-3, RZ - W / 2 - 1.1, COL.orange, 2], [-1.4, RZ - W / 2 - 1.4, COL.blue, 3], [44, 9.2, COL.orange, 2],
+    [-3, RZ - W / 2 - 1.1, COL.orange, 2], [-1.4, RZ - W / 2 - 1.4, COL.blue, 3], [42.5, 8.6, COL.orange, 2],
   ];
   for (const [cx, cz, c, n] of coils) for (let i = 0; i < n; i++) coil(p, cx + (r() - 0.5) * 0.15, groundAt(cx, cz) + i * 0.24, cz + (r() - 0.5) * 0.15, 0.62 - i * 0.02, c);
   // conos de seguridad
@@ -1592,7 +1618,7 @@ function buildMisc(k: Kit, M: Mats) {
   palletStack(k.b(M.rough), 41.6, 7.2, 0.1, 2, r);
   // batea de escombros
   {
-    const bx = 46, bz = 16.2, L = 4.2, W = 2.0, H = 1.3, b = k.b(M.paint), c = '#e08a1e';
+    const bx = 41.5, bz = 21.2, L = 4.2, W = 2.0, H = 1.3, b = k.b(M.paint), c = '#e08a1e';
     box(b, bx, G, bz, L, 0.08, W, c);
     for (const s of [-1, 1]) {
       box(b, bx, G, bz + s * (W / 2 - 0.04), L, H, 0.08, c);
@@ -1602,7 +1628,7 @@ function buildMisc(k: Kit, M: Mats) {
   }
   // bodega en contenedor marítimo (en la explanada de faena)
   {
-    const cx = 62.5, cz = 36.5, cy = groundAt(cx, cz);
+    const cx = 28, cz = 40.5, cy = groundAt(cx, cz);
     part(k.b(M.sheet), GEO.box, cx, cy + 1.3, cz, 6.06, 2.59, 2.44, '#3f6b88', { uv: [1.1, 2.6] });
     box(p, cx - 3.04, cy + 0.06, cz, 0.04, 2.47, 2.32, '#355a73');
     for (const s of [-0.55, -0.15, 0.15, 0.55]) box(k.b(M.metal), cx - 3.08, cy + 0.2, cz + s, 0.05, 2.2, 0.05, '#9aa4ad');
@@ -1617,14 +1643,14 @@ function buildMisc(k: Kit, M: Mats) {
   }
   // sacos de cemento sobre pallets (envueltos en film)
   for (let i = 0; i < 3; i++) {
-    const cx = 44.6 + i * 1.35, cz = 1.5;
-    palletStack(k.b(M.rough), cx, cz, Math.PI / 2, 1, r);
+    const cx = 43.6, cz = -3.2 + i * 1.35;
+    palletStack(k.b(M.rough), cx, cz, 0, 1, r);
     box(p, cx, G + 0.15, cz, 0.95, 0.95, 1.12, '#dcd9d2');
     box(p, cx, G + 1.1, cz, 0.85, 0.02, 1.0, '#c8c4bb');
   }
   // acopio de áridos y excedentes de excavación (en el ensanche +x y al final del camino, abajo)
   const mounds: [number, number, number, number, number, string][] = [
-    [57, 5, 9, 2.6, 7, '#cfae82'], [63, 13, 7, 2.0, 6, '#9e968a'], [64, -9, 8, 2.2, 6, '#c99266'],
+    [42, -7.5, 6, 2.0, 5, '#cfae82'], [42.5, 14.5, 5, 1.7, 4, '#9e968a'],
   ];
   mounds.forEach(([mx, mz, sx, sy, sz, c], i) => part(k.b(M.ground), heapGeometry(i + 3), mx, groundAt(mx, mz) - 0.05, mz, sx, sy, sz, c, { ry: i, uv: 10 }));
   // postes de iluminación en las esquinas
@@ -1647,44 +1673,43 @@ function buildMisc(k: Kit, M: Mats) {
   // camioneta de la faena, arriba en la explanada
   car(k, M, SITE.faena.x - SITE.faena.w / 2 - 3.5, SITE.faena.z - 2, Math.PI / 2 + 0.1, '#f2f3f4', true);
   // autos en la calle, fuera del recorrido de los mixers (que llegan y salen por el tramo del portón)
-  car(k, M, ST_W + 2.9, 72, -Math.PI / 2, '#8d969e');
-  car(k, M, ST_W + 2.9, 90, Math.PI / 2, '#c9ccd0');
-  car(k, M, ST_W - 2.9, 64, -Math.PI / 2, '#3b4c63');
+  car(k, M, 20, -52.6, 0, '#8d969e');
+  car(k, M, -24, -47.4, Math.PI, '#c9ccd0');
+  car(k, M, -95, 28.8, Math.PI, '#3b4c63');
 }
 
 // ---------------------------------------------------------------------------------------
 // Entorno: calles, veredas, casas y árboles
 // ---------------------------------------------------------------------------------------
 
-/** Calles asfaltadas y veredas (cortadas en los cruces y en el acceso a la obra). */
-function buildStreets(asphalt: Batch, k: Kit, M: Mats) {
-  const o = { width: 8, texLen: 16, step: 3 };
-  TOWN.zSt.forEach((x, i) => ribbon(asphalt, [[x, -170], [x, TOWN.z1 + 25]], { ...o, lift: 0.04 + i * 0.003 }));
-  TOWN.xSt.forEach((z, i) => ribbon(asphalt, [[ST_W + 4, z], [TOWN.x1 + 25, z]], { ...o, lift: 0.055 + i * 0.003 }));
-  const b = k.b(M.rough);
-  const walk = (along: 'x' | 'z', c: number, a: number, e: number, cuts: number[]) => {
-    let s0 = a;
-    for (const cut of [...cuts.filter((v) => v > a && v < e).sort((p, q) => p - q), e + 5]) {
-      const s1 = cut - 5;
-      if (s1 - s0 > 2) {
-        // en tramos de ≤ 6 m, cada uno a la cota del terreno (la calle del portón sube al barrio)
-        const n = Math.ceil((s1 - s0) / 6), L = (s1 - s0) / n;
-        for (let i = 0; i < n; i++) {
-          const m = s0 + (i + 0.5) * L;
-          for (const side of [-1, 1]) {
-            // junto al cierro de la faena no hay vereda (ahí baja el talud del cierro a la calle)
-            if (along === 'z' && c === ST_W && side > 0 && m < FENCE.z1 + 2) continue;
-            const x = along === 'x' ? m : c + side * 5, z = along === 'x' ? c + side * 5 : m;
-            box(b, x, heightAt(x, z) - 0.05, z, along === 'x' ? L + 0.02 : 2, 0.2, along === 'x' ? 2 : L + 0.02, COL.concrete);
-          }
-        }
-      }
-      s0 = cut + 5;
-    }
-  };
-  // la calle del portón tiene vereda desde el cierro posterior, cortada en el acceso de camiones
-  for (const x of TOWN.zSt) walk('z', x, x === ST_W ? FENCE.z0 - 1 : -10, TOWN.z1 + 20, x === ST_W ? [...TOWN.xSt, SITE.gate.z] : TOWN.xSt);
-  for (const z of TOWN.xSt) walk('x', z, ST_W + 6, TOWN.x1 + 20, TOWN.zSt);
+/** Distancia en planta de (x, z) al eje de una calle y punto más cercano. */
+function streetDist(x: number, z: number, pts: V2[]): { d: number; px: number; pz: number } {
+  let best = { d: Infinity, px: x, pz: z };
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+    const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1e-9;
+    const t = clamp(((x - ax) * dx + (z - az) * dz) / L2, 0, 1);
+    const px = ax + dx * t, pz = az + dz * t, d = Math.hypot(x - px, z - pz);
+    if (d < best.d) best = { d, px, pz };
+  }
+  return best;
+}
+/** Calle más cercana a (x, z): distancia a su borde y punto del eje. */
+function nearestStreet(x: number, z: number) {
+  let best = { d: Infinity, px: x, pz: z };
+  for (const s of STREETS) {
+    const q = streetDist(x, z, s.pts);
+    if (q.d - s.w / 2 < best.d) best = { d: q.d - s.w / 2, px: q.px, pz: q.pz };
+  }
+  return best;
+}
+
+/** Calles asfaltadas del entorno (el pasaje del portón, la avenida y las del barrio), con veredas. */
+function buildStreets(asphalt: Batch, walks: Batch) {
+  STREETS.forEach((s, i) => {
+    ribbon(walks, s.pts, { width: s.w + 4, radius: s.r ?? 6, texLen: 6, uRep: 1, step: 2, lift: 0.03 + i * 0.002 });
+    ribbon(asphalt, s.pts, { width: s.w, radius: s.r ?? 6, texLen: 16, step: 2, lift: 0.05 + i * 0.002 });
+  });
 }
 
 const WALLS = ['#f6f2ea', '#efe4cc', '#f3e7d3', '#ebe8e1', '#f1dcc0', '#f8f6f1'];
@@ -1751,65 +1776,88 @@ function roundTree(b: Batch, x: number, z: number, H: number, r: () => number) {
   }
 }
 
+/** Edificio de departamentos ya construido del condominio: pisos con franjas de ventanas y techo plano. */
+function condoBlock(b: Batch, x: number, z: number, w: number, d: number, floors: number) {
+  const y0 = Math.min(heightAt(x - w / 2, z - d / 2), heightAt(x + w / 2, z + d / 2), heightAt(x, z)) - 0.3;
+  const H = floors * 2.6 + 0.4;
+  box(b, x, y0, z, w, H, d, '#eceae4');
+  for (let f = 0; f < floors; f++) {
+    const y = y0 + 0.5 + f * 2.6;
+    box(b, x, y + 0.8, z, w + 0.06, 1.15, d + 0.06, '#56616b');
+    box(b, x, y + 2.45, z, w + 0.2, 0.18, d + 0.2, '#d6d3cb');
+  }
+  box(b, x, y0 + H, z, w + 0.3, 0.5, d + 0.3, '#c9c7c1');
+  box(b, x, y0 + H + 0.02, z, w - 0.6, 0.5, d - 0.6, '#9da3a8');
+  // caja de escala sobre la cubierta
+  box(b, x - w * 0.15, y0 + H + 0.5, z, 5, 2.4, 4, '#e3e1da');
+}
+
 /**
- * Barrio, bosques y lomas. Lo cercano proyecta sombras; lo lejano no (va en otra malla). Devuelve
- * el bosque del cerro detrás de la obra (grupo aparte, para ocultarlo en la vista posterior).
+ * Entorno según la vista satelital: barrio de casas del lado del portón y al otro lado de la avenida,
+ * edificios del condominio al frente, estero con árboles detrás de la obra y bosque hacia +x. Lo
+ * cercano proyecta sombras; lo lejano no (va en otra malla). Devuelve los árboles del estero (grupo
+ * aparte, para ocultarlos en la vista posterior).
  */
 function buildSurroundings(M: Mats, group: THREE.Group) {
   const near = new Kit(), far = new Kit(), ridge = new Kit();
   const r = rng(31);
-  const isNear = (x: number, z: number) => Math.hypot(x - 1, z - 10) < 115;
+  const isNear = (x: number, z: number) => Math.hypot(x - 1, z - 10) < 130;
   const kit = (x: number, z: number) => (isNear(x, z) ? near : far);
-  const onStreet = (x: number, z: number) => TOWN.zSt.some((X) => Math.abs(x - X) < 7) || TOWN.xSt.some((Z) => Math.abs(z - Z) < 7 && x > ST_W);
-  const addHouse = (x: number, z: number, ry: number) => {
-    const k = kit(x, z);
-    house(k.b(M.facade), k.b(M.tile), k.b(M.paint), x, z, ry, r);
-    if (r() > 0.4) {
-      const gx = x + (r() - 0.5) * 6, gz = z + (r() - 0.5) * 6;
-      const f = frame(gx, gz, ry);
-      const [tx, tz] = f(0, 7.5);
-      roundTree(k.b(M.foliage), tx, tz, 4 + r() * 3, r);
-    }
-  };
-  // filas a ambos lados de las calles en x (la primera fila de la calle 62 sería la obra)
-  for (const zc of TOWN.xSt) for (const side of [-1, 1]) {
-    const zr = zc + side * 15;
-    if (zr < FENCE.z1 + 6) continue;
-    for (let x = ST_W + 10 + (side < 0 ? 5.5 : 0); x < TOWN.x1; x += 11.5) {
-      if (TOWN.zSt.some((X) => Math.abs(x - X) < 9)) continue;
-      addHouse(x, zr + (r() - 0.5) * 0.6, side > 0 ? Math.PI : 0);
+  const inSite = (x: number, z: number, m: number) => x > FENCE.x0 - m && x < FENCE.x1 + m && z > FENCE.z0 - m && z < FENCE.z1 + m;
+  const nearCondo = (x: number, z: number, m: number) => CONDO.some(([cx, cz, w, d]) => Math.abs(x - cx) < w / 2 + m && Math.abs(z - cz) < d / 2 + m);
+  // casas: lotes cada 11,5 m en el barrio del portón y al otro lado de la avenida, mirando a la calle más cercana
+  const lot = (x: number, z: number) => (x < -70 && z > -46 && z < 150 && !(z > 30 && x > -86)) || (z < -58 && z > -175 && x > -205 && x < 200);
+  for (let x = -205; x < 200; x += 11.5) {
+    for (let z = -170; z < 150; z += 11.5) {
+      const hx = x + (r() - 0.5) * 1.2, hz = z + (r() - 0.5) * 1.2;
+      if (!lot(hx, hz) || nearCondo(hx, hz, 8)) continue;
+      const s = nearestStreet(hx, hz);
+      if (s.d < 5.5 || s.d > 34) continue;
+      // el antejardín (+z local) mira a la calle
+      const ry = Math.atan2(s.px - hx, s.pz - hz);
+      const k = kit(hx, hz);
+      house(k.b(M.facade), k.b(M.tile), k.b(M.paint), hx, hz, ry, r);
+      if (r() > 0.45) {
+        const [tx, tz] = frame(hx, hz, ry)((r() - 0.5) * 6, -7);
+        if (nearestStreet(tx, tz).d > 2) roundTree(k.b(M.foliage), tx, tz, 4 + r() * 3, r);
+      }
     }
   }
-  // filas junto a las calles en z: hacia −x (todo el largo) y hacia +x (frente a la obra)
-  // (ry = π/2 deja el antejardín hacia +x)
-  for (const [xr, ry, z1] of [[-156, -Math.PI / 2, TOWN.z1], [-133, Math.PI / 2, TOWN.z1], [-103, -Math.PI / 2, TOWN.z1], [-79, Math.PI / 2, TOWN.z1],
-    [97, -Math.PI / 2, 48], [120, Math.PI / 2, 48], [145, Math.PI / 2, 48], [175, -Math.PI / 2, 48], [198, Math.PI / 2, 48]] as const) {
-    for (let z = -4 + (Math.abs(xr) % 2) * 5; z < z1; z += 11.5) addHouse(xr, z, ry);
+  // edificios del condominio ya construidos, al frente, con algunos árboles
+  for (const [cx, cz, w, d, n] of CONDO) condoBlock(near.b(M.paint), cx, cz, w, d, n);
+  for (let i = 0; i < 26; i++) {
+    const x = -90 + r() * 140, z = 58 + r() * 60;
+    if (nearCondo(x, z, 3) || nearestStreet(x, z).d < 3 || inSite(x, z, 4)) continue;
+    roundTree(near.b(M.foliage), x, z, 4 + r() * 4, r);
   }
-  // bosque de eucaliptos y pinos sobre el cerro (costado posterior)
-  for (let i = 0; i < 230; i++) {
-    const x = -150 + r() * 330, z = FENCE.z0 - 4 - Math.pow(r(), 1.6) * 120, H = r();
-    if (onStreet(x, z)) continue;
-    const onRidge = x > -90 && x < 105 && z > FENCE.z0 - 36;
-    const b = (onRidge ? ridge : kit(x, z)).b(M.foliage);
-    if (r() > 0.3) eucalyptus(b, x, z, 15 + H * 12, r, isNear(x, z));
-    else pine(b, x, z, 12 + H * 8, r);
+  // estero Las Tablas: franja de eucaliptos, sauces y aromos detrás del cierro posterior
+  for (let i = 0; i < 170; i++) {
+    const x = FENCE.x0 - 2 + r() * 260, z = ESTERO_Z + (r() - 0.5) * 9, H = r();
+    if (nearestStreet(x, z).d < 2) continue;
+    const b = (x < 110 ? ridge : far).b(M.foliage);
+    if (r() > 0.45) eucalyptus(b, x, z, 13 + H * 12, r, isNear(x, z));
+    else roundTree(b, x, z, 6 + H * 5, r);
+  }
+  // bosque hacia +x (pinos y eucaliptos, con claros de tierra)
+  for (let i = 0; i < 420; i++) {
+    const x = FENCE.x1 + 6 + Math.pow(r(), 1.3) * 190, z = -46 + r() * 210, H = r();
+    if (nearestStreet(x, z).d < 3 || nearCondo(x, z, 4) || fbm(x * 0.02, z * 0.02, 2, 17) < 0.42) continue;
+    const b = kit(x, z).b(M.foliage);
+    if (r() > 0.4) pine(b, x, z, 12 + H * 9, r);
+    else eucalyptus(b, x, z, 15 + H * 10, r, isNear(x, z));
   }
   // lomas lejanas con manchones de bosque (sin sombras)
   for (let i = 0; i < 1800; i++) {
     const x = -460 + r() * 920, z = -460 + r() * 920;
-    const inTown = x > TOWN.x0 - 8 && x < TOWN.x1 + 8 && z > -14 && z < TOWN.z1 + 8;
-    const inNear = x > -150 && x < 180 && z > -150 && z < -14;
-    if (inTown || inNear || onStreet(x, z) || fbm(x * 0.012, z * 0.012, 2, 41) < 0.46) continue;
+    const inTown = x > TOWN.x0 - 8 && x < TOWN.x1 + 8 && z > -180 && z < TOWN.z1 + 8;
+    if (inTown || fbm(x * 0.012, z * 0.012, 2, 41) < 0.46) continue;
     if (r() > 0.35) eucalyptus(far.b(M.foliage), x, z, 16 + r() * 12, r, false);
     else pine(far.b(M.foliage), x, z, 12 + r() * 8, r);
   }
-  // eucaliptos sueltos junto al cierro
-  for (const [tx, tz] of [[-57.3, -6], [-57.3, 5], [74, -6]] as const) eucalyptus(near.b(M.foliage), tx, tz, 16 + r() * 6, r);
   near.into(group);
   far.into(group, false);
   const ridgeGroup = ridge.into(new THREE.Group());
-  ridgeGroup.name = 'bosque-talud';
+  ridgeGroup.name = 'arboles-estero';
   group.add(ridgeGroup);
   return ridgeGroup;
 }
@@ -1869,10 +1917,13 @@ export function createSite(): SiteRig {
   }
 
   const k = new Kit();
-  buildStreets(asphalt, k, M);
-  const street = new THREE.Mesh(asphalt.build()!, M.asphalt);
-  street.receiveShadow = true;
-  group.add(street);
+  const walks = new Batch(false);
+  buildStreets(asphalt, walks);
+  for (const [b, m] of [[walks, M.walk], [asphalt, M.asphalt]] as const) {
+    const mesh = new THREE.Mesh(b.build()!, m);
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
 
   const beacons = new Batch(false);
   buildFences(k, M);

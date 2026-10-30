@@ -138,7 +138,7 @@ function graded(x: number, z: number) {
 }
 
 /** Cierros de la faena (el portón va en el cierro −x). */
-export const FENCE = { x0: SITE.gate.x, x1: 72, z0: TR.cierroZ, z1: 50 };
+export const FENCE = { x0: SITE.gate.x, x1: 46, z0: TR.cierroZ, z1: 50 };
 
 /**
  * Cota del suelo en (x, z): movimiento de tierra dentro de la faena; afuera, la calle del portón

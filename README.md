@@ -38,6 +38,7 @@ Todo viene de la carpeta **Proyecto de titulo 07-10** en Drive:
 | Partidas y plazos de la techumbre (cap. 3, 14.5, 2.23 y 2.24) | *Itemizado / Presupuesto (APU)* y *Cronograma Edificio E – versión detallada con cuadrillas (oct 2026)* |
 | Programa por piso, superficies y deptos | *CATALOGO.md* (láminas L38–L40) |
 | Grúa, mixer, faena, acopios, 85 trabajadores | fotos de la visita a terreno del 09-10-2026 |
+| Entorno: estero Las Tablas y avenida detrás de la obra, pasaje del portón y barrio, edificios del condominio al frente, bosque; tamaño del sitio | vista satelital (Av. Las Tablas 230, Curauma) |
 | Desniveles, camino, bajada y rampa, ubicación de la bomba, orden de excavación | fotos de la visita y bosquejo de la distribución real de la faena |
 
 Los tiempos de cada actividad (días hábiles) son típicos del método y se ajustan en `src/config.ts` (`DAYS` y `PACE`). Ahí también se definen las ubicaciones de la grúa, la bomba, los acopios, los caminos y el portón, y las cotas del terreno (`SITE.terreno`).
