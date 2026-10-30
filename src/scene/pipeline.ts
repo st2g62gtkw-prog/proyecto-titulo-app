@@ -10,6 +10,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { BuildingData } from '../data/building';
 import { haWalls, type Schedule } from '../core/schedule';
 import { SITE } from '../config';
+import { bordePosterior, groundAt, piePosterior } from '../core/terrain';
 import { GeoBuilder } from './geom';
 import { revealMaterial, revealMesh } from './reveal';
 
@@ -48,16 +49,27 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
   const g = new GeoBuilder();
 
   // tendido en el suelo: caseta → puerta posterior del hall → pasillo → vestíbulo → base del shaft.
-  // Afuera va sobre el terreno; justo antes de la puerta sube en rampa a la cota del radier
-  // terminado (adentro queda sobre tacos de madera mientras el 1er piso sigue en relleno y, una
-  // vez hormigonado el radier, apoyada sobre él en vez de quedar ahogada en el hormigón).
+  // Afuera va sobre el terreno: de la caseta (abajo, a la cota del camino) sube por el corte posterior
+  // hasta la plataforma y sigue por detrás de las zanjas hasta frente a la puerta; justo antes de la
+  // puerta sube en rampa a la cota del radier terminado (adentro queda sobre tacos de madera mientras
+  // el 1er piso sigue en relleno y, una vez hormigonado el radier, apoyada sobre él en vez de quedar
+  // ahogada en el hormigón).
   const P = SITE.pipeline;
   const yIn = levels[0].slab.y1 + R + 0.02;
   const d = new THREE.Vector2(dir.x, dir.z).normalize();
   const drop = { x: outlet.x + d.x * 0.5, z: outlet.z + d.y * 0.5 };
+  /** Tramo por el terreno, de la bomba hasta frente a la puerta posterior (detrás de las zanjas, z = −8,7). */
+  const zRun = -8.7;
+  const onSoil = (x: number, z: number): [number, number, number] => [x, groundAt(x, z) + 0.1, z];
+  const soil: [number, number, number][] = [
+    onSoil(drop.x, drop.z),
+    onSoil(drop.x, piePosterior(drop.x) - 0.1),
+    [drop.x, yG, bordePosterior(drop.x) + 0.1],
+    [drop.x, yG, zRun],
+    [P.xDoor, yG, zRun],
+  ];
   const route = ([
-    [drop.x, yG, drop.z],
-    [P.xDoor, yG, drop.z],
+    ...soil,
     [P.xDoor, yG, P.zDoor - 0.9],
     [P.xDoor, yIn, P.zDoor - 0.3],
     [P.xDoor, yIn, P.zHall],
@@ -69,9 +81,9 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
   const tLay = firstUse - 6;
   g.timing(tLay, tLay + 0.6, removeAt, removeAt + 0.3);
   // codo de salida: de la brida de la bomba baja al suelo
-  g.barN(outlet.x, outlet.y, outlet.z, drop.x, yG, drop.z, R * 2);
+  g.barN(outlet.x, outlet.y, outlet.z, ...soil[0], R * 2);
   const joint = (x: number, y: number, z: number) => g.aabb(x - R * 1.35, y - R * 1.35, z - R * 1.35, x + R * 1.35, y + R * 1.35, z + R * 1.35);
-  joint(drop.x, yG, drop.z);
+  joint(...soil[0]);
   // tacos de madera bajo el tramo interior (del relleno a la tubería)
   const wood = new GeoBuilder();
   wood.timing(tLay, tLay + 0.6, removeAt, removeAt + 0.3);
@@ -114,18 +126,17 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
     g.aabb(vx - 0.12, yB - 0.6, vz - 0.12, vx + 0.12, yB - 0.52, vz + 0.12);
     g.barN(vx - 0.03, (yA + yB) / 2, vz - 0.03, vx + 0.03, (yA + yB) / 2, vz + 0.03, R * 2.6);
   }
-  // fundaciones: mientras se hormigona cada sector de zapatas, la tubería va por el suelo de la caseta
-  // hasta el borde de la excavación frente a la puerta posterior (fundTap) y de ahí, sobre caballetes
-  // que cruzan las zanjas (ver update), hasta la manguera
-  const fundTap = new THREE.Vector3(P.xDoor, yG, -8.7);
+  // fundaciones: mientras se hormigona cada sector de zapatas, la tubería va por el suelo desde la
+  // caseta, sube el corte y llega al borde de la excavación frente a la puerta posterior (fundTap); de
+  // ahí, sobre caballetes que cruzan las zanjas (ver update), hasta la manguera
+  const fundTap = new THREE.Vector3(...soil[soil.length - 1]);
   for (const fp of sched.fund.pours) {
     g.timing(fp.pour[0] - 3.2, fp.pour[0] - 2.6, fp.pour[1] + 0.6, fp.pour[1] + 1.0);
-    g.barN(outlet.x, outlet.y, outlet.z, drop.x, yG, drop.z, R * 2);
-    joint(drop.x, yG, drop.z);
-    g.barN(drop.x, yG, drop.z, P.xDoor, yG, drop.z, R * 2);
-    joint(P.xDoor, yG, drop.z);
-    g.barN(P.xDoor, yG, drop.z, fundTap.x, yG, fundTap.z, R * 2);
-    joint(fundTap.x, yG, fundTap.z);
+    g.barN(outlet.x, outlet.y, outlet.z, ...soil[0], R * 2);
+    soil.forEach((p, i) => {
+      joint(...p);
+      if (i > 0) g.barN(...soil[i - 1], ...p, R * 2);
+    });
   }
   const fixed = revealMesh(g.build(), mat);
   fixed.userData.pick = { type: 'pipe' };

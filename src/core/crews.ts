@@ -7,6 +7,7 @@ import type { Activity, RoofLayer, Schedule } from './schedule';
 import { haWalls, pourFrac } from './schedule';
 import { offsetPolygon, pointInPolygon, polyBounds, type V2 } from '../scene/geom';
 import { SITE } from '../config';
+import { groundAt } from './terrain';
 
 export type Action = 'idle' | 'walk' | 'work' | 'carry';
 
@@ -304,7 +305,7 @@ export class Crews {
       const sway = Math.sin(t * 0.7 + j) * Math.min(0.35, spread * 0.4);
       m.x = g.x + Math.cos(ang) * rad + sway;
       m.z = g.z + Math.sin(ang) * rad;
-      m.y = SITE.groundY;
+      m.y = groundAt(m.x, m.z);
       m.action = g.action;
       m.heading = Math.atan2(g.z - m.z, g.x - m.x);
       m.walk = t * 1.3 + j;

@@ -11,6 +11,7 @@ import { Crews } from '../core/crews';
 import { Logistics } from '../core/logistics';
 import { buildPaintPlan, type PaintPlan, type PaintState } from '../core/paintPlan';
 import { buildSchedule, haWalls, type Schedule } from '../core/schedule';
+import { groundAt, Y_FAENA } from '../core/terrain';
 import { createBalancin, type BalancinRig } from './equipment/balancin';
 import { createCapacho, type CapachoRig } from './equipment/capacho';
 import { createCrane, type CraneRig } from './equipment/crane';
@@ -43,6 +44,18 @@ const TRUCK_POOL = 3;
 
 /** Punto plano {x, y, z} de un vector (para el plan de la grúa, que no depende de three). */
 const toP3 = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
+
+/**
+ * Apoya un camión en el terreno (la calle del portón, el camino de abajo, la subida y la rampa de
+ * salida tienen pendiente): a la cota media de sus ejes y con el cabeceo de la pendiente a lo
+ * largo del rumbo (half = medio largo entre ejes).
+ */
+function onGround(g: THREE.Object3D, x: number, z: number, heading: number, half = 2.4) {
+  const c = Math.cos(heading), s = Math.sin(heading);
+  const yf = groundAt(x + c * half, z + s * half), yb = groundAt(x - c * half, z - s * half);
+  g.position.set(x, (yf + yb) / 2, z);
+  g.rotation.set(0, -heading, Math.atan2(yf - yb, 2 * half), 'YXZ');
+}
 
 export interface WorldState {
   /** Punto de trabajo actual (para seguir la obra con la cámara). */
@@ -188,7 +201,7 @@ export class World {
     {
       const m = this.mixers[0];
       m.setChute(1);
-      m.group.position.set(cap.x, SITE.groundY, cap.z);
+      m.group.position.set(cap.x, groundAt(cap.x, cap.z), cap.z);
       m.group.rotation.set(0, -stopHeading, 0);
       m.group.updateMatrixWorld(true);
       m.chuteTip.getWorldPosition(this.capachoFill);
@@ -198,17 +211,19 @@ export class World {
     // hacia el camión); entra y sale a ras de suelo desde 1,7 m más allá de la punta (sobre el eje
     // del mixer, fuera del alcance de la canaleta) y en reposo queda al lado de ese punto, a un
     // costado del camino (lado del talud): la grúa lo lleva de uno a otro sin pasar sobre el camión
-    this.capachoFill.addScaledVector(toCab, 0.25).setY(SITE.groundY);
+    this.capachoFill.addScaledVector(toCab, 0.25);
+    this.capachoFill.setY(groundAt(this.capachoFill.x, this.capachoFill.z));
     const capachoFill = toP3(this.capachoFill);
     const capachoSlide = toP3(this.capachoFill.clone().addScaledVector(toCab, -1.7));
-    this.capachoRest.set(capachoSlide.x, SITE.groundY, SITE.road.z - 3.4);
+    this.capachoRest.set(capachoSlide.x, groundAt(capachoSlide.x, SITE.road.z - 3.4), SITE.road.z - 3.4);
     // asa perpendicular al eje del mixer (el gancho no gira con la pluma): así la canaleta pasa bajo
     // el travesaño del asa y no a través de sus brazos
     this.capacho.group.rotation.y = Math.PI / 2;
 
     // bomba estacionaria en su caseta y la tubería que sube por el shaft del ascensor
     this.pump = createStationaryPump();
-    this.pump.group.position.set(SITE.pump.x, SITE.groundY, SITE.pump.z);
+    // abajo, a la cota del camino (ensanche entre el camino y el pie del corte posterior)
+    this.pump.group.position.set(SITE.pump.x, groundAt(SITE.pump.x, SITE.pump.z), SITE.pump.z);
     this.pump.group.rotation.y = SITE.pump.heading;
     scene.add(this.pump.group);
     this.pump.group.updateMatrixWorld(true);
@@ -320,7 +335,7 @@ export class World {
     this.addLabel('am', 'Acopio moldajes de muro', 'acopio', root, a.acopioMoldajeMuro.clone().add(new THREE.Vector3(0, 2.2, 0)));
     this.addLabel('al', 'Acopio moldaje de losa', 'acopio', root, a.acopioMoldajeLosa.clone().add(new THREE.Vector3(0, 2.2, 0)));
     this.addLabel('af', 'Acopio de fierro', 'acopio', root, a.acopioFierro.clone().add(new THREE.Vector3(0, 2.2, 0)));
-    this.addLabel('faena', 'Instalación de faena', 'info', root, new THREE.Vector3(SITE.faena.x, 5, SITE.faena.z));
+    this.addLabel('faena', 'Instalación de faena', 'info', root, new THREE.Vector3(SITE.faena.x, Y_FAENA + 5, SITE.faena.z));
     this.addLabel('pump', 'Bomba estacionaria', 'pump', this.pump.group, new THREE.Vector3(0, 4.2, 0));
     // sobre el pilar del lado +z y más alta que la del mixer, para que no se tapen cuando pasa un camión
     this.addLabel('gate', 'Portón de camiones', 'info', root, new THREE.Vector3(SITE.gate.x, 7.2, SITE.gate.z + 4.6));
@@ -429,8 +444,7 @@ export class World {
     for (const s of mstates) {
       const m = this.mixers[s.id % MIXER_POOL];
       m.group.visible = true;
-      m.group.position.set(s.pose.x, gy, s.pose.z);
-      m.group.rotation.set(0, -s.pose.heading, 0);
+      onGround(m.group, s.pose.x, s.pose.z, s.pose.heading);
       m.setWheels(s.dist);
       m.setChute(s.chute);
       m.setDischarge(s.discharging);
@@ -459,8 +473,7 @@ export class World {
     for (const s of tstates) {
       const tk = this.trucks[s.id % TRUCK_POOL];
       tk.group.visible = true;
-      tk.group.position.set(s.pose.x, gy, s.pose.z);
-      tk.group.rotation.set(0, -s.pose.heading, 0);
+      onGround(tk.group, s.pose.x, s.pose.z, s.pose.heading);
       tk.setWheels(s.dist);
       tk.setLoad(s.load);
     }
@@ -537,8 +550,9 @@ export class World {
       { x: SITE.tallerFierro.x, z: SITE.tallerFierro.z, r: 1.6, action: 'work' },
       { x: SITE.tallerFierro.x - 2, z: SITE.tallerFierro.z + 2, r: 1.2, action: 'work' },
       { x: a.acopioMoldajeMuro.x + 6.5, z: a.acopioMoldajeMuro.z - 1.5, r: 0.8, action: 'work' },
-      // rigger del capacho: al borde del camino (lado del talud), junto al punto de llenado
-      { x: this.capachoFill.x, z: SITE.road.z - 2.75, r: 0.3, spread: 0.5, action: act.kind === 'muroHormigon' || act.kind === 'fundaciones' ? 'work' : 'idle' },
+      // rigger del capacho: junto a su punto de reposo, al otro lado del camino (fuera del paso de los
+      // camiones y del mixer de la bomba)
+      { x: this.capachoRest.x + 1.0, z: this.capachoRest.z + 0.4, r: 0.3, spread: 0.5, action: act.kind === 'muroHormigon' || act.kind === 'fundaciones' ? 'work' : 'idle' },
       { x: a.acopioMoldajeLosa.x - 5.5, z: a.acopioMoldajeLosa.z + 1.5, r: 0.8, action: 'work' },
       { x: SITE.faena.x + 7, z: SITE.faena.z + 5, r: 1.5, action: 'idle' },
       { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },
@@ -555,8 +569,10 @@ export class World {
           { x: SITE.faena.x + 5.2, z: SITE.faena.z - 5.4, r: 0.4, action: 'idle' },
         );
       } else ground.push(
-        { x: P.x + 0.4, z: P.z + 2.6, r: 0.15, spread: 0.35, action: mode },
-        { x: H.x - 0.4, z: P.z + 2.25, r: 0.15, spread: 0.3, action: mode },
+        // abajo, en el ensanche: el operador al lado de la caseta que da al camino y uno en la tolva,
+        // entre el camión y el pie del corte
+        { x: P.x + 1.6, z: P.z - 2.2, r: 0.15, spread: 0.35, action: mode },
+        { x: H.x - 0.5, z: P.z + 1.55, r: 0.15, spread: 0.2, action: mode },
       );
     }
     // trabajos en paralelo en el 1er piso (redes bajo radier, hormigonado del radier): cuatro puestos

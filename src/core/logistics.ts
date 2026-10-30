@@ -3,10 +3,11 @@
  * capacho; las losas y el radier con la bomba estacionaria que queda fija en su caseta.
  * Igual que la grúa, todo es función del tiempo de simulación.
  *
- * Camino (costado posterior, ver SITE.road): es uno solo y termina en la bomba. El mixer llega por
- * la calle del portón (carril del lado de la obra), pasa el portón y se detiene; retrocede girando
- * por el portón y sigue en retroceso por el camino hasta el punto de descarga, porque la canaleta
- * va atrás: el capacho (muros) o la tolva de la bomba (losas y radier), que está al final del camino.
+ * Camino (costado posterior, ver SITE.road): es uno solo y va abajo, a la cota del camino. El mixer
+ * llega por la calle del portón (carril del lado de la obra), pasa el portón y se detiene; retrocede
+ * girando por el portón y sigue en retroceso por el camino hasta el punto de descarga, porque la
+ * canaleta va atrás: el capacho (muros) o la tolva de la bomba (losas y radier), que está en un
+ * ensanche al costado del camino (el mixer se corre a él con una S al final del retroceso).
  * Al terminar sale hacia adelante por el mismo camino y el mismo portón y dobla hacia el barrio por
  * el otro carril de la calle. Como no hay por dónde adelantar, en cada hormigonado de losa el
  * segundo mixer entra en retroceso mientras descarga el primero y se aparta al bolsón de espera
@@ -161,16 +162,18 @@ export class Logistics {
      */
     const visit = (spot: MixerVisit['spot'], xStop: number, at: number, pours: [number, number][], done: number, laybyAt?: number) => {
       const [dOut, dIn] = spot === 'capacho' ? CAP_CHUTE : PUMP_CHUTE;
-      const street = arrival(), out = exitFrom(xStop);
+      // a la bomba se corre del camino a su ensanche (z de la tolva); el capacho se llena en el camino
+      const zStop = spot === 'bomba' ? PMP.z : CAP.z;
+      const street = arrival(), out = exitFrom(xStop, zStop);
       const legs: Leg[] = [];
       let gateIn: number, waitFrom: number | null = null;
       if (laybyAt === undefined) {
-        const back = reverseTo(xStop);
+        const back = reverseTo(xStop, zStop);
         gateIn = at - dur(back, V_BACK);
         legs.push(leg(back, gateIn, at, true));
       } else {
         // espera su turno en el bolsón: llega ahí en laybyAt y sale hacia la tolva justo a tiempo
-        const toLb = reverseToLayby(), fromLb = laybyTo(xStop);
+        const toLb = reverseToLayby(), fromLb = laybyTo(xStop, zStop);
         gateIn = laybyAt - dur(toLb, V_BACK);
         legs.push(leg(toLb, gateIn, laybyAt, true), leg(fromLb, at - dur(fromLb, V_BACK), at, true));
         waitFrom = laybyAt;
@@ -187,9 +190,15 @@ export class Logistics {
     /** Tramo de la calle que termina pasado el portón (el anterior al primer retroceso). */
     const streetLeg = (m: MixerVisit) => m.legs.findIndex((L) => L.back) - 1;
     const xOf = (m: MixerVisit) => (m.spot === 'capacho' ? CAP.x : PMP.x);
+    /** Distancia por la ruta de salida hasta el portón (la S desde el ensanche la alarga un poco). */
+    const toGate = (m: MixerVisit) => {
+      const r = m.out.route;
+      for (let s = 0; s <= r.length; s += 0.25) if (r.at(s).x <= G.x) return s;
+      return xOf(m) - G.x;
+    };
     /** Ventana en que el que sale cruza el carril de llegada (de antes del portón a ya doblado). */
     const crossing = (m: MixerVisit): [number, number] => {
-      const s0 = xOf(m) - G.x;
+      const s0 = toGate(m);
       return [timeAt(m.out, s0 - 1.5), timeAt(m.out, s0 + OUT_ARC + 2)];
     };
     /** Ventana en que el que llega por la calle pasa frente al portón (hasta quedar pasado el portón). */

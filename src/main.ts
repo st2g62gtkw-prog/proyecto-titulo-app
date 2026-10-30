@@ -47,7 +47,8 @@ hud.setLoading(0.05, 'Cargando modelo del Edificio E…');
 const ISO_TARGET = new THREE.Vector3(-1.3, 5, 8.3);
 /**
  * Vistas fijas: la principal mira desde el frente (+z, grúa y acopios adelante); la posterior
- * gira 180° para ver desde el talud el camino de mixers, el portón, la bomba y la tubería.
+ * gira 180° para ver desde atrás el camino de mixers (abajo), el portón, la bomba y la tubería, con
+ * el talud del frente y la faena al fondo.
  */
 const VIEWS = {
   iso: { target: ISO_TARGET, az: 55, el: 33, zoom: 1.0 },
@@ -58,14 +59,14 @@ const MIN_POLAR = THREE.MathUtils.degToRad(12);
 
 /**
  * Planta (en pantalla +x a la derecha y −z hacia arriba): encuadra el recorrido de los camiones
- * (la calle del portón, el camino posterior y la bomba), el edificio y los acopios, y de la faena
- * al pie del talud, en el espacio libre entre las columnas del tablero. Devuelve el objetivo y el
- * zoom de la cámara.
+ * (la calle del portón, el camino posterior, la bomba y la subida), el edificio, los acopios y el
+ * talud del frente con la faena, en el espacio libre entre las columnas del tablero. Devuelve el
+ * objetivo y el zoom de la cámara.
  */
 function topFit() {
-  const A = SITE.acopioFierro;
-  const x0 = SITE.street.x - SITE.street.width / 2 - 2, x1 = A.x + A.w / 2 + 2;
-  const z0 = SITE.talud.zStart - 1, z1 = SITE.faena.z + SITE.faena.d / 2 + 2;
+  const x0 = SITE.street.x - SITE.street.width / 2 - 2, x1 = SITE.terreno.subida.x + SITE.terreno.subida.r + 4;
+  // (desde el estacionamiento, detrás del camino, hasta la faena arriba del talud del frente)
+  const z0 = SITE.road.z - 10, z1 = SITE.faena.z + SITE.faena.d / 2 + 2;
   const c = stage.renderer.domElement.getBoundingClientRect();
   // espacio libre: entre las columnas (escritorio) y bajo la barra superior, sobre la línea de tiempo
   let l = c.left, r = c.right;
@@ -562,7 +563,7 @@ function loop(now: number) {
   stage.update(dt);
   const cam = stage.camera.position, tgt = stage.controls.target;
   hud.setCompass(compassAngle(SITE.northAngle, cam.x - tgt.x, cam.z - tgt.z));
-  // mirando desde atrás (cámara del lado del talud) se oculta el bosque que taparía el camino
+  // mirando desde atrás (cámara del lado del cerro) se oculta el bosque que taparía el camino
   w.site.setBackView?.(cam.z - tgt.z < -40);
   // el corte quita la mitad del edificio que queda hacia la cámara
   w.setCutSide(cam.z - tgt.z < 0);

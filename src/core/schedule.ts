@@ -434,9 +434,9 @@ export function buildSchedule(data: BuildingData): Schedule {
   const radier = par('radier', rStart, rEnd, 'Radier 1er piso', 'Radier e=10 cm sobre relleno compactado, con bomba estacionaria');
   const rDur = rEnd - rStart;
   // un solo mixer (no cabe un cambio de camión): entra en retroceso cuando el último de la losa de
-  // techumbre del 6P ya salió por el portón (≈ 7 s después de empezar el radier) y sale antes de
-  // que llegue el del capacho; la bomba no se detiene (pumpStop vacío)
-  const rPour: [number, number] = [rStart + 7.4, rEnd - 0.4];
+  // techumbre del 6P ya salió por el portón (≈ 8 s después de empezar el radier: el camino a la
+  // bomba es largo) y sale antes de que llegue el del capacho; la bomba no se detiene (pumpStop vacío)
+  const rPour: [number, number] = [rStart + 8.2, rEnd - 0.4];
   slab[0] = {
     props: [rStart, rStart], deck: [rStart, rStart], rebar: [rStart, rStart + rDur * 0.32],
     pour: rPour, pumpStop: [rPour[1], rPour[1]], propsOut: [1e7, 1e7], deckOut: [1e7, 1e7],

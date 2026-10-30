@@ -2,8 +2,9 @@
  * Disposición de la faena (coordenadas de la app, metros).
  *
  *  x: a lo largo del edificio (≈ -24 … +26)
- *  z: a lo ancho; +z es la fachada frontal (surponiente según northAngle; donde está la grúa) y -z
- *     la fachada posterior (nororiente), donde corre el camino de los mixers, está la bomba y sube el talud
+ *  z: a lo ancho; +z es la fachada frontal (surponiente según northAngle; donde está la grúa y,
+ *     detrás del talud, la faena) y -z la fachada posterior (nororiente), donde corre el camino de
+ *     los mixers, más abajo, y está la bomba
  *  y: altura; 0 = NPT del 1er piso (cara superior del radier)
  *
  * Todo lo que es "dónde está cada cosa en la obra" se ajusta aquí.
@@ -26,12 +27,14 @@ export const SITE = {
 
   /**
    * Bomba estacionaria de hormigón (losas y radier), dentro de su caseta en el costado posterior,
-   * al frente opuesto de la grúa y al final del camino de mixers. heading = giro de la caseta: con
-   * −π/2 la tolva mira hacia −x (hacia el portón, por donde llega el mixer en retroceso) y la salida
-   * de la tubería queda en el extremo +x, del lado del talud, justo frente a la puerta posterior del
-   * hall (x = pipeline.xDoor), así la tubería va derecho hacia el edificio por el costado de la caseta.
+   * al frente opuesto de la grúa: abajo, a la cota del camino (foto de la visita: la bomba queda en
+   * un desnivel, como un piso más abajo que la plataforma, y algo alejada del edificio), en el
+   * ensanche entre el camino y el pie del corte. heading = giro de la caseta: con −π/2 la tolva mira
+   * hacia −x (hacia el portón, por donde llega el mixer en retroceso) y la salida de la tubería queda
+   * en el extremo +x; de ahí la tubería sube el corte y va por la plataforma hasta la puerta
+   * posterior del hall.
    */
-  pump: { x: -5.0, z: -12.0, heading: -Math.PI / 2 },
+  pump: { x: 2.0, z: -15.45, heading: -Math.PI / 2 },
 
   /**
    * Tendido de la tubería por el suelo (planta): de la salida de la bomba entra por la puerta
@@ -44,58 +47,96 @@ export const SITE = {
   pipeline: { xDoor: -1.2, zDoor: -5.8, zHall: 0.45, xLobby: 0.6, zShaftDoor: 4.0, door: { x0: -2.5, x1: -0.85, h: 2.07 } },
 
   /**
-   * Centro del mixer cuando descarga al capacho (muros): detenido en el camino, antes de llegar a
-   * la bomba, con la cabina hacia el portón. El capacho se llena en el suelo bajo la punta de la
-   * canaleta (≈ 6,3 m detrás del centro, hacia la bomba) y la grúa lo toma ahí, a ~28 m del mástil.
+   * Centro del mixer cuando descarga al capacho (muros): se corre del camino al ensanche junto al
+   * corte (como en la bomba, así el camino queda libre), antes de llegar a la bomba y con la cabina
+   * hacia el portón. El capacho se llena en el suelo bajo la punta de la canaleta (≈ 6,3 m detrás del
+   * centro, hacia la bomba) y la grúa lo toma ahí, a ~30 m del mástil.
    */
-  mixerCapacho: { x: -19.5, z: -12.0 },
+  mixerCapacho: { x: -19.5, z: -15.45 },
   /**
-   * Centro del mixer cuando su canaleta descarga en la tolva de la bomba: llega en retroceso hasta
-   * que la punta de la canaleta (6,28 m detrás del centro) queda sobre la tolva (pump.x − 2,6).
+   * Centro del mixer cuando su canaleta descarga en la tolva de la bomba: llega en retroceso por el
+   * camino, se corre con una S al ensanche de la bomba (z = pump.z) y sigue hasta que la punta de la
+   * canaleta (6,28 m detrás del centro) queda sobre la tolva (pump.x − 2,6).
    */
-  mixerPump: { x: -13.88, z: -12.0 },
+  mixerPump: { x: -6.88, z: -15.45 },
 
   /**
-   * Accesos y caminos. Los camiones entran por el portón norponiente (en el cierro −x que da a la
-   * calle, junto al costado posterior; arriba a la izquierda en la vista principal; con northAngle
-   * queda ~32° al poniente del norte visto desde el edificio). El camino posterior es uno solo
-   * (eje z = road.z, ancho road.width) y termina en la bomba: el mixer llega por la calle
-   * (street, eje x = cte), pasa el portón, retrocede por el portón y por el camino hasta el punto
-   * de descarga (capacho o tolva) y sale hacia adelante por el mismo camino y el mismo portón.
+   * Accesos y caminos (bosquejo de la distribución real). Los camiones entran por el portón
+   * norponiente, abajo, al inicio del camino (en el cierro −x que da a la calle, junto al costado
+   * posterior; arriba a la izquierda en la vista principal). El camino posterior es uno solo (eje
+   * z = road.z, ancho road.width) y va a la cota del camino (terreno.camino), más abajo que la
+   * plataforma del edificio: pasa por la bomba y en el extremo +x sube a la plataforma (la subida).
+   * El mixer llega por la calle, pasa el portón, retrocede por el portón y por el camino hasta el
+   * punto de descarga (capacho o tolva) y sale hacia adelante por el mismo camino y el mismo portón.
    */
-  gate: { x: -56, z: -12.0 },
+  gate: { x: -56, z: -20.0 },
   /**
-   * Bolsón de espera: ensanche al costado del camino (lado del talud), entre el portón y la bomba.
+   * Bolsón de espera: en el mismo ensanche de la bomba, junto al pie del corte y antes de la tolva.
    * En los hormigonados de losa el segundo mixer entra en retroceso y espera aquí (centro del
-   * camión) mientras descarga el primero; cuando este sale y lo pasa, retrocede hasta la tolva.
+   * camión) mientras descarga el primero; cuando este sale al camino y lo pasa, retrocede derecho
+   * hasta la tolva.
    */
-  layby: { x: -29, z: -16.6 },
-  road: { z: -12.0, width: 5 },
+  layby: { x: -24, z: -15.45 },
+  road: { z: -20.0, width: 5 },
   street: { x: -64, width: 8 },
 
-  /** Acopios dentro del alcance de la grúa (rectángulos en planta: centro, ancho x, fondo z, giro). */
-  acopioMoldajeMuro: { x: -17.5, z: 16.5, w: 10, d: 5.5, rot: 0 },
-  acopioMoldajeLosa: { x: 17.5, z: 13.8, w: 9, d: 4.5, rot: 0 },
+  /**
+   * Acopios dentro del alcance de la grúa (rectángulos en planta: centro, ancho x, fondo z, giro),
+   * sobre la plataforma frente al edificio: el moldaje de losa junto a los puntales (−x) y el de
+   * muros hacia el fierro (+x).
+   */
+  acopioMoldajeMuro: { x: 20.0, z: 13.85, w: 12, d: 4.6, rot: 0 },
+  acopioMoldajeLosa: { x: -19.1, z: 15.55, w: 8.4, d: 4.4, rot: 0 },
   acopioFierro: { x: 34, z: 11, w: 7, d: 10, rot: 0 },
-  tallerFierro: { x: 36, z: -1, w: 9, d: 9, rot: 0 },
+  tallerFierro: { x: 36, z: 0.5, w: 9, d: 9, rot: 0 },
   acopioPuntales: { x: -30, z: 8, w: 5, d: 8, rot: 0 },
-  faena: { x: -42, z: 12, w: 18, d: 18, rot: 0 },
+  /** Instalación de faena: arriba del talud del frente, en la explanada a la cota terreno.faena. */
+  faena: { x: 6, z: 32, w: 18, d: 18, rot: 0 },
 
   /**
-   * Talud de corte en el costado posterior, nororiente (fotos: talud con malla naranja). Su pie queda detrás del
-   * camino de mixers, con una franja plana de ~18 m desde la fachada posterior (camino, caseta de la
-   * bomba, capacho en reposo y, junto al portón, el estacionamiento y la cancha de lavado).
+   * Movimiento de tierra (fotos de la visita a terreno y bosquejo de la distribución real):
+   *  - plataforma plana del edificio a groundY (lo encerrado en azul en el bosquejo), del borde
+   *    posterior (bordePosterior, que en el tramo −x se corre hacia atrás para la huella de los
+   *    camiones tolva) al pie del talud del frente y de plataformaX[0] al cierro +x (desde ensancheZ
+   *    hacia el frente; más atrás queda la subida);
+   *  - camino posterior, bolsón, ensanche de la bomba y estacionamiento más abajo, a la cota del
+   *    camino, con un corte de ~2 m (corte, horizontal) desde el borde posterior de la plataforma;
+   *  - talud del frente bastante inclinado, de pieTalud a coronaTalud, hasta la explanada de la
+   *    faena, unos 5 m más arriba (hasta frenteZ; más allá baja al barrio);
+   *  - la bajada: de la explanada de faena al camino por el costado del portón (eje x, de zArriba a
+   *    zAbajo), con el resto del costado −x en ladera a la misma cota;
+   *  - la subida: del camino a la plataforma en el extremo +x, en una curva de radio r que da la
+   *    vuelta (centro en x, a r del eje del camino) y llega a la plataforma mirando hacia −x;
+   *  - la salida de los camiones tolva: rampa del extremo −x de la huella de carguío al camino.
    */
-  talud: { zStart: -25, zTop: -34, height: 6 },
+  terreno: {
+    camino: -2.2,
+    faena: 4.8,
+    bordePosterior: [-12.6, -11.9] as [number, number],
+    corte: 1.5,
+    plataformaX: -37,
+    ensancheZ: -2,
+    pieTalud: 18.5,
+    coronaTalud: 22.5,
+    frenteZ: 42,
+    bajada: { x: -43.5, ancho: 5, zArriba: 34, zAbajo: -16 },
+    subida: { x: 44, r: 7, ancho: 6 },
+    salida: { x0: -32, x1: -52, ancho: 6 },
+    /** Fondo del sector bajo junto al portón (estacionamiento y cancha de lavado) y del resto. */
+    fondoBajo: [-33.5, -25] as [number, number],
+    /** Cierro posterior, al pie del cerro con bosque. */
+    cierroZ: -34.5,
+  },
 
   /**
    * Excavación de las fundaciones (días 1 a 13). La excavadora llega en cama baja y queda en el
    * testero −x (park0); al terminar el sector 3 se estaciona en el testero +x (park1) y se retira.
-   * Los camiones tolva entran en retroceso por el portón y el camino posterior igual que los
-   * mixers y se apartan a una huella de carguío pegada a la fachada posterior (laneZ; la caseta de la
-   * bomba se arma recién cuando sale el último camión, así que la huella va derecho) y,
-   * para las zanjas del frente, entran a la plataforma por la franja de los peines posteriores
-   * (aún sin excavar) hasta innerZ, detrás de la excavadora. entryX = donde salen del camino.
+   * Los camiones tolva entran de frente por el portón, recorren el camino posterior, suben por la
+   * subida y avanzan por una huella de carguío pegada a la fachada posterior (laneZ; la caseta de la
+   * bomba se arma recién cuando sale el último camión) hasta el puesto de carga; para las zanjas del
+   * frente entran a la plataforma por la franja de los peines posteriores (aún sin excavar) hasta
+   * innerZ, detrás de la excavadora, en retroceso desde entryX. Cargados, siguen de frente por la
+   * huella hasta la rampa de salida (terreno.salida), bajan al camino y salen por el portón.
    */
   excavacion: {
     park0: { x: -29.5, z: -4.5 },
@@ -139,7 +180,8 @@ export const PACE = {
  * hormigonado llevan más tiempo para que se alcance a ver la excavadora, los camiones y la bomba.
  */
 export const FUND_PACE = {
-  trazado: 1.2,
+  /** Trazado y escarpe (días 1 a 3); alcanza para que el primer camión tolva llegue por el camino y la subida. */
+  trazado: 4.6,
   /** Excavación del sector 1 (días 4 a 6: zona profunda A-B y cambio de camión tolva). */
   excavacionS1: 4.2,
   excavacion: 3.0,

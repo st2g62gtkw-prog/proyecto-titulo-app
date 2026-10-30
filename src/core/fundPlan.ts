@@ -15,7 +15,7 @@
 import { FUND_PACE, PACE, SITE } from '../config';
 import type { FootingStrip, FundData, WallData } from '../data/building';
 import { Route, easeTravel, type Pose } from './paths';
-import { LB_S, RZ, arc, arrival, line, reverseToLayby, shift, type P } from './roads';
+import { SUBIDA_TOP, gateToSubida, laneZ, line, salidaToStreet, shift, streetToGate, type P } from './roads';
 import { polyBounds, type V2 } from '../scene/geom';
 
 export type Win = [number, number];
@@ -273,8 +273,9 @@ function dayWeights(): number[] {
     else if (d <= 12) s = FUND_PACE.excavacion;
     else if (d === 13) s = 5.5; // sale el último camión tolva y se retira la excavadora
     else if (d >= 34) s = FUND_PACE.cierre;
-    // (durante la excavación, con holgura para que el mixer no se cruce con los camiones tolva)
-    if (cap.has(d)) s = Math.max(s, capDay(cap.get(d)!) + (d <= 12 ? 3 : 0) + (pump.has(d + 1) ? 2.5 : 0));
+    // (durante la excavación, con holgura para que el mixer no se cruce en el camino con los camiones
+    // tolva: el que sale del sector anterior por la rampa y el que llega para el sector siguiente)
+    if (cap.has(d)) s = Math.max(s, capDay(cap.get(d)!) + (d <= 12 ? 9.5 : 0) + (pump.has(d + 1) ? 2.5 : 0));
     if (pump.has(d)) s = FUND_PACE.bomba;
     // el día siguiente a un hormigonado deja salir al último mixer antes del próximo que entra
     else if (pump.has(d - 1)) s = Math.max(s, 3.5);
@@ -337,16 +338,13 @@ function seq<T>(items: T[], weight: (x: T) => number, [A, B]: Win, lap = 0): Win
 
 const EX = SITE.excavacion;
 /**
- * Eje z de la huella de carguío en x. La caseta de la bomba todavía no está (se arma al terminar la
- * excavación, ver pumpIn), así que la huella va derecho y deja la berma libre junto a las zanjas: el
- * costado del camión queda a ≥ 0,3 m del borde de los peines posteriores (−8,13) y, frente a la zanja
- * profunda de A-B (−2,66 con talud 3:1, borde a −8,77), a ≥ 1 m: se aparta 1,25 m más del edificio y
- * vuelve en 8 m, para que el camión no se cruce en diagonal sobre el peine x = −10,48.
+ * Eje z de la huella de carguío en x (core/roads, laneZ): la huella va derecho y deja la berma libre
+ * junto a las zanjas: el costado del camión queda a ≥ 0,3 m del borde de los peines posteriores
+ * (−8,13) y, frente a la zanja profunda de A-B (−2,66 con talud 3:1, borde a −8,77), a ≥ 1 m: se
+ * aparta 1,25 m más del edificio y vuelve en 8 m, para que el camión no se cruce en diagonal sobre el
+ * peine x = −10,48.
  */
-export function laneZ(x: number) {
-  const ab = 1 - smooth((x + 15.9) / 8);
-  return EX.laneZ - 1.25 * ab;
-}
+export { laneZ };
 const laneLine = (xa: number, xb: number): P[] => {
   const n = Math.max(1, Math.ceil(Math.abs(xb - xa) / 1.5));
   return Array.from({ length: n + 1 }, (_, i) => {
@@ -354,14 +352,19 @@ const laneLine = (xa: number, xb: number): P[] => {
     return [x, laneZ(x)] as P;
   });
 };
-/** Del camino a la huella (o vuelta): S suave entre x = entryX − 8 (camino) y entryX (huella). */
-const ROAD_TO_LANE = (): P[] => shift([EX.entryX - 8, RZ], [EX.entryX, laneZ(EX.entryX)]);
+/** Donde la S que baja de la subida llega a la huella (14 m antes, hacia −x, del final de la subida). */
+const QX = SUBIDA_TOP[0] - 14;
+/** Donde empieza la rampa de salida, en el extremo −x de la huella. */
+const SAL_X = SITE.terreno.salida.x0;
 /** Largo en x de la S para entrar a la plataforma por la franja de los peines posteriores. */
 const INNER_S = 8;
 /** Tolva del camión: centro a 1,85 m detrás del centro del camión (hacia la trasera). */
 export const TRUCK_BED = 1.85;
-/** Rapidez media en la obra (reposicionarse entre puestos), en retroceso desde el portón y al salir. */
-const V_SITE = 7, V_BACK = 17, V_OUT = 21, V_STREET = 18;
+/**
+ * Rapidez media en la obra (reposicionarse entre puestos), entre la espera y el puesto, al salir, por
+ * la calle y de frente por el camino y la subida hasta la plataforma (vacío).
+ */
+const V_SITE = 7, V_BACK = 17, V_OUT = 21, V_STREET = 18, V_FWD = 24;
 const dur = (r: Route, v: number) => 0.45 + r.length / v;
 /** Ruta por puntos sin repetidos consecutivos (el Catmull-Rom no admite dos puntos iguales). */
 function R(pts: P[], back = false) {
@@ -718,56 +721,73 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     }
     return out;
   };
-  /** Salida de frente desde la huella: hasta el camino, el portón y la calle. */
-  const exitRoute = (from: ExcStation['truck']) => {
-    const G = SITE.gate;
-    const LANE_OUT = SITE.street.x - SITE.street.width / 4 + 0.35, R_OUT = G.x - LANE_OUT;
+  /**
+   * Salida de frente: de la plataforma (si cargó adentro) vuelve a la huella, sigue por ella hasta
+   * la rampa de salida, baja al camino y sale por el portón a la calle.
+   */
+  const exitRoute = (from: ExcStation['truck'], xa: number) => {
+    const xe = xa + INNER_S;
     const pts: P[] = [
-      ...laneLine(from.x, EX.entryX),
-      ...ROAD_TO_LANE().reverse().slice(1),
-      ...line([EX.entryX - 8, RZ], [G.x, RZ]).slice(1),
-      ...arc([G.x, RZ + R_OUT], R_OUT, -Math.PI / 2, -Math.PI).slice(1),
-      ...line([LANE_OUT, RZ + R_OUT], [LANE_OUT, RZ + 52], 6).slice(1),
+      ...(from.kind === 'inner'
+        ? [...line([from.x, from.z], [xe, EX.innerZ], 1.5), ...shift([xe, EX.innerZ], [xa, laneZ(xa)]).slice(1), ...laneLine(xa, SAL_X).slice(1)]
+        : laneLine(from.x, SAL_X)),
+      ...salidaToStreet().slice(1),
     ];
     return R(pts);
   };
-  const LBp = SITE.layby;
-  const LB_IN = LBp.x - 4 - LB_S;
-  /** Desde el bolsón, en retroceso: vuelve al camino con una S y entra a la huella en x = LBp.x + 12. */
-  const LB_EXIT_X = LBp.x + 12;
   /** Fracción del recorrido (inversa de easeTravel): instante relativo en que se llega a la distancia s. */
   const timeOf = (route: Route, s: number, D: number) => {
     const f = Math.min(Math.max(s / route.length, 0), 1);
     return (f <= 0.5 ? Math.sqrt(f / 2) : 1 - Math.sqrt((1 - f) / 2)) * D;
   };
-  /** Segundos desde que parte la salida hasta que la trasera del que sale ya pasó el bolsón. */
-  const clearAfter = (exR: Route) => {
+  /** Segundos desde que parte la salida hasta que el que sale ya va más allá de xClear (hacia −x). */
+  const clearAfter = (exR: Route, xClear: number) => {
     const D = dur(exR, V_OUT);
-    for (let s = 0; s <= exR.length; s += 0.5) if (exR.at(s).x < LB_IN - 6) return timeOf(exR, s, D);
+    for (let s = 0; s <= exR.length; s += 0.5) if (exR.at(s).x < xClear) return timeOf(exR, s, D);
     return D;
   };
-  /** Del punto final de un tramo de llegada (en la huella) hasta el puesto `stop`. */
-  const toStop = (fromLane: P[], stop: ExcStation['truck'], xa: number): P[] => {
-    const x = fromLane[fromLane.length - 1][0];
-    const tail = stop.kind === 'inner'
-      ? [...laneLine(x, xa).slice(1), ...shift([xa, laneZ(xa)], [xa + INNER_S, EX.innerZ]).slice(1), ...line([xa + INNER_S, EX.innerZ], [stop.x, stop.z], 1.5).slice(1)]
-      : laneLine(x, stop.x).slice(1);
-    return [...fromLane, ...tail];
+  /** Punto de la huella hasta donde avanza de frente para llegar al puesto (para los de adentro, pasado xa para retroceder). */
+  const target = (stop: ExcStation['truck'], xa: number) => (stop.kind === 'inner' ? xa - 1.5 : stop.x);
+  /** Tramos desde la huella (en x, de frente hacia −x) hasta el puesto: avanza y, si es adentro, retrocede con la S. */
+  const hopsFrom = (pre: P[], stop: ExcStation['truck'], xa: number): { route: Route; back: boolean }[] => {
+    const xw = target(stop, xa);
+    const x0 = pre.length ? pre[pre.length - 1][0] : xw;
+    const fwd = [...pre, ...laneLine(x0, xw).slice(pre.length ? 1 : 0)];
+    const out = fwd.length >= 2 ? [{ route: R(fwd), back: false }] : [];
+    if (stop.kind === 'inner') {
+      out.push({ route: R([...laneLine(xw, xa), ...shift([xa, laneZ(xa)], [xa + INNER_S, EX.innerZ]).slice(1), ...line([xa + INNER_S, EX.innerZ], [stop.x, stop.z], 1.5).slice(1)], true), back: true });
+    }
+    return out;
   };
-  /** Llegada desde la calle: gira en retroceso por el portón y sigue por el camino hasta la huella. */
-  const fromGate = (stop: ExcStation['truck'], xa: number) => {
-    const LANE_IN = SITE.street.x + SITE.street.width / 4, R_IN = 8;
-    return R(toStop([
-      ...arc([LANE_IN + R_IN, RZ - R_IN], R_IN, Math.PI, Math.PI / 2),
-      ...line([LANE_IN + R_IN, RZ], [EX.entryX - 8, RZ]).slice(1),
-      ...ROAD_TO_LANE().slice(1),
-    ], stop, xa), true);
+  /** Llegada a la plataforma: de la subida a la huella (S) y por ella de frente hasta x (≤ QX). */
+  const fromTop = (x: number): P[] => [...shift(SUBIDA_TOP, [QX, laneZ(QX)]), ...laneLine(QX, Math.min(x, QX)).slice(1)];
+  /**
+   * Donde espera el camión siguiente mientras se carga el anterior (en prevX): en la huella, 12 m
+   * detrás de ambos puestos (hacia +x), o arriba de la subida si no cabe antes de la S.
+   */
+  const queueOf = (stop: ExcStation['truck'], xa: number, prevX: number): P | null => {
+    const qx = Math.max(stop.kind === 'inner' ? xa + INNER_S + 5 : stop.x, prevX) + 12;
+    return qx <= QX ? [qx, laneZ(qx)] : null;
   };
-  const fromLayby = (stop: ExcStation['truck'], xa: number) => R(toStop([...shift([LBp.x, LBp.z], [LB_EXIT_X, laneZ(LB_EXIT_X)])], stop, xa), true);
+  /** Del punto de espera al puesto: tramos (de frente y, si es adentro, en retroceso). */
+  const fromQueue = (stop: ExcStation['truck'], xa: number, prevX: number) => {
+    const q = queueOf(stop, xa, prevX);
+    return hopsFrom(q ? [q] : [...shift(SUBIDA_TOP, [QX, laneZ(QX)])], stop, xa);
+  };
+  const hopsDur = (hops: { route: Route }[]) => hops.reduce((a, h) => a + dur(h.route, V_BACK), 0);
+  /** Pasado el pie de la rampa de salida (hacia +x), el camino ya no se comparte con los que salen. */
+  const MERGE_X = -35;
+  /** Ventana en que un camión que sale ocupa el camino entre el pie de la rampa de salida y el portón. */
+  const exitGateWin = (v: TruckVisit): Win => {
+    const L = v.legs[v.legs.length - 1], D = L.t[1] - L.t[0];
+    let s0 = 0;
+    for (let s = 0; s <= L.route.length; s += 0.5) if (L.route.at(s).x < MERGE_X) { s0 = s; break; }
+    return [L.t[0] + timeOf(L.route, s0, D), (L.gateAt ?? L.t[1]) + 1.2];
+  };
   /**
    * Cargas de un sector: cada carga es un camión tolva que se llena en una serie de puestos seguidos.
    * El sector 1 (el de mayor volumen, con la zona profunda A-B) se carga en 2 camiones; el cambio se
-   * hace donde el puesto siguiente queda al alcance desde el bolsón (huella, x ≥ LB_EXIT_X).
+   * hace en un puesto de la huella (el que llega avanza de frente hasta él desde donde esperaba).
    */
   const splitLoads = (sts: ExcStation[], n: number): ExcStation[][] => {
     if (n <= 1 || sts.length < 2) return [sts];
@@ -777,15 +797,15 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     for (let i = 1; i < sts.length; i++) {
       acc += vol[i - 1];
       const s = sts[i].truck;
-      if (s.kind !== 'lane' || s.x < LB_EXIT_X + 0.5) continue;
+      if (s.kind !== 'lane') continue;
       const err = Math.abs(acc / tot - 0.5);
       if (err < bestErr && err < 0.3) { bestErr = err; best = i; }
     }
     return best < 0 ? [sts] : [sts.slice(0, best), sts.slice(best)];
   };
   const LOADS = [2, 1, 1];
-  /** Salida del último camión cargado (para que el siguiente espere a que pase). */
-  let prevExit: { route: Route; t0: number } | null = null;
+  /** Salida del último camión cargado y su último puesto (para que el siguiente espere a que se aleje). */
+  let prevExit: { route: Route; t0: number; x: number } | null = null;
   const sectors: SectorPlan[] = [];
   for (const sn of [1, 2, 3]) {
     const g = GANTT[sn - 1];
@@ -796,17 +816,22 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
     const isFirst = (s: ExcStation) => loads.some((ld) => ld[0] === s);
     // duraciones fijas: traslados entre puestos (excavadora y camión) y cambios de camión
     const moves = sts.map((s, i) => (i === 0 || isFirst(s) ? [] : moveLegs(sts[i - 1].truck, s.truck, xa)));
-    const exitOf = (s: ExcStation) => exitRoute(s.truck);
+    const exitOf = (s: ExcStation) => exitRoute(s.truck, xa);
+    /** El que sale ya va 13 m más allá (hacia −x) del puesto que deja y de donde llega el siguiente. */
+    const xClear = (prevX: number, s: ExcStation) => Math.min(prevX, target(s.truck, xa)) - 13;
     const trans = sts.map((s, i) => {
       if (i === 0) {
-        // primer puesto del sector: el camión llega (de la calle o del bolsón) y la excavadora se traslada
-        const truck = prevExit ? clearAfter(prevExit.route) + 0.15 + dur(fromLayby(s.truck, xa), V_BACK) : 0;
+        // primer puesto del sector: el camión llega (de la calle o de donde esperaba) y la excavadora se traslada
+        const truck = prevExit ? clearAfter(prevExit.route, xClear(prevExit.x, s)) + 0.15 + hopsDur(fromQueue(s.truck, xa, prevExit.x)) : 0;
         return Math.max(truck, sn > 1 ? pathTime(s) : 0);
       }
-      if (isFirst(s)) return Math.max(clearAfter(exitOf(sts[i - 1])) + 0.15 + dur(fromLayby(s.truck, xa), V_BACK), pathTime(s));
+      if (isFirst(s)) {
+        const px = sts[i - 1].truck.x;
+        return Math.max(clearAfter(exitOf(sts[i - 1]), xClear(px, s)) + 0.15 + hopsDur(fromQueue(s.truck, xa, px)), pathTime(s));
+      }
       return Math.max(pathTime(s) - 0.05, moves[i].reduce((acc, m) => acc + dur(m.route, V_SITE), 0) + 0.1);
     });
-    // los cambios de camión no se acortan (el que llega espera en el bolsón a que pase el que sale);
+    // los cambios de camión no se acortan (el que llega espera en la huella a que se aleje el que sale);
     // si no alcanza el tiempo, se apuran los traslados entre puestos
     const fixed = sts.reduce((a, s, i) => a + (i === 0 || isFirst(s) ? trans[i] : 0), 0);
     const avail = E[1] - E[0] - fixed;
@@ -832,38 +857,64 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
       }
       legs.push({ route: exR, t: exT, back: false, on: 'salida', gateAt });
       trucks.push({ id: trucks.length + 1, sector: sn, legs, arrive: [legs[0].t[0], arrive], leave: exT, waitFrom, gateIn, cells: visitCells });
-      prevExit = { route: exR, t0: at };
+      prevExit = { route: exR, t0: at, x: last.truck.x };
     };
     sts.forEach((s, i) => {
       const tr = i === 0 || isFirst(s) ? trans[i] : trans[i] * kTr;
       if (i === 0 || isFirst(s)) {
-        // llega un camión vacío: el primero de la obra desde la calle; los demás esperan en el bolsón
+        // llega un camión vacío: el primero de la obra entra derecho hasta el puesto; los demás esperan
+        // en la huella detrás del que se carga y avanzan cuando este ya se alejó hacia la salida
         if (i > 0) closeVisit(sts[i - 1], t);
         legs = [];
         visitCells = [];
-        const st = arrival();
+        const st = R(streetToGate());
+        const pushHops = (hops: { route: Route; back: boolean }[], from: number, first: 'camino' | 'huella') => {
+          let tt = from;
+          hops.forEach((h, k) => {
+            const d = dur(h.route, k === 0 && first === 'camino' ? V_FWD : V_BACK);
+            legs.push({ route: h.route, t: [tt, tt + d], back: h.back, on: k === 0 ? first : 'huella' });
+            tt += d;
+          });
+          return tt;
+        };
         if (!prevExit) {
-          const back = fromGate(s.truck, xa);
+          // por el portón, el camino y la subida, de frente hasta el puesto (llega con holgura y espera)
+          const hops = hopsFrom([...gateToSubida(), ...fromTop(target(s.truck, xa)).slice(1)], s.truck, xa);
+          const D = hops.reduce((a, h, k) => a + dur(h.route, k === 0 ? V_FWD : V_BACK), 0);
           arrive = t;
-          gateIn = t - dur(back, V_BACK);
+          gateIn = Math.max(t0 + 0.3 + dur(st, V_STREET) + 0.25, t - 0.5 - D);
           waitFrom = null;
-          legs.push({ route: st, t: [gateIn - 0.25 - dur(st, V_STREET), gateIn - 0.25], back: false, on: 'calle' }, { route: back, t: [gateIn, t], back: true, on: 'camino' });
+          legs.push({ route: st, t: [gateIn - 0.25 - dur(st, V_STREET), gateIn - 0.25], back: false, on: 'calle' });
+          const late = pushHops(hops, gateIn, 'camino') - t;
+          if (late > 0.05) console.warn(`Fundaciones: el primer camión tolva llega ${late.toFixed(2)} s tarde a su puesto`);
         } else {
-          const pe: { route: Route; t0: number } = prevExit;
-          const toLb = reverseToLayby(), fromLb = fromLayby(s.truck, xa);
-          const go = pe.t0 + clearAfter(pe.route) + 0.15;
-          // llega al bolsón antes de que el cargado parta, pero sin pisarle los talones al anterior en la calle
+          const pe: { route: Route; t0: number; x: number } = prevExit;
+          const q = queueOf(s.truck, xa, pe.x);
+          const toQ = R([...gateToSubida(), ...(q ? fromTop(q[0]).slice(1) : [])]);
+          const hops = fromQueue(s.truck, xa, pe.x);
+          const go = pe.t0 + clearAfter(pe.route, xClear(pe.x, s)) + 0.15;
+          // llega a esperar antes de que el cargado parta, sin pisarle los talones al anterior en la calle
+          // y sin cruzarse en el portón con los que ya salen por la rampa (pasa antes que ellos)
+          const dq = dur(toQ, V_FWD);
+          let sIn = toQ.length;
+          for (let q2 = 0; q2 <= toQ.length; q2 += 0.5) if (toQ.at(q2).x > MERGE_X) { sIn = q2; break; }
+          const cIn = timeOf(toQ, sIn, dq), busy = trucks.map(exitGateWin);
+          let g = pe.t0 - 0.4 - dq;
+          for (let guard = 0; guard < 50; guard++) {
+            const w = busy.find((W) => g - 0.3 < W[1] + 0.2 && g + cIn > W[0] - 0.2);
+            if (!w) break;
+            g = w[0] - 0.2 - cIn - 0.01;
+          }
           const lastGate = trucks.length ? trucks[trucks.length - 1].gateIn : -Infinity;
-          gateIn = Math.max(pe.t0 - 0.4 - dur(toLb, V_BACK), lastGate + 2.8);
-          const atLb = gateIn + dur(toLb, V_BACK);
+          gateIn = Math.max(g, lastGate + 2.8);
+          const atQ = gateIn + dq;
           arrive = t + tr;
-          const d = dur(fromLb, V_BACK);
           legs.push(
             { route: st, t: [gateIn - 0.25 - dur(st, V_STREET), gateIn - 0.25], back: false, on: 'calle' },
-            { route: toLb, t: [gateIn, atLb], back: true, on: 'bolsón' },
-            { route: fromLb, t: [Math.max(go, arrive - d), arrive], back: true, on: 'delBolsón' },
+            { route: toQ, t: [gateIn, atQ], back: false, on: 'camino' },
           );
-          waitFrom = atLb;
+          pushHops(hops, Math.max(go, arrive - hopsDur(hops)), 'huella');
+          waitFrom = atQ;
         }
         // la excavadora se traslada (al sector siguiente o al puesto del nuevo camión)
         if (i === 0 && sn > 1) pushPath(stations.indexOf(s), t, t + Math.min(tr, pathTime(s)), `Se traslada al sector ${sn}`);
@@ -946,14 +997,23 @@ export function buildFundPlan(f: FundData, t0: number, walls1P: WallData[]): Fun
       // (desde que se acerca al portón por la calle, donde cruza el carril de salida)
       return { P: [gate - 1.8, done + 2.6] as Win, M: [[gate - 1.8, at], [done, done + 2.6]] as Win[] };
     };
-    // tramos de los camiones tolva por el camino: los que van al bolsón solo topan al mixer en movimiento
-    const lb = trucks.flatMap((v) => v.legs.filter((L) => L.on !== 'calle' && L.on !== 'huella')
-      .map((L) => ({ t: (L.on === 'salida' ? [L.t[0], (L.gateAt ?? L.t[1]) + 1.6] : L.t) as Win, toLb: L.on === 'bolsón' })));
+    // tramos de los camiones tolva por el camino (del portón al pie de la subida y del pie de la rampa
+    // de salida a la calle): el mixer detenido queda en el ensanche, fuera del camino, así que solo
+    // topan al mixer mientras entra o sale
+    const when = (L: TruckLeg, cond: (x: number) => boolean) => {
+      for (let s = 0; s <= L.route.length; s += 0.5) if (cond(L.route.at(s).x)) return L.t[0] + timeOf(L.route, s, L.t[1] - L.t[0]);
+      return null;
+    };
+    const road = trucks.flatMap((v) => v.legs.flatMap((L): Win[] => {
+      if (L.on === 'camino') return [[L.t[0], when(L, (x) => x > SUBIDA_TOP[0] - 1) ?? L.t[1]]];
+      if (L.on === 'salida') return [[when(L, (x) => x < SAL_X - 4) ?? L.t[0], (L.gateAt ?? L.t[1]) + 1.6]];
+      return [];
+    }));
     const hit = (w: Win, b: Win) => w[0] < b[1] + 0.3 && w[1] > b[0] - 0.3;
     let a = T(day - 1) + 0.1;
     for (let guard = 0; guard < 600; guard++) {
       const m = win(a);
-      if (!lb.some((L) => (L.toLb ? m.M.some((w) => hit(w, L.t)) : hit(m.P, L.t)))) break;
+      if (!road.some((L) => m.M.some((w) => hit(w, L)))) break;
       a += 0.1;
     }
     if (win(a).P[1] > T(day) + 1.5) console.warn(`Fundaciones: la serie de capachos del día ${day} no cabe entre los camiones tolva`);

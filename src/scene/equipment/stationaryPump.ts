@@ -41,6 +41,15 @@ const PIPE_R = 0.065;
 const PIPE_X = -1.1;
 const OUTLET: XYZ = [PIPE_X, PY, -3.3];
 
+/**
+ * Salida de la tubería en planta (mundo) con la bomba en (x, z) y girada heading (como
+ * group.rotation.y), y la dirección horizontal en que sale (−z local).
+ */
+export function pumpOutletXZ(x: number, z: number, heading: number) {
+  const c = Math.cos(heading), s = Math.sin(heading);
+  return { x: x + OUTLET[0] * c + OUTLET[2] * s, z: z - OUTLET[0] * s + OUTLET[2] * c, dx: -s, dz: -c };
+}
+
 /** Tolva: centro en z, cotas del fondo y del borde, semi-anchos (x, z) abajo y arriba, espesor. */
 const HOP = { z: 2.6, y0: 0.45, y1: 1.2, bot: [0.42, 0.19] as XY, top: [0.74, 0.32] as XY, t: 0.025 };
 const HOPPER_POINT: XYZ = [0, 1.25, HOP.z];

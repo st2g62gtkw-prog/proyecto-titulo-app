@@ -48,7 +48,7 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
   const rad = sched.slab[0].pour;
   ev.push({ t: rad[1], text: 'Radier del 1er piso hormigonado · 665,7 m²', kind: 'ok' });
   for (const m of log.mixers) {
-    if (m.waitFrom !== null) ev.push({ t: m.waitFrom, text: m.waitAt === 'bolsón' ? `Mixer N° ${m.id} espera en el bolsón del camino a que salga el anterior` : `Mixer N° ${m.id} espera en la calle junto al portón a que salga el anterior`, kind: 'mixer' });
+    if (m.waitFrom !== null) ev.push({ t: m.waitFrom, text: m.waitAt === 'bolsón' ? `Mixer N° ${m.id} espera en el bolsón junto a la bomba a que salga el anterior` : `Mixer N° ${m.id} espera en la calle junto al portón a que salga el anterior`, kind: 'mixer' });
     ev.push({ t: m.gateIn + 0.3, text: `Mixer N° ${m.id} entra en retroceso por el portón norponiente · 7 m³ G25`, kind: 'mixer' });
     ev.push({ t: m.discharge[0], text: m.spot === 'bomba' ? `Mixer N° ${m.id} descarga en tolva de la bomba` : `Mixer N° ${m.id} carga el capacho`, kind: 'mixer' });
   }
@@ -61,9 +61,9 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
     const tot = vol(F.cells);
     let acc = 0;
     for (const v of F.trucks) {
-      ev.push({ t: v.gateIn + 0.2, text: `Camión tolva N° ${v.id} entra en retroceso por el portón${v.waitFrom !== null ? ' y espera en el bolsón' : ''}`, kind: 'mixer' });
+      ev.push({ t: v.gateIn + 0.2, text: `Camión tolva N° ${v.id} entra por el portón, recorre el camino y sube por la subida a la plataforma${v.waitFrom !== null ? '; espera en la huella detrás del que se carga' : ''}`, kind: 'mixer' });
       acc += vol(v.cells);
-      ev.push({ t: v.leave[0] + 0.1, text: `Camión tolva N° ${v.id} sale a botadero · ${fmt(Math.round((acc / tot) * 627))} de 627 m³ excavados`, kind: 'mixer' });
+      ev.push({ t: v.leave[0] + 0.1, text: `Camión tolva N° ${v.id} baja por la rampa de salida y sale a botadero · ${fmt(Math.round((acc / tot) * 627))} de 627 m³ excavados`, kind: 'mixer' });
     }
     for (const S of F.sectors) {
       const n = S.n;
@@ -82,7 +82,7 @@ export function buildFeed(sched: Schedule, log: Logistics, paint?: PaintPlan): F
       ev.push({ t: S.relleno[0] + 0.05, text: `Relleno lateral compactado en capas de 25 cm, sector ${n}`, kind: 'info' });
     }
     ev.push({ t: F.excavatorOnSite[1], text: 'Termina la excavación: se retira la excavadora', kind: 'info' });
-    ev.push({ t: F.pumpIn, text: 'Llega la bomba estacionaria: se arma su caseta junto al camino (la huella de carguío queda libre)', kind: 'pump' });
+    ev.push({ t: F.pumpIn, text: 'Llega la bomba estacionaria: se arma su caseta abajo, en el ensanche junto al camino (la tubería sube el corte hasta la plataforma)', kind: 'pump' });
     ev.push({ t: F.compactacion[0] + 0.05, text: 'Compactación de la plataforma y ensayos de densidad', kind: 'info' });
     ev.push({ t: F.replanteo[1] - 0.2, text: 'Fundaciones recibidas por la ITO · replanteo de muros del 1er piso', kind: 'ok' });
   }
