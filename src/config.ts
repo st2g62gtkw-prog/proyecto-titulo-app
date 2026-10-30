@@ -85,9 +85,9 @@ export const SITE = {
    * sobre la plataforma frente al edificio: el moldaje de losa junto a los puntales (−x) y el de
    * muros hacia el fierro (+x).
    */
-  acopioMoldajeMuro: { x: 20.0, z: 13.85, w: 12, d: 4.6, rot: 0 },
-  acopioMoldajeLosa: { x: -19.1, z: 15.55, w: 8.4, d: 4.4, rot: 0 },
-  acopioFierro: { x: 34, z: 11, w: 7, d: 10, rot: 0 },
+  acopioMoldajeMuro: { x: 20.0, z: 15.85, w: 12, d: 4.6, rot: 0 },
+  acopioMoldajeLosa: { x: -19.1, z: 17.55, w: 8.4, d: 4.4, rot: 0 },
+  acopioFierro: { x: 34, z: 15, w: 7, d: 10, rot: 0 },
   tallerFierro: { x: 36, z: 0.5, w: 9, d: 9, rot: 0 },
   acopioPuntales: { x: -30, z: 8, w: 5, d: 8, rot: 0 },
   /** Instalación de faena: arriba del talud del frente, en la explanada a la cota terreno.faena. */

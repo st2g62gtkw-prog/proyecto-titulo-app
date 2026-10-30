@@ -1287,7 +1287,7 @@ function sleepers(b: Batch, x: number, z: number, len: number, along: 'x' | 'z',
  * Centro (planta) de cada acopio de moldaje tal como está dibujado abajo; createSite lo lleva a su
  * lugar en SITE (los acopios de muros y de losa se intercambiaron según la visita a terreno).
  */
-const MURO0: V2 = [-19.1, 15.55], LOSA0: V2 = [20.0, 13.85];
+const MURO0: V2 = [-19.1, 15.55], LOSA0: V2 = [20.0, 13.85], FIERRO0: V2 = [34, 11];
 
 /** Moldaje metálico de muros: pilas de paneles 2,4 × 0,9 m acostados + panelera con paneles parados. */
 function buildMoldajeMuro(M: Mats) {
@@ -1922,9 +1922,9 @@ export function createSite(): SiteRig {
   group.add(faena);
 
   const muro = buildMoldajeMuro(M), losa = buildMoldajeLosa(M), fierro = buildFierro(M), puntales = buildPuntales(M), taller = buildTaller(M);
-  // los acopios de moldaje se arman donde están dibujados (MURO0 y LOSA0) y se llevan a su lugar
+  // los acopios de moldaje y de fierro se arman donde están dibujados (MURO0, LOSA0, FIERRO0) y se llevan a su lugar
   // en la obra (de muros hacia el fierro, de losa junto a los puntales)
-  for (const [a, from, to] of [[muro, MURO0, SITE.acopioMoldajeMuro], [losa, LOSA0, SITE.acopioMoldajeLosa]] as const) {
+  for (const [a, from, to] of [[muro, MURO0, SITE.acopioMoldajeMuro], [losa, LOSA0, SITE.acopioMoldajeLosa], [fierro, FIERRO0, SITE.acopioFierro]] as const) {
     a.group.position.set(to.x - from[0], 0, to.z - from[1]);
     a.anchor.add(a.group.position);
   }
