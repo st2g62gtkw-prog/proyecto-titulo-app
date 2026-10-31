@@ -38,13 +38,14 @@ export const SITE = {
 
   /**
    * Tendido de la tubería por el suelo (planta): de la salida de la bomba entra por la puerta
-   * posterior del hall (x = xDoor; la puerta del IFC va de x −2,56 a −0,79 y su cara exterior está
-   * en z = zDoor), pasa entre los muros del hall y cruza al pasillo (z = zHall), sigue por el
+   * posterior del hall (x = xDoor; el hall va al centro de la fachada posterior, planFixes.ts, y su
+   * puerta de x 0,37 a 2,14 con la cara exterior en z = zDoor), adentro del hall dobla (z = zIn)
+   * hasta el paso entre los muros del hall del IFC (x = xIn), cruza al pasillo (z = zHall), sigue por el
    * vestíbulo del ascensor (x = xLobby) y entra al shaft por el vano de su puerta (z = zShaftDoor,
    * entre el tabique de la puerta y el muro H.A., z 3,69…4,39). Ningún tramo cruza muros de H.A.
    * `door` es el vano de esa puerta (ancho en x y alto), que se dibuja en el muro de fachada.
    */
-  pipeline: { xDoor: -1.2, zDoor: -5.8, zHall: 0.45, xLobby: 0.6, zShaftDoor: 4.0, door: { x0: -2.5, x1: -0.85, h: 2.07 } },
+  pipeline: { xDoor: 1.73, zDoor: -5.8, zIn: -4.95, xIn: -1.2, zHall: 0.45, xLobby: 0.6, zShaftDoor: 4.0, door: { x0: 0.43, x1: 2.08, h: 2.07 } },
 
   /**
    * Centro del mixer cuando descarga al capacho (muros): se corre del camino al ensanche junto al

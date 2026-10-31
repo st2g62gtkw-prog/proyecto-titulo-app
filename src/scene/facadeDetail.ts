@@ -7,12 +7,12 @@
  */
 import type { WallData } from '../data/building';
 
-type Box = [number, number, number, number, number, number];
+export type Box = [number, number, number, number, number, number];
 /** Centro del edificio en planta y medio largo (x) y medio ancho (z). */
 export type Center = [number, number, number, number];
 
 /** Grupos de triángulos seguidos y vecinos (cada ventana o baranda del IFC). */
-function clusters(pos: Float32Array, gap: number): Box[] {
+export function clusters(pos: Float32Array, gap: number): Box[] {
   const out: Box[] = [];
   let b: Box | null = null;
   for (let t = 0; t < pos.length / 9; t++) {
@@ -52,7 +52,7 @@ function merge(boxes: Box[], tol: number): Box[] {
 }
 
 /** Caja alineada a los ejes como triángulos. */
-function box(out: number[], x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) {
+export function box(out: number[], x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) {
   const v = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
   for (const [a, b, c, d] of [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [3, 7, 6, 2], [0, 4, 7, 3], [1, 2, 6, 5]]) {
     for (const k of [a, b, c, a, c, d]) out.push(...v[k]);
@@ -73,28 +73,32 @@ function frameOf(b: Box, center: Center) {
   return { alongX, sign, u0: alongX ? ax : az, u1: alongX ? bx : bz, y0: ay, y1: by, d0: alongX ? az : ax, d1: alongX ? bz : bx };
 }
 
-/** Coordenada de la cara exterior del muro de fachada detrás de la ventana (o el medio de su caja). */
+/**
+ * Coordenada de la cara exterior del muro de fachada que tapa la ventana (o el medio de su caja): la
+ * cara más exterior entre los cantos de muro paralelos a la fachada que cubren al menos la mitad del
+ * ancho de la ventana (el IFC no les abre el vano). Se miran los cantos y no la caja del muro porque
+ * los muros de la saliente del frente tienen retornos y la caja tiene más de 1 m de fondo.
+ */
 function wallFace(f: ReturnType<typeof frameOf>, walls: WallData[]) {
-  let best: number | null = null, bestD = -Infinity;
-  const mid = (f.d0 + f.d1) / 2;
+  const faces: { d: number; ov: number }[] = [];
   for (const w of walls) {
-    let u0 = Infinity, u1 = -Infinity, d0 = Infinity, d1 = -Infinity;
-    for (const [x, z] of w.poly) {
-      const u = f.alongX ? x : z, d = f.alongX ? z : x;
-      u0 = Math.min(u0, u); u1 = Math.max(u1, u); d0 = Math.min(d0, d); d1 = Math.max(d1, d);
-    }
     // un muro que tapa la ventana en toda su altura cuenta aunque esté hasta 2 m por delante (sobre el
     // hall el IFC pone las ventanas 1,2 m detrás del muro de fachada; en la elevación van en la fachada)
     const reach = w.y0 <= f.y0 + 0.15 && w.y1 >= f.y1 - 0.15 ? 2 : 0.8;
-    // (hasta 0,7 de fondo: el muro de fachada sobre el hall tiene retornos en los extremos)
-    if (u1 < f.u0 + 0.1 || u0 > f.u1 - 0.1 || d1 - d0 > 0.7 || d0 > f.d1 + reach || d1 < f.d0 - reach) continue;
-    // la cara más exterior de los muros de fachada que tapan el vano (el IFC no les abre el vano)
-    const face = f.sign > 0 ? d1 : d0;
-    if (f.sign > 0 ? face > f.d1 + reach : face < f.d0 - reach) continue;
-    const out = f.sign * face;
-    if (out > bestD || best === null) { bestD = out; best = face; }
+    for (let i = 0; i < w.poly.length; i++) {
+      const a = w.poly[i], b = w.poly[(i + 1) % w.poly.length];
+      const [ua, da] = f.alongX ? a : [a[1], a[0]], [ub, db] = f.alongX ? b : [b[1], b[0]];
+      if (Math.abs(da - db) > 0.02) continue;
+      const ov = Math.min(f.u1, Math.max(ua, ub)) - Math.max(f.u0, Math.min(ua, ub)), d = (da + db) / 2;
+      if (ov < 0.05 || d < f.d0 - reach || d > f.d1 + reach) continue;
+      const c = faces.find((c) => Math.abs(c.d - d) < 0.03);
+      if (c) c.ov += ov;
+      else faces.push({ d, ov });
+    }
   }
-  return best ?? mid;
+  let best: number | null = null;
+  for (const c of faces) if (c.ov >= 0.5 * (f.u1 - f.u0) && (best === null || f.sign * c.d > f.sign * best)) best = c.d;
+  return best ?? (f.d0 + f.d1) / 2;
 }
 
 /** Ventanas a ras del muro: marco delgado con montante (frame) y vidrio (glass). */

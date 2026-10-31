@@ -39,7 +39,7 @@ Todo viene de la carpeta **Proyecto de titulo 07-10** en Drive:
 | Programa por piso, superficies y deptos | *CATALOGO.md* (láminas L38–L40) |
 | Grúa, mixer, faena, acopios, 85 trabajadores | fotos de la visita a terreno del 09-10-2026 |
 | Entorno: estero Las Tablas y avenida detrás de la obra, pasaje del portón y barrio, edificios del condominio al frente (iguales al E, en una terraza más alta), bosque; tamaño del sitio | vista satelital (Av. Las Tablas 230, Curauma) |
-| Hall de acceso a doble altura (vacío del 2P), ventanas y barandas de fachada | plantas 1P y 2P y elevaciones (L38, L39, L42): correcciones sobre el IFC en `src/data/planFixes.ts` y `src/scene/facadeDetail.ts` |
+| Fachadas largas simétricas (ventanas, barandas y muros reflejados desde una mitad), hall de acceso a doble altura al centro de la fachada posterior (vacío del 2P), 2P igual a los pisos tipo, ventanas y barandas de vidrio de fachada | plantas 1P y 2P y elevaciones (L38, L39, L42): correcciones sobre el IFC en `src/data/planFixes.ts` y `src/scene/facadeDetail.ts` |
 | Desniveles, camino, bajada y rampa, ubicación de la bomba, orden de excavación | fotos de la visita y bosquejo de la distribución real de la faena |
 
 Los tiempos de cada actividad (días hábiles) son típicos del método y se ajustan en `src/config.ts` (`DAYS` y `PACE`). Ahí también se definen las ubicaciones de la grúa, la bomba, los acopios, los caminos y el portón, y las cotas del terreno (`SITE.terreno`).

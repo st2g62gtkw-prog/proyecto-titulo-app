@@ -48,7 +48,7 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
   const mat = revealMaterial({ color: STEEL, roughness: 0.45, metalness: 0.6 }, { mode: 'drop', dropHeight: 0.5 });
   const g = new GeoBuilder();
 
-  // tendido en el suelo: caseta → puerta posterior del hall → pasillo → vestíbulo → base del shaft.
+  // tendido en el suelo: caseta → puerta posterior del hall → hall → pasillo → vestíbulo → base del shaft.
   // Afuera va sobre el terreno: de la caseta (abajo, a la cota del camino) sube por el corte posterior
   // hasta la plataforma y sigue por detrás de las zanjas hasta frente a la puerta; justo antes de la
   // puerta sube en rampa a la cota del radier terminado (adentro queda sobre tacos de madera mientras
@@ -80,7 +80,9 @@ export function createPipeline(data: BuildingData, sched: Schedule, outlet: THRE
     ...soil,
     [door[0], yG, door[1]],
     [P.xDoor, yIn, P.zDoor - 0.3],
-    [P.xDoor, yIn, P.zHall],
+    [P.xDoor, yIn, P.zIn],
+    [P.xIn, yIn, P.zIn],
+    [P.xIn, yIn, P.zHall],
     [P.xLobby, yIn, P.zHall],
     [P.xLobby, yIn, P.zShaftDoor],
     [vx, yIn, P.zShaftDoor],
