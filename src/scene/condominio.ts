@@ -41,6 +41,7 @@ export function createCondominio(data: BuildingData, detail: ArrayBuffer): THREE
     railing: std(FINISH.railing, 0.45, 0.4),
     door: std(FINISH.door, 0.6),
   };
+  const railGlass = new THREE.MeshStandardMaterial({ color: FINISH.railGlass, roughness: 0.1, metalness: 0.1, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false });
   // ventanas y barandas como en el E (según las elevaciones)
   const bt = polyBounds(top.outer), center: Center = [(bt.x0 + bt.x1) / 2, (bt.z0 + bt.z1) / 2, (bt.x1 - bt.x0) / 2, (bt.z1 - bt.z0) / 2];
   for (const g of data.detail.groups) {
@@ -48,7 +49,10 @@ export function createCondominio(data: BuildingData, detail: ArrayBuffer): THREE
     if (g.kind === 'window') {
       const w = windowsFromIfc(src, walls, center);
       parts.push([timedGeometry(w.frame, 0, 1, b0.x0, b0.x1), kindMat.window], [timedGeometry(w.glass, 0, 1, b0.x0, b0.x1), kindMat.plate]);
-    } else if (g.kind === 'railing') parts.push([timedGeometry(railingsFromIfc(src, center), 0, 1, b0.x0, b0.x1), kindMat.railing]);
+    } else if (g.kind === 'railing') {
+      const r = railingsFromIfc(src, center, walls);
+      parts.push([timedGeometry(r.rail, 0, 1, b0.x0, b0.x1), kindMat.railing], [timedGeometry(r.glass, 0, 1, b0.x0, b0.x1), railGlass]);
+    }
     else parts.push([detailGeometry(detail, g.offset, g.count, 0, 1, b0.x0, b0.x1), kindMat[g.kind]]);
   }
   const cx = (b0.x0 + b0.x1) / 2, cz = (b0.z0 + b0.z1) / 2;

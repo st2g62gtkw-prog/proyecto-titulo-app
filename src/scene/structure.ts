@@ -64,13 +64,14 @@ const C = {
   // vidrio oscuro de las ventanas y barandas metálicas oscuras de los balcones (imagen de referencia
   // del modelo)
   glass: '#43525f',
-  railing: '#aeb4ba', // barandas de barras de acero galvanizado
+  railing: '#5f666c', // perfiles de aluminio de las barandas de vidrio (renders)
+  railGlass: '#8ea3ae',
   door: '#7a5232',
 };
 
 /** Paleta del edificio terminado (la usan también los edificios ya construidos del condominio). */
 export const FINISH = {
-  facade: C.facade, slab: '#d9d5cc', roof: '#9aa3a9', pvc: C.pvc, glass: C.glass, railing: C.railing, door: C.door,
+  facade: C.facade, slab: '#d9d5cc', roof: '#9aa3a9', pvc: C.pvc, glass: C.glass, railing: C.railing, railGlass: C.railGlass, door: C.door,
 };
 
 type Mats = ReturnType<typeof makeSharedMaterials>;
@@ -107,8 +108,10 @@ function makeSharedMaterials(clip: THREE.Plane[]) {
     finishRaw: withClip(revealMaterial({ color: FACADE_COLORS.raw, map: conc, roughness: 0.92 }, { mode: 'rise' })),
     pvc: withClip(revealMaterial({ color: C.pvc, roughness: 0.5 }, { mode: 'drop', dropHeight: 0.6 })),
     glass: withClip(revealMaterial({ color: C.glass, roughness: 0.25, metalness: 0.15 }, { mode: 'drop', dropHeight: 0.6 })),
-    // barandas de los balcones: perfiles oscuros que dejan ver la terraza (semitransparentes)
+    // barandas de los balcones (renders del proyecto): perfiles de aluminio gris oscuro y paños de
+    // vidrio translúcido que dejan ver la terraza
     railing: withClip(revealMaterial({ color: C.railing, roughness: 0.45, metalness: 0.4 }, { mode: 'drop', dropHeight: 0.6 })),
+    railGlass: withClip(revealMaterial({ color: C.railGlass, roughness: 0.1, metalness: 0.1, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false }, { mode: 'drop', dropHeight: 0.6 })),
     door: withClip(revealMaterial({ color: C.door, roughness: 0.6 }, { mode: 'drop', dropHeight: 0.6 })),
     excavation: withClip(revealMaterial({ color: '#7d5b3b', roughness: 1 }, { mode: 'pop' })),
     trench: withClip(revealMaterial({ color: '#4c3523', roughness: 1 }, { mode: 'pop' })),
@@ -432,7 +435,7 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
     add(fw.build(), M.finishWall, 'tabiques', L, f0, NEVER, true);
     add(fr.build(), M.finishRaw, 'tabiques', L, f0, NEVER, true);
     const mats = { window: M.pvc, plate: M.glass, railing: M.railing, door: M.door } as const;
-    // ventanas y barandas según las elevaciones (facadeDetail): a ras del muro y de barras delgadas
+    // ventanas y barandas según las elevaciones y los renders (facadeDetail): a ras del muro y de vidrio
     const center: Center = [(bboxAll.x0 + bboxAll.x1) / 2, (bboxAll.z0 + bboxAll.z1) / 2, (bboxAll.x1 - bboxAll.x0) / 2, (bboxAll.z1 - bboxAll.z0) / 2];
     const tw0 = f0 + (f1 - f0) * 0.4;
     for (const grp of data.detail.groups.filter((g) => g.level === lv.name)) {
@@ -442,7 +445,9 @@ export function buildStructure(data: BuildingData, sched: Schedule, detail: Arra
         add(timedGeometry(w.frame, tw0, f1, X0, X1), M.pvc, 'window', L, f0, NEVER, false, true);
         add(timedGeometry(w.glass, tw0, f1, X0, X1), M.glass, 'plate', L, f0, NEVER, false, false);
       } else if (grp.kind === 'railing') {
-        add(timedGeometry(railingsFromIfc(src, center), tw0, f1, X0, X1), M.railing, 'railing', L, f0, NEVER, false, true);
+        const r = railingsFromIfc(src, center, lv.walls);
+        add(timedGeometry(r.rail, tw0, f1, X0, X1), M.railing, 'railing', L, f0, NEVER, false, true);
+        add(timedGeometry(r.glass, tw0, f1, X0, X1), M.railGlass, 'railing', L, f0, NEVER, false, false);
       } else {
         add(detailGeometry(detail, grp.offset, grp.count, tw0, f1, X0, X1), mats[grp.kind], grp.kind, L, f0, NEVER, false, grp.kind !== 'plate');
       }

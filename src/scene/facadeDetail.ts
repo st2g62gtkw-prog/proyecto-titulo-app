@@ -3,7 +3,7 @@
  * las ventanas como cajas de marco de 0,6 m de fondo que sobresalen del muro y las barandas como
  * paneles llenos. Aquí, de cada ventana del IFC se toma solo su vano (ancho y alto) y se arma una
  * ventana a ras de la cara exterior del muro: vidrio con marco delgado y montante al centro; de
- * cada baranda, barras metálicas delgadas (pasamanos, barra intermedia, zócalo y pies).
+ * cada baranda, un paño de vidrio con pasamanos y perfiles de aluminio (renders del proyecto).
  */
 import type { WallData } from '../data/building';
 
@@ -83,10 +83,14 @@ function wallFace(f: ReturnType<typeof frameOf>, walls: WallData[]) {
       const u = f.alongX ? x : z, d = f.alongX ? z : x;
       u0 = Math.min(u0, u); u1 = Math.max(u1, u); d0 = Math.min(d0, d); d1 = Math.max(d1, d);
     }
-    if (u1 < f.u0 + 0.1 || u0 > f.u1 - 0.1 || d1 - d0 > 0.6 || d0 > f.d1 + 0.8 || d1 < f.d0 - 0.8) continue;
+    // un muro que tapa la ventana en toda su altura cuenta aunque esté hasta 2 m por delante (sobre el
+    // hall el IFC pone las ventanas 1,2 m detrás del muro de fachada; en la elevación van en la fachada)
+    const reach = w.y0 <= f.y0 + 0.15 && w.y1 >= f.y1 - 0.15 ? 2 : 0.8;
+    // (hasta 0,7 de fondo: el muro de fachada sobre el hall tiene retornos en los extremos)
+    if (u1 < f.u0 + 0.1 || u0 > f.u1 - 0.1 || d1 - d0 > 0.7 || d0 > f.d1 + reach || d1 < f.d0 - reach) continue;
     // la cara más exterior de los muros de fachada que tapan el vano (el IFC no les abre el vano)
     const face = f.sign > 0 ? d1 : d0;
-    if (f.sign > 0 ? face > f.d1 + 0.8 : face < f.d0 - 0.8) continue;
+    if (f.sign > 0 ? face > f.d1 + reach : face < f.d0 - reach) continue;
     const out = f.sign * face;
     if (out > bestD || best === null) { bestD = out; best = face; }
   }
@@ -119,26 +123,36 @@ export function windowsFromIfc(pos: Float32Array, walls: WallData[], center: Cen
   return { frame: new Float32Array(frame), glass: new Float32Array(glass) };
 }
 
-/** Barandas de barras delgadas en el plano de cada panel de baranda del IFC. */
-export function railingsFromIfc(pos: Float32Array, center: Center) {
-  const out: number[] = [];
+/**
+ * Barandas de vidrio como en los renders del proyecto: paño de vidrio translúcido (glass) con
+ * pasamanos, perfil inferior y perfiles en las juntas de los paños (rail), en el plano de cada panel
+ * de baranda del IFC.
+ */
+export function railingsFromIfc(pos: Float32Array, center: Center, walls: WallData[]) {
+  const rail: number[] = [], glass: number[] = [];
   for (const b of clusters(pos, 0.03)) {
     const f = frameOf(b, center);
     if (f.u1 - f.u0 < 0.2 || f.y1 - f.y0 < 0.3) continue;
-    const d = (f.d0 + f.d1) / 2, r = 0.022;
-    const bar = (u0: number, y0: number, u1: number, y1: number) => {
-      if (f.alongX) box(out, u0, y0, d - r, u1, y1, d + r);
-      else box(out, d - r, y0, u0, d + r, y1, u1);
+    const r = 0.022;
+    let d = (f.d0 + f.d1) / 2;
+    // si el panel queda dentro de un muro de fachada sin vano, va por fuera, delante de la ventana
+    const face = wallFace(f, walls);
+    if (f.sign * face > f.sign * d) d = face + f.sign * 0.13;
+    const bar = (out: number[], u0: number, y0: number, u1: number, y1: number, h = r) => {
+      if (f.alongX) box(out, u0, y0, d - h, u1, y1, d + h);
+      else box(out, d - h, y0, u0, d + h, y1, u1);
     };
     const { u0, u1, y0, y1 } = f;
-    bar(u0, y1 - 0.05, u1, y1);
-    bar(u0, (y0 + y1) / 2 - r, u1, (y0 + y1) / 2 + r);
-    bar(u0, y0 + 0.08, u1, y0 + 0.08 + 2 * r);
+    // pasamanos de 5 × 4,4 cm y perfil inferior
+    bar(rail, u0, y1 - 0.05, u1, y1);
+    bar(rail, u0, y0 + 0.06, u1, y0 + 0.1, 0.016);
+    // paños de ~1,2 m con perfiles delgados en las juntas y en los extremos
     const n = Math.max(1, Math.round((u1 - u0) / 1.2));
     for (let i = 0; i <= n; i++) {
       const u = u0 + ((u1 - u0) * i) / n;
-      bar(Math.max(u0, u - r), y0, Math.min(u1, u + r), y1);
+      bar(rail, Math.max(u0, u - 0.018), y0 + 0.06, Math.min(u1, u + 0.018), y1 - 0.05, 0.018);
     }
+    bar(glass, u0, y0 + 0.1, u1, y1 - 0.05, 0.006);
   }
-  return new Float32Array(out);
+  return { rail: new Float32Array(rail), glass: new Float32Array(glass) };
 }

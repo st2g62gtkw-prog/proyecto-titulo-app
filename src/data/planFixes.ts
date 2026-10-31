@@ -28,6 +28,7 @@ export function applyPlanFixes(data: BuildingData, detail: ArrayBuffer): ArrayBu
   // --- 1. el 2P igual al 3P -------------------------------------------------------------------
   // losa: contorno del 3P con la muesca del vacío del hall en el borde posterior
   const outer: V2[] = [];
+  let zFace = -7.35;
   const ring = L3.slab.outer;
   for (let i = 0; i < ring.length; i++) {
     const a = ring[i], b = ring[(i + 1) % ring.length];
@@ -35,9 +36,9 @@ export function applyPlanFixes(data: BuildingData, detail: ArrayBuffer): ArrayBu
     // tramo del borde posterior que cruza el hall (va de +x a −x por la línea de fachada)
     if (Math.abs(a[1] - b[1]) < 0.01 && a[1] < -6 && a[0] > x1 && b[0] < x0) {
       outer.push([x1, a[1]], [x1, z1], [x0, z1], [x0, a[1]]);
+      zFace = a[1];
     }
   }
-  const zFace = Math.min(...outer.filter(([x]) => x > x0 && x < x1).map(([, z]) => z));
   L2.slab.outer = outer;
   L2.slab.holes = L3.slab.holes.map((h) => h.map(([x, z]) => [x, z] as V2));
   L2.slab.area = L3.slab.area - (x1 - x0) * (z1 - zFace);
