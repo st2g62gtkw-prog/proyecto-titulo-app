@@ -88,7 +88,7 @@ export const SITE = {
    */
   acopioMoldajeMuro: { x: 23.0, z: 15.85, w: 12, d: 4.6, rot: 0 },
   acopioMoldajeLosa: { x: -17.05, z: 16.1, w: 8.4, d: 4.4, rot: 0 },
-  acopioFierro: { x: 34.5, z: 11, w: 7, d: 10, rot: 0 },
+  acopioFierro: { x: 35.2, z: 7.1, w: 7, d: 10, rot: 0 },
   tallerFierro: { x: 37, z: -4, w: 9, d: 9, rot: 0 },
   acopioPuntales: { x: -25, z: 15, w: 5, d: 8, rot: 0 },
   /**
@@ -100,7 +100,7 @@ export const SITE = {
    * Instalación de faena: arriba del talud del frente, en la explanada a la cota terreno.faena (de
    * coronaTalud a frenteZ), a lo largo de la explanada hacia +x.
    */
-  faena: { x: 18.6, z: 37, w: 42, d: 17, rot: 0 },
+  faena: { x: 35.4, z: 37, w: 42, d: 17, rot: 0 },
 
   /**
    * Movimiento de tierra (fotos de la visita a terreno y bosquejo de la distribución real):
