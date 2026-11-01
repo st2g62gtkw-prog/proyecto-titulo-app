@@ -84,20 +84,23 @@ export const SITE = {
   /**
    * Acopios dentro del alcance de la grúa (rectángulos en planta: centro, ancho x, fondo z, giro),
    * sobre la plataforma frente al edificio: el moldaje de losa junto a los puntales (−x) y el de
-   * muros hacia el fierro (+x).
+   * muros hacia el fierro (+x); el taller de fierro, junto al testero +x, un poco hacia atrás.
    */
-  acopioMoldajeMuro: { x: 20.0, z: 15.85, w: 12, d: 4.6, rot: 0 },
+  acopioMoldajeMuro: { x: 23.0, z: 15.85, w: 12, d: 4.6, rot: 0 },
   acopioMoldajeLosa: { x: -19.1, z: 17.55, w: 8.4, d: 4.4, rot: 0 },
   acopioFierro: { x: 34, z: 15, w: 7, d: 10, rot: 0 },
-  tallerFierro: { x: 36, z: 0.5, w: 9, d: 9, rot: 0 },
+  tallerFierro: { x: 37, z: -4, w: 9, d: 9, rot: 0 },
   acopioPuntales: { x: -30, z: 8, w: 5, d: 8, rot: 0 },
   /**
    * Edificios ya construidos del condominio, al frente y más arriba (iguales al Edificio E): terraza
    * a la cota y entre z0 y z1, y centro en planta de cada edificio (misma orientación que el E).
    */
   condominio: { y: 9.5, z0: 64, z1: 115, centros: [[42, 86], [-16, 82], [-74, 88]] as [number, number][] },
-  /** Instalación de faena: arriba del talud del frente, en la explanada a la cota terreno.faena. */
-  faena: { x: -6, z: 35, w: 18, d: 18, rot: 0 },
+  /**
+   * Instalación de faena: arriba del talud del frente, en la explanada a la cota terreno.faena (de
+   * coronaTalud a frenteZ), a lo largo de la explanada hacia +x.
+   */
+  faena: { x: 6, z: 37, w: 42, d: 17, rot: 0 },
 
   /**
    * Movimiento de tierra (fotos de la visita a terreno y bosquejo de la distribución real):

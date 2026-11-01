@@ -63,8 +63,10 @@ export function buildFacadePaint(plan: PaintPlan, clipping: THREE.Plane[]): THRE
   const tex = concreteTexture();
   const mat = new THREE.MeshStandardMaterial({
     color: FACADE_COLORS.raw, map: tex, roughness: 0.92,
-    // queda pegada al hormigón: se adelanta en profundidad para no parpadear con la cara del muro
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    // queda pegada al hormigón: se adelanta en profundidad para no parpadear con la cara del muro.
+    // Solo un desfase fijo (unidades): el proporcional a la pendiente, con la cámara ortogonal lejana
+    // u oblicua, la adelantaba varios metros y tapaba las ventanas que van 6 cm por delante del muro
+    polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -4,
   });
   mat.clippingPlanes = clipping;
   const uniforms = {

@@ -262,8 +262,8 @@ export class World {
       const geo = new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2);
       const tex = (() => {
         const c = document.createElement('canvas');
-        c.width = 256;
-        c.height = Math.round((256 * d) / w);
+        c.width = 1024;
+        c.height = Math.round((1024 * d) / w);
         const g = c.getContext('2d')!;
         g.fillStyle = '#8fae5c';
         g.fillRect(0, 0, c.width, c.height);
@@ -278,7 +278,45 @@ export class World {
         g.stroke();
         g.fillStyle = '#d3cfc6';
         g.fill();
+        // estacionamientos del 1er piso: en los vanos donde el 1P se retranquea al frente, bajo los
+        // pisos de arriba; líneas de demarcación de 5 m, tope de rueda y número de cada uno
+        {
+          const P = this.b.data.levels[0].slab.outer, segs: [number, number, number][] = [];
+          P.forEach(([x, z], i) => {
+            const [x2, z2] = P[(i + 1) % P.length];
+            if (Math.abs(z - z2) < 0.01 && z > 1 && z < 3.5) segs.push([Math.min(x, x2), Math.max(x, x2), z]);
+          });
+          segs.sort((a, b) => a[0] - b[0]);
+          const bays: [number, number, number][] = [];
+          for (const s of segs) {
+            const last = bays[bays.length - 1];
+            if (last && s[0] - last[1] < 0.3) [last[1], last[2]] = [s[1], Math.max(last[2], s[2])];
+            else bays.push([...s]);
+          }
+          const X = (x: number) => (x - m.x0) * k, Z = (z: number) => (z - m.z0) * k, L = 5, lw = 0.12 * k;
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.font = `bold ${Math.round(0.8 * k)}px sans-serif`;
+          let n = 0;
+          for (const [x0, x1, zw] of bays) {
+            const cnt = Math.max(1, Math.floor((x1 - x0) / 2.5)), sw = (x1 - x0) / cnt;
+            // pavimento de los estacionamientos más oscuro que la vereda, para que se lea la demarcación
+            g.fillStyle = '#8f8b84';
+            g.fillRect(X(x0), Z(zw), (x1 - x0) * k, L * k);
+            g.fillStyle = '#f4f4f0';
+            for (let i = 0; i <= cnt; i++) g.fillRect(X(x0 + i * sw) - lw / 2, Z(zw), lw, L * k);
+            g.fillRect(X(x0), Z(zw + L) - lw / 2, (x1 - x0) * k, lw);
+            for (let i = 0; i < cnt; i++) {
+              const cx = x0 + (i + 0.5) * sw;
+              g.fillStyle = '#e3b322';
+              g.fillRect(X(cx - 0.8), Z(zw + 0.6), 1.6 * k, 0.18 * k);
+              g.fillStyle = '#f4f4f0';
+              g.fillText(`E-${++n}`, X(cx), Z(zw + L - 1.2));
+            }
+          }
+        }
         const t = new THREE.CanvasTexture(c);
+        t.anisotropy = 4;
         t.colorSpace = THREE.SRGBColorSpace;
         return t;
       })();
@@ -585,15 +623,15 @@ export class World {
     const a = this.site.anchors;
     // en terreno: alrededor de los acopios (no encima), taller de fierro, capacho y faena
     const ground: { x: number; z: number; r?: number; spread?: number; action: 'idle' | 'walk' | 'work' | 'carry' }[] = [
-      { x: a.acopioFierro.x - 4.5, z: a.acopioFierro.z + 1, r: 0.8, action: 'work' },
+      { x: a.acopioFierro.x + 5.5, z: a.acopioFierro.z + 1, r: 0.8, action: 'work' },
       { x: SITE.tallerFierro.x, z: SITE.tallerFierro.z, r: 1.6, action: 'work' },
       { x: SITE.tallerFierro.x - 2, z: SITE.tallerFierro.z + 2, r: 1.2, action: 'work' },
-      { x: a.acopioMoldajeMuro.x + 6.5, z: a.acopioMoldajeMuro.z - 1.5, r: 0.8, action: 'work' },
+      { x: a.acopioMoldajeMuro.x - 7.5, z: a.acopioMoldajeMuro.z - 1.5, r: 0.8, action: 'work' },
       // rigger del capacho: junto a su punto de reposo, al otro lado del camino (fuera del paso de los
       // camiones y del mixer de la bomba)
       { x: this.capachoRest.x + 1.0, z: this.capachoRest.z + 0.4, r: 0.3, spread: 0.5, action: act.kind === 'muroHormigon' || act.kind === 'fundaciones' ? 'work' : 'idle' },
       { x: a.acopioMoldajeLosa.x - 5.5, z: a.acopioMoldajeLosa.z + 1.5, r: 0.8, action: 'work' },
-      { x: SITE.faena.x + 7, z: SITE.faena.z + 5, r: 1.5, action: 'idle' },
+      { x: SITE.faena.x - 5, z: SITE.faena.z + 3, r: 1.5, action: 'idle' },
       { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },
     ];
     // concreteros en la bomba: el operador junto a la caseta (lado del edificio) y uno en la tolva,
@@ -604,8 +642,8 @@ export class World {
       // antes de que llegue la bomba (excavación) esperan en la faena, fuera de la huella de carguío
       if (T < this.sched.fund.pumpIn) {
         ground.push(
-          { x: SITE.faena.x + 4, z: SITE.faena.z - 6, r: 0.4, action: 'idle' },
-          { x: SITE.faena.x + 5.2, z: SITE.faena.z - 5.4, r: 0.4, action: 'idle' },
+          { x: SITE.faena.x - 8, z: SITE.faena.z - 2.4, r: 0.4, action: 'idle' },
+          { x: SITE.faena.x - 6.8, z: SITE.faena.z - 1.8, r: 0.4, action: 'idle' },
         );
       } else ground.push(
         // abajo, en el ensanche: el operador al lado de la caseta que da al camino y uno en la tolva,

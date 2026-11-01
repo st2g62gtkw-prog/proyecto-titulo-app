@@ -1232,6 +1232,50 @@ function waterTank(k: Kit, M: Mats, x: number, z: number) {
   for (let i = 1; i < hose.length; i++) rod(b, GEO.tube, ...hose[i - 1], ...hose[i], 0.05, COL.blue);
 }
 
+/**
+ * Resto de la faena, a lo largo de la explanada hacia +x desde xe: oficina técnica y del ITO y
+ * vestidores con duchas (contenedores, fila de atrás, a la z cz), pañol de herramientas, bodega de
+ * materiales y taller de carpintería (fila del borde del talud, a la z hz), y entre ambas el grupo
+ * electrógeno con su tablero, materiales en pallets y el estacionamiento de las camionetas.
+ */
+function extendFaena(k: Kit, M: Mats, xe: number, cz: number, hz: number) {
+  const r = rng(23), zm = (cz + hz) / 2;
+  container(k, M, xe + 3.5, G, cz, 0, true);
+  container(k, M, xe + 9.7, G, cz, 0, true);
+  container(k, M, xe + 15.9, G, cz, 0, false);
+  osbHut(k, M, xe + 3.5, hz, 0, 6, 4, 2.5, 1.2);
+  osbHut(k, M, xe + 11.5, hz, 0, 7, 4, 2.5);
+  // taller de carpintería: cobertizo con banco, sierra y tablas
+  {
+    const tx = xe + 19.5, tz = hz + 0.3, w = 6, d = 4;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(k.b(M.rough), tx + sx * (w / 2 - 0.1), G, tz + sz * (d / 2 - 0.1), 0.12, sz > 0 ? 2.75 : 2.45, 0.12, COL.timber);
+    roofSheet(k.b(M.sheet), tx, tz, 0, w + 0.6, d + 0.6, G + 2.4, 0.35, COL.zinc);
+    box(k.b(M.rough), tx - 0.9, G + 0.82, tz, 3.2, 0.08, 0.9, '#b48a5e');
+    for (const lx of [-2.3, 0.5]) for (const lz of [-0.35, 0.35]) box(k.b(M.rough), tx + lx, G, tz + lz, 0.08, 0.82, 0.08, COL.timberDark);
+    box(k.b(M.paint), tx - 0.9, G + 0.9, tz, 0.55, 0.22, 0.45, '#c0392b');
+    for (let i = 0; i < 14; i++) box(k.b(M.rough), tx + 1.85 + (r() - 0.5) * 0.1, G + 0.12 + Math.floor(i / 7) * 0.05, tz - 0.9 + (i % 7) * 0.28, 2.0, 0.045, 0.2, ['#c9a46e', '#b8915c', '#d2b07a'][i % 3]);
+    sleepers(k.b(M.rough), tx + 1.85, tz, 2.0, 'x', [-0.7, 0.7]);
+  }
+  // grupo electrógeno sobre su base y tablero eléctrico
+  {
+    const gx = xe + 2.2, gz = zm, b = k.b(M.paint);
+    box(k.b(M.metal), gx, G, gz, 2.5, 0.15, 1.15, '#3a4249');
+    box(b, gx, G + 0.15, gz, 2.3, 1.15, 1.0, '#e0b21c');
+    box(b, gx - 0.6, G + 1.3, gz, 0.7, 0.06, 0.8, '#c99c12');
+    part(k.b(M.metal), GEO.cyl, gx + 0.8, G + 1.6, gz + 0.25, 0.1, 0.55, 0.1, '#2a2e33');
+    box(k.b(M.metal), gx + 2.0, G, gz - 0.3, 0.1, 1.7, 0.1, COL.galv);
+    box(b, gx + 2.0, G + 0.9, gz - 0.2, 0.6, 0.75, 0.25, '#d9dde0');
+  }
+  // materiales en pallets (sacos y cerámicos envueltos en film)
+  for (let i = 0; i < 4; i++) {
+    const px = xe + 7.5 + i * 1.5, pz = zm - 0.3;
+    palletStack(k.b(M.rough), px, pz, 0, 1, r, G);
+    box(k.b(M.paint), px, G + 0.15, pz, 0.95, 0.75 + (i % 2) * 0.3, 1.12, i % 2 ? '#dcd9d2' : '#c7b9a4');
+  }
+  // estacionamiento de las camionetas de la obra
+  for (let i = 0; i < 3; i++) car(k, M, xe + 14.5 + i * 2.7, zm + 0.4, Math.PI / 2 + (i === 1 ? Math.PI : 0), ['#f2f3f4', '#9aa3ab', '#d7dadd'][i], true, G);
+}
+
 function buildFaena(M: Mats) {
   const k = new Kit();
   const F = SITE.faena;
@@ -1280,12 +1324,13 @@ function buildFaena(M: Mats) {
   waterTank(k, M, x0 + 16.4, F.z + 3.6);
   // punto limpio (contenedores de colores)
   ['#2e7d32', '#f9a825', '#1565c0', '#616161'].forEach((c, i) => {
-    const bx = x0 + 14.6 + i * 0.8, bz = z1 + 2.2;
+    const bx = x0 + 14.6 + i * 0.8, bz = z1 - 1.0;
     box(k.b(M.paint), bx, G, bz, 0.7, 1.0, 0.7, c);
     box(k.b(M.paint), bx, G + 1.0, bz - 0.05, 0.74, 0.07, 0.78, c);
   });
   // asta con bandera
-  part(k.b(M.metal), GEO.cyl, x0 + 17.5, G + 4, z1 + 1.5, 0.08, 8, 0.08, COL.galv);
+  part(k.b(M.metal), GEO.cyl, x0 + 17.5, G + 4, z1 - 0.5, 0.08, 8, 0.08, COL.galv);
+  extendFaena(k, M, x0 + 19, cz, F.z - F.d / 2 + 3);
   return k;
 }
 
@@ -1608,7 +1653,7 @@ function buildMisc(k: Kit, M: Mats) {
   const cones: V2[] = [
     [SITE.gate.x + 2.2, GATE.z1 - 0.6], [SITE.gate.x + 2.2, GATE.z0 + 0.6],
     [tip, SITE.pump.z + 2.1], [tip, SITE.pump.z - 2.2],
-    [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-28.4, 18.0], [24.6, 17.4],
+    [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-28.4, 18.0], [29.75, 18.6],
   ];
   for (const [cx, cz] of cones) cone(p, cx, cz);
   // pallets sueltos
@@ -1650,7 +1695,7 @@ function buildMisc(k: Kit, M: Mats) {
   }
   // acopio de áridos y excedentes de excavación (en el ensanche +x y al final del camino, abajo)
   const mounds: [number, number, number, number, number, string][] = [
-    [42, -7.5, 6, 2.0, 5, '#cfae82'], [57, 5, 9, 2.6, 7, '#cfae82'], [63, 14, 7, 2.0, 6, '#9e968a'], [64, -8, 8, 2.2, 6, '#c99266'],
+    [48, -7, 6, 2.0, 5, '#cfae82'], [57, 5, 9, 2.6, 7, '#cfae82'], [63, 14, 7, 2.0, 6, '#9e968a'], [64, -8, 8, 2.2, 6, '#c99266'],
   ];
   mounds.forEach(([mx, mz, sx, sy, sz, c], i) => part(k.b(M.ground), heapGeometry(i + 3), mx, groundAt(mx, mz) - 0.05, mz, sx, sy, sz, c, { ry: i, uv: 10 }));
   // postes de iluminación en las esquinas
@@ -1862,7 +1907,7 @@ export function createSite(): SiteRig {
   const F = SITE.faena;
   const padAt = (x: number, z: number, w: number, d: number, alpha = 1) =>
     ribbon(pads, [[x - w / 2, z], [x + w / 2, z]], { width: d, texLen: 6, uRep: d / 6, fade: 0.8, alpha, lift: 0.02 });
-  padAt(F.x, F.z + 1, F.w + 2, F.d + 3);
+  padAt(F.x, F.z, F.w + 2, F.d - 0.5);
   padAt(PARK.x, PARK.z - 0.3, 21, 7.2);
   // ensanche de la bomba, abajo entre el camino y el pie del corte: caseta y mixer en la tolva
   {
@@ -1932,7 +1977,7 @@ export function createSite(): SiteRig {
   flagGeo.translate(1.05, 0, 0);
   const flagRest = Float32Array.from(flagGeo.attributes.position.array);
   const flag = new THREE.Mesh(flagGeo, M.flag);
-  flag.position.set(F.x - F.w / 2 + 17.5, G + 7.2, F.z + F.d / 2 + 1.5);
+  flag.position.set(F.x - F.w / 2 + 17.5, G + 7.2, F.z + F.d / 2 - 0.5);
   flag.rotation.y = -0.4;
   flag.castShadow = true;
   faena.add(flag);

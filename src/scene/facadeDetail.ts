@@ -64,10 +64,28 @@ export function box(out: number[], x0: number, y0: number, z0: number, x1: numbe
  * fachada se reconoce por la posición respecto del centro del edificio (center = [cx, cz, medio
  * largo, medio ancho]): las ventanas de los testeros son tan anchas como hondas.
  */
-function frameOf(b: Box, center: Center) {
+function frameOf(b: Box, center: Center, walls: WallData[] = []) {
   const [ax, ay, az, bx, by, bz] = b;
   const ex = bx - ax, ez = bz - az;
-  const alongX = Math.abs(ex - ez) > 0.3 ? ex > ez : Math.abs((az + bz) / 2 - center[1]) / center[3] > Math.abs((ax + bx) / 2 - center[0]) / center[2];
+  // caja casi cuadrada (ventana chica: 0,6 m de fondo del IFC y poco más de ancho): la orientación
+  // la da el muro cuya cara atraviesa la caja a lo largo (así, la del retorno del escalón del
+  // testero va en el retorno y no cruzando la esquina); si no hay, la posición en el edificio
+  let alongX = ex > ez;
+  if (Math.abs(ex - ez) <= 0.3) {
+    const cover = (ax2: boolean) => {
+      const [u0, u1, d0, d1] = ax2 ? [ax, bx, az, bz] : [az, bz, ax, bx];
+      let best = 0;
+      for (const w of walls) for (let i = 0; i < w.poly.length; i++) {
+        const p = w.poly[i], q = w.poly[(i + 1) % w.poly.length];
+        const [up, dp] = ax2 ? p : [p[1], p[0]], [uq, dq] = ax2 ? q : [q[1], q[0]];
+        if (Math.abs(dp - dq) > 0.02 || dp < d0 + 0.05 || dp > d1 - 0.05) continue;
+        best = Math.max(best, (Math.min(u1, Math.max(up, uq)) - Math.max(u0, Math.min(up, uq))) / (u1 - u0));
+      }
+      return best;
+    };
+    const cx = cover(true), cz = cover(false);
+    alongX = Math.abs(cx - cz) > 0.2 ? cx > cz : Math.abs((az + bz) / 2 - center[1]) / center[3] > Math.abs((ax + bx) / 2 - center[0]) / center[2];
+  }
   const mid = alongX ? (az + bz) / 2 : (ax + bx) / 2;
   const sign = alongX ? Math.sign(mid - center[1]) || 1 : Math.sign(mid - center[0]) || 1;
   return { alongX, sign, u0: alongX ? ax : az, u1: alongX ? bx : bz, y0: ay, y1: by, d0: alongX ? az : ax, d1: alongX ? bz : bx };
@@ -106,7 +124,7 @@ export function windowsFromIfc(pos: Float32Array, walls: WallData[], center: Cen
   const frame: number[] = [], glass: number[] = [];
   for (const b of clusters(pos, 0.03)) {
     if (b[4] - b[1] < 0.3) continue;
-    const f = frameOf(b, center);
+    const f = frameOf(b, center, walls);
     if (f.u1 - f.u0 < 0.15) continue;
     const face = wallFace(f, walls), s = f.sign, t = 0.06, dep = 0.1;
     // caja en coordenadas (u, y, d) → (x, y, z)
@@ -135,7 +153,7 @@ export function windowsFromIfc(pos: Float32Array, walls: WallData[], center: Cen
 export function railingsFromIfc(pos: Float32Array, center: Center, walls: WallData[]) {
   const rail: number[] = [], glass: number[] = [];
   for (const b of clusters(pos, 0.03)) {
-    const f = frameOf(b, center);
+    const f = frameOf(b, center, walls);
     if (f.u1 - f.u0 < 0.2 || f.y1 - f.y0 < 0.3) continue;
     const r = 0.022;
     let d = (f.d0 + f.d1) / 2;

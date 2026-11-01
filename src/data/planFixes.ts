@@ -14,6 +14,7 @@
  *    en el 1er piso el acceso se retranquea con su vidriería y su puerta (las del IFC, trasladadas), y
  *    en el 2° piso es un VACÍO desde la línea de fachada hasta el pasillo: la losa del 2P no llega ahí,
  *    no hay muros ni ventanas del 2P sobre el hall y el vidrio del hall sube hasta la losa del 3P.
+ * 4. El 1er piso es de estacionamientos: sin ventanas, barandas ni vidrios (salvo la vidriería del hall).
  */
 import type { BuildingData, DetailGroup, WallData } from './building';
 import type { V2 } from '../scene/geom';
@@ -223,7 +224,8 @@ export function applyPlanFixes(data: BuildingData, detail: ArrayBuffer): ArrayBu
     const ring = L1.slab.outer.filter(([x, z]) => !(z > -6.3 && z < -5.5 && x > HALL_IFC.x0 - 0.01 && x < HALL_IFC.x1 + 0.01));
     L1.slab.outer = notch(ring, H0, H1, HALL_FACE, -6.3, -6.2).outer;
     const inHall = (x: number, z: number) => x > H0 - 0.2 && x < H1 + 0.2 && z < -BAND;
-    for (const k of kinds) set('1P', k, [...(isBox(k) ? dropBoxes(get('1P', k), inHall) : dropTris(get('1P', k), inHall)), ...(hall.get(k) ?? [])]);
+    // (4) estacionamientos: de las ventanas, barandas y vidrios del 1P solo queda la vidriería del hall
+    for (const k of kinds) set('1P', k, [...(isBox(k) ? [] : dropTris(get('1P', k), inHall)), ...(hall.get(k) ?? [])]);
   }
 
   // --- 2. el 2P igual al 3P, con el vacío del hall (3b) ----------------------------------------
