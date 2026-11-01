@@ -414,7 +414,7 @@ export class World {
     this.addLabel('faena', 'Instalación de faena', 'info', root, new THREE.Vector3(SITE.faena.x, Y_FAENA + 5, SITE.faena.z));
     this.addLabel('pump', 'Bomba estacionaria', 'pump', this.pump.group, new THREE.Vector3(0, 4.2, 0));
     // sobre el pilar del lado +z y más alta que la del mixer, para que no se tapen cuando pasa un camión
-    this.addLabel('gate', 'Portón de camiones', 'info', root, new THREE.Vector3(SITE.gate.x, 7.2, SITE.gate.z + 4.6));
+    this.addLabel('gate', 'Acceso', 'info', root, new THREE.Vector3(SITE.gate.x, 7.2, SITE.gate.z + 4.6));
     this.mixers.forEach((m, i) => this.addLabel(`mixer${i}`, 'Mixer 7 m³', 'mixer', m.group, new THREE.Vector3(0, 4.6, 0)));
     this.addLabel('excavator', 'Excavadora 20 t', 'info', this.excavator.group, new THREE.Vector3(0, 5.2, 0));
     this.trucks.forEach((tk, i) => this.addLabel(`truck${i}`, 'Camión tolva 14 m³', 'mixer', tk.group, new THREE.Vector3(0, 4.4, 0)));
@@ -630,7 +630,7 @@ export class World {
       // rigger del capacho: junto a su punto de reposo, al otro lado del camino (fuera del paso de los
       // camiones y del mixer de la bomba)
       { x: this.capachoRest.x + 1.0, z: this.capachoRest.z + 0.4, r: 0.3, spread: 0.5, action: act.kind === 'muroHormigon' || act.kind === 'fundaciones' ? 'work' : 'idle' },
-      { x: a.acopioMoldajeLosa.x - 5.5, z: a.acopioMoldajeLosa.z + 1.5, r: 0.8, action: 'work' },
+      { x: a.acopioMoldajeLosa.x + 7.2, z: a.acopioMoldajeLosa.z + 1.5, r: 0.8, action: 'work' },
       { x: SITE.faena.x - 5, z: SITE.faena.z + 3, r: 1.5, action: 'idle' },
       { x: SITE.crane.x + 4.2, z: SITE.crane.z + 3.8, r: 0.5, action: 'idle' },
     ];

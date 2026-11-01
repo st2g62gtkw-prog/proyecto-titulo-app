@@ -1623,18 +1623,6 @@ function car(k: Kit, M: Mats, x: number, z: number, ry: number, color: string, p
 function buildMisc(k: Kit, M: Mats) {
   const r = rng(21);
   const p = k.b(M.paint);
-  // generador amarillo bajo cobertizo y pañol de OSB, en el testero −x de la plataforma
-  {
-    const gx = -33.5, gz = 0.5;
-    box(k.b(M.metal), gx, G, gz, 2.5, 0.14, 1.15, '#3a4249');
-    box(p, gx, G + 0.14, gz, 2.3, 1.25, 1.05, COL.yellow);
-    for (const s of [-1, 1]) box(k.b(M.metal), gx + 0.55, G + 0.45, gz + s * 0.53, 0.9, 0.7, 0.02, '#4a4f55');
-    box(p, gx - 0.6, G + 0.8, gz + 0.535, 0.5, 0.3, 0.01, '#1d1f22');
-    part(k.b(M.metal), GEO.cyl, gx + 0.8, G + 1.6, gz - 0.2, 0.1, 0.4, 0.1, '#2a2e33');
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(k.b(M.rough), gx + sx * 1.5, G, gz + sz * 1.05, 0.1, sz > 0 ? 2.5 : 2.3, 0.1, COL.timber);
-    roofSheet(k.b(M.sheet), gx, gz, 0, 3.6, 2.8, G + 2.3, 0.25, '#e6eaec');
-    osbHut(k, M, -34.8, 5.5, 0, 3.2, 3.0, 2.3);
-  }
   // caseta del guardia junto al portón (en la ladera, sobre el camino)
   {
     const hx = SITE.gate.x + 3.2, hz = GATE.z1 + 3.4;
@@ -1653,7 +1641,7 @@ function buildMisc(k: Kit, M: Mats) {
   const cones: V2[] = [
     [SITE.gate.x + 2.2, GATE.z1 - 0.6], [SITE.gate.x + 2.2, GATE.z0 + 0.6],
     [tip, SITE.pump.z + 2.1], [tip, SITE.pump.z - 2.2],
-    [30, 4.4], [29.5, 6.2], [-24.3, 12.5], [-28.4, 18.0], [29.75, 18.6],
+    [30, 4.4], [29.5, 6.2], [-28.6, 12.2], [-28.6, 18.6], [29.75, 18.6],
   ];
   for (const [cx, cz] of cones) cone(p, cx, cz);
   // pallets sueltos

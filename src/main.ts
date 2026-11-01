@@ -386,7 +386,7 @@ function describe(p: { type: string; id?: string; slot?: number }): Selection {
           ['En faena ahora', `${st.length}${st.some((x) => x.loading) ? ' · cargando' : ''}`],
           ['Retirado a botadero', `${fmt(m3 * 1.25)} m³ esponjados (25 %)`],
           ['Viajes equivalentes', `${fmt(trips)} de ≈ 56`],
-          ['Recorrido', 'Portón norponiente → camino posterior → huella de carguío'],
+          ['Recorrido', 'Acceso norponiente → camino posterior → huella de carguío'],
         ],
         note: 'Entra en retroceso por el portón y el camino posterior, igual que los mixers (el camino es uno solo), se aparta a la huella de carguío junto a la fachada posterior y la excavadora lo carga; sale de frente a botadero autorizado. El siguiente espera en el bolsón a que pase el que sale. El maicillo excavado no se reutiliza en el relleno (va integral o estabilizado).',
       };

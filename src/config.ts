@@ -83,14 +83,14 @@ export const SITE = {
 
   /**
    * Acopios dentro del alcance de la grúa (rectángulos en planta: centro, ancho x, fondo z, giro),
-   * sobre la plataforma frente al edificio: el moldaje de losa junto a los puntales (−x) y el de
+   * sobre la plataforma frente al edificio: el moldaje de losa con los puntales al lado (−x) y el de
    * muros hacia el fierro (+x); el taller de fierro, junto al testero +x, un poco hacia atrás.
    */
   acopioMoldajeMuro: { x: 23.0, z: 15.85, w: 12, d: 4.6, rot: 0 },
-  acopioMoldajeLosa: { x: -19.1, z: 17.55, w: 8.4, d: 4.4, rot: 0 },
+  acopioMoldajeLosa: { x: -17.05, z: 16.1, w: 8.4, d: 4.4, rot: 0 },
   acopioFierro: { x: 34.5, z: 11, w: 7, d: 10, rot: 0 },
   tallerFierro: { x: 37, z: -4, w: 9, d: 9, rot: 0 },
-  acopioPuntales: { x: -30, z: 8, w: 5, d: 8, rot: 0 },
+  acopioPuntales: { x: -25, z: 15, w: 5, d: 8, rot: 0 },
   /**
    * Edificios ya construidos del condominio, al frente y más arriba (iguales al Edificio E): terraza
    * a la cota y entre z0 y z1, y centro en planta de cada edificio (misma orientación que el E).
